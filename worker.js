@@ -671,46 +671,46 @@ function renderSignalsHTML(signals) {
 <title>Kumar Commodity Signals</title>
 <style>
   :root {
-    --bg:#0b0f1a; --card:#131a2b; --card2:#0f1522; --border:rgba(255,255,255,0.08);
-    --text:#e5e9f0; --muted:#8892a6; --green:#16c784; --red:#ff4757; --amber:#ffb020; --blue:#3b82f6;
+    --bg:#f3f2fb; --card:#ffffff; --card2:#f7f7fb; --border:rgba(0,0,0,0.08);
+    --text:#1a1a2e; --muted:#6b7280; --green:#0a9d3f; --red:#e0263f; --amber:#b45309; --blue:#2575fc;
   }
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, Roboto, sans-serif; color:var(--text); margin:0; padding:16px;
     background-color: var(--bg);
     background-image:
-      radial-gradient(circle at 10% 0%, rgba(138,92,246,0.18), transparent 40%),
-      radial-gradient(circle at 90% 15%, rgba(59,130,246,0.16), transparent 40%),
-      radial-gradient(circle at 50% 100%, rgba(20,184,166,0.12), transparent 45%);
+      radial-gradient(circle at 10% 0%, rgba(138,92,246,0.14), transparent 40%),
+      radial-gradient(circle at 90% 15%, rgba(37,117,252,0.12), transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(20,184,166,0.10), transparent 45%);
     background-attachment: fixed;
   }
-  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#8a5cf6,#3b82f6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#6a11cb,#2575fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .sub { font-size:13px; color:var(--muted); margin-bottom:14px; }
   .nav { font-size:13px; color:var(--blue); text-decoration:none; display:inline-block; margin-bottom:16px; }
-  .statusBar { display:flex; align-items:center; justify-content:space-between; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-bottom:10px; }
+  .statusBar { display:flex; align-items:center; justify-content:space-between; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-bottom:10px; box-shadow:0 2px 10px rgba(0,0,0,0.05); }
   .statusLeft { display:flex; align-items:center; gap:8px; font-weight:bold; font-size:13px; }
   .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
   .dot.live { background:var(--green); box-shadow:0 0 8px var(--green); }
   .dot.closed { background:var(--red); }
   .statusTime { font-size:12px; color:var(--muted); }
-  .closedBanner { background:rgba(255,176,32,0.12); border:1px solid rgba(255,176,32,0.35); color:var(--amber); font-size:12px; padding:10px 14px; border-radius:12px; margin-bottom:14px; line-height:1.5; }
+  .closedBanner { background:#fef3c7; border:1px solid #fde68a; color:#92400e; font-size:12px; padding:10px 14px; border-radius:12px; margin-bottom:14px; line-height:1.5; }
   .setupsStrip { margin-bottom:18px; }
   .setupsTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px; }
   .setupsRow { display:flex; gap:10px; flex-wrap:wrap; }
-  .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
-  .setupMini.buy { background:linear-gradient(135deg,#d1fae5,#a7f3d0); border:none; }
-  .setupMini.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); border:none; }
-  .setupMini.none { background:linear-gradient(135deg,#fef3c7,#fde68a); border:none; }
+  .setupMini { flex:1; min-width:140px; border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; box-shadow:0 2px 10px rgba(0,0,0,0.06); }
+  .setupMini.buy { background:linear-gradient(135deg,#d1fae5,#a7f3d0); }
+  .setupMini.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); }
+  .setupMini.none { background:linear-gradient(135deg,#fef3c7,#fde68a); }
   .setupMini.buy .setupSym, .setupMini.buy .setupPrice { color:#065f46; }
   .setupMini.sell .setupSym, .setupMini.sell .setupPrice { color:#991b1b; }
   .setupMini.none .setupSym, .setupMini.none .setupPrice { color:#92400e; }
-  .setupSym { font-size:11px; color:var(--muted); }
+  .setupSym { font-size:11px; opacity:0.75; }
   .setupAction { font-size:15px; font-weight:bold; }
   .setupAction.buy { color:#047857; }
   .setupAction.sell { color:#b91c1c; }
   .setupAction.none { color:#92400e; }
-  .setupPrice { font-size:12px; color:var(--muted); }
-  .card { border-radius:16px; overflow:hidden; margin-bottom:18px; border:1px solid var(--border); }
+  .setupPrice { font-size:12px; opacity:0.75; }
+  .card { border-radius:16px; overflow:hidden; margin-bottom:18px; box-shadow:0 4px 18px rgba(0,0,0,0.08); }
   .hero { padding:18px 20px; color:#fff; }
   .symbol { margin:0; font-size:14px; opacity:0.9; }
   .expiry { margin:2px 0 8px 0; font-size:12px; opacity:0.8; }
@@ -726,17 +726,11 @@ function renderSignalsHTML(signals) {
   .relbadge { font-size:12px; color:var(--blue); }
   .relbadge.muted { color:var(--muted); }
   .note { font-size:13px; color:var(--muted); line-height:1.5; margin:0; }
-  .tradeBox { margin-top:14px; padding:12px 14px; background:var(--card2); border-radius:10px; border-left:4px solid var(--border); }
-  .tradeAction { margin:0 0 8px 0; font-size:16px; font-weight:bold; }
-  .tradeGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
-  .tradeGrid .gcell { background:var(--bg); }
-  .tradeGrid .conf { font-size:13px; }
-  .tradeNote { font-size:12px; color:var(--muted); line-height:1.5; margin:0; }
-  .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; }
+  .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; box-shadow:0 2px 10px rgba(0,0,0,0.06); }
   .optionCard.buy { background:linear-gradient(135deg,#d1fae5,#a7f3d0); }
   .optionCard.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); }
   .optionCard.none { background:linear-gradient(135deg,#fef3c7,#fde68a); }
-  .optionCard .tradeGrid .gcell { background:rgba(255,255,255,0.6); border:none; }
+  .optionCard .tradeGrid .gcell { background:rgba(255,255,255,0.7); border:none; }
   .optionCard .tradeGrid .gcell span { color:rgba(0,0,0,0.55); }
   .optionCard .tradeGrid .gcell b { color:#111; }
   .optionCard .tradeNote { color:rgba(0,0,0,0.65); }
@@ -749,22 +743,23 @@ function renderSignalsHTML(signals) {
   .confChip.high { background:#047857; color:#fff; }
   .confChip.medium { background:#92400e; color:#fff; }
   .confChip.low { background:#b91c1c; color:#fff; }
-  .techBasis { padding:12px 14px; background:linear-gradient(135deg,rgba(59,130,246,0.30),rgba(59,130,246,0.08)); border:1px solid rgba(59,130,246,0.6); border-left:5px solid #3b82f6; border-radius:10px; }
-  .techTitle { font-size:11px; color:#7ab3ff; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
+  .techBasis { padding:12px 14px; background:#eef4ff; border-left:5px solid #2575fc; border-radius:10px; }
+  .techTitle { font-size:11px; color:#2575fc; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .err { color:var(--red); padding:14px; }
-  .scanner { background:linear-gradient(135deg,rgba(168,85,247,0.26),rgba(168,85,247,0.06)); border-top:3px solid #a855f7; padding:14px 18px; }
-  .scannerTitle { color:#c98bff; }
-  .calcTitle { color:#5eead4; }
+  .tradeGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .scanner { background:#f5eeff; border-top:3px solid #8a5cf6; padding:14px 18px; }
+  .scannerTitle { color:#7c3aed; }
+  .calcTitle { color:#0f766e; }
   .scannerTitle, .calcTitle { font-size:11px; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .tfRow { display:flex; gap:8px; margin-bottom:12px; }
-  .tfBtn { flex:1; background:rgba(0,0,0,0.25); border:1px solid rgba(168,85,247,0.3); color:var(--muted); padding:8px 0; border-radius:8px; font-weight:bold; font-size:13px; }
+  .tfBtn { flex:1; background:#fff; border:1px solid rgba(138,92,246,0.3); color:var(--muted); padding:8px 0; border-radius:8px; font-weight:bold; font-size:13px; }
   .tfBtn.active { background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff; border-color:transparent; }
   .scanHint { font-size:12px; color:var(--muted); margin:0; }
   .scanLoading { font-size:12px; color:var(--muted); margin:0; }
-  .calc { background:linear-gradient(135deg,rgba(20,184,166,0.26),rgba(20,184,166,0.06)); border-top:3px solid #14b8a6; padding:14px 18px; }
+  .calc { background:#eafaf8; border-top:3px solid #14b8a6; padding:14px 18px; }
   .calcInputs { display:flex; gap:10px; margin-bottom:10px; }
   .calcInputs label { flex:1; font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
-  .calcInputs input { background:rgba(0,0,0,0.25); border:1px solid rgba(20,184,166,0.35); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
+  .calcInputs input { background:#fff; border:1px solid rgba(20,184,166,0.35); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
   .calcOut { font-size:12px; color:var(--muted); line-height:1.5; }
   .calcOut b { color:var(--text); }
   .disclaimer { font-size:11px; color:var(--muted); line-height:1.6; margin-top:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; }
