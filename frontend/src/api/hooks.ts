@@ -42,3 +42,12 @@ export function useScan(symbol: InstrumentSymbol, tf: string, enabled: boolean) 
     staleTime: 10_000,
   });
 }
+
+export function useCandles(symbol: InstrumentSymbol, tf: string) {
+  return useQuery({
+    queryKey: ["candles", symbol, tf],
+    queryFn: () => api.candles(symbol, tf),
+    staleTime: 10_000,
+    refetchInterval: tf === "1D" ? 60_000 : 15_000,
+  });
+}

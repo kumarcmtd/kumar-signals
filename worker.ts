@@ -666,27 +666,38 @@ async function computeSignals(token: string): Promise<SignalCard[]> {
   return out;
 }
 
-// Powers the multi-timeframe scanner: tf is "1D" (daily candles, same as the
-// main signal) or a minute count (5/15/30) resampled from 1-minute intraday
-// candles, which only exist for the current session.
-async function computeScan(token: string, symbol: Symbol, tf: string): Promise<(SignalCard & { timeframe: string }) | { error: string }> {
-  const fut = await getNearestFuture(token, symbol);
-  if (!fut) return { error: "No instrument found" };
-
+// Shared by /api/scan and /api/candles: tf is "1D" (daily candles) or a
+// minute count (5/15/30) resampled from 1-minute intraday candles, which
+// only exist for the current session.
+async function getCandlesForTF(token: string, fut: FutureInfo, tf: string): Promise<Candle[] | { error: string }> {
   if (tf === "1D") {
     const candles = await getHistoricalCandles(token, fut.instrument_key);
     if (!candles || candles.length < 40) return { error: "Not enough historical data yet" };
-    const signal = await buildSignalCard(token, symbol, fut, candles);
-    return { ...signal, timeframe: "1D" };
+    return candles;
   }
-
   const tfMinutes = parseInt(tf, 10);
   const oneMin = await getIntradayCandles(token, fut.instrument_key);
   if (!oneMin || oneMin.length < 20) return { error: "Not enough intraday data yet — market may be closed" };
   const candles = tfMinutes === 1 ? oneMin : resampleCandles(oneMin, tfMinutes);
   if (candles.length < 15) return { error: "Not enough bars yet at this timeframe — try again later in the session" };
+  return candles;
+}
+
+async function computeScan(token: string, symbol: Symbol, tf: string): Promise<(SignalCard & { timeframe: string }) | { error: string }> {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: "No instrument found" };
+  const candles = await getCandlesForTF(token, fut, tf);
+  if ("error" in candles) return candles;
   const signal = await buildSignalCard(token, symbol, fut, candles);
   return { ...signal, timeframe: tf };
+}
+
+async function computeCandles(token: string, symbol: Symbol, tf: string): Promise<{ tradingSymbol: string; timeframe: string; candles: Candle[] } | { error: string }> {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: "No instrument found" };
+  const candles = await getCandlesForTF(token, fut, tf);
+  if ("error" in candles) return candles;
+  return { tradingSymbol: fut.trading_symbol, timeframe: tf, candles };
 }
 
 interface PriceCard {
@@ -788,6 +799,15 @@ export default {
           const tf = url.searchParams.get("tf") || "15";
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
           return json(await computeScan(token, symbol, tf));
+        }
+
+        if (url.pathname === "/api/candles") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          const tf = url.searchParams.get("tf") || "1D";
+          if (!ALL_SYMBOLS.includes(symbol)) return json({ error: "invalid symbol" }, 400);
+          return json(await computeCandles(token, symbol, tf));
         }
 
         return json({ error: "Not found" }, 404);

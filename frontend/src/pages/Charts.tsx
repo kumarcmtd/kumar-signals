@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
-import { createChart, ColorType, CandlestickSeries } from "lightweight-charts";
+import { createChart, ColorType, CandlestickSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import { useAppStore } from "../store/appStore";
-import { useScan } from "../api/hooks";
+import { useCandles, useScan } from "../api/hooks";
+import { TechnicalAnalysisPanel } from "../components/TechnicalAnalysisPanel";
 
 const TIMEFRAMES: { value: "5" | "15" | "30" | "1D"; label: string }[] = [
   { value: "5", label: "5m" },
@@ -13,6 +14,10 @@ const TIMEFRAMES: { value: "5" | "15" | "30" | "1D"; label: string }[] = [
 export function Charts() {
   const { selectedInstrument, setSelectedInstrument, selectedTimeframe, setSelectedTimeframe } = useAppStore();
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+
+  const { data: candleData, isLoading: candlesLoading, error: candlesError } = useCandles(selectedInstrument, selectedTimeframe);
   const { data: scan } = useScan(selectedInstrument, selectedTimeframe, true);
 
   useEffect(() => {
@@ -24,20 +29,38 @@ export function Charts() {
       height: 320,
       timeScale: { timeVisible: true },
     });
-    chart.addSeries(CandlestickSeries, {
+    const series = chart.addSeries(CandlestickSeries, {
       upColor: "#16a34a",
       downColor: "#dc2626",
       borderVisible: false,
       wickUpColor: "#16a34a",
       wickDownColor: "#dc2626",
     });
+    chartRef.current = chart;
+    seriesRef.current = series;
+
     const handleResize = () => chart.applyOptions({ width: containerRef.current?.clientWidth ?? 320 });
     window.addEventListener("resize", handleResize);
     return () => {
       window.removeEventListener("resize", handleResize);
       chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
     };
-  }, [selectedInstrument, selectedTimeframe]);
+  }, []);
+
+  useEffect(() => {
+    if (!seriesRef.current || !candleData?.candles?.length) return;
+    const bars = candleData.candles.map((c) => ({
+      time: Math.floor(new Date(c.date).getTime() / 1000) as UTCTimestamp,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    seriesRef.current.setData(bars);
+    chartRef.current?.timeScale().fitContent();
+  }, [candleData]);
 
   return (
     <div className="space-y-4">
@@ -73,20 +96,32 @@ export function Charts() {
         ))}
       </div>
 
-      <div className="card p-2">
+      <div className="card p-2 relative">
         <div ref={containerRef} />
+        {candlesLoading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-xs text-[var(--color-muted)]">
+            Loading candles…
+          </div>
+        )}
+        {candlesError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-white/90 text-xs text-[var(--color-sell)] px-4 text-center">
+            {(candlesError as Error).message}
+          </div>
+        )}
       </div>
 
       {scan && !("error" in scan) && (
-        <div className="card p-4 text-sm">
+        <div className="card p-4 text-sm space-y-1">
           <p className="font-bold">{scan.pattern?.pattern}</p>
           <p className="text-[var(--color-muted)]">{scan.pattern?.note}</p>
         </div>
       )}
 
+      {candleData?.candles && <TechnicalAnalysisPanel candles={candleData.candles} />}
+
       <p className="text-[11px] text-[var(--color-muted)] px-1">
         Drawing tools (trend lines, Fibonacci) are planned for a follow-up build — this view currently renders live
-        candles only.
+        candles and indicators only.
       </p>
     </div>
   );

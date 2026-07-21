@@ -1,4 +1,4 @@
-import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol } from "../types";
+import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle } from "../types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);
@@ -16,4 +16,6 @@ export const api = {
   signal: (symbol: InstrumentSymbol) => getJSON<SignalCard>(`/signals/${symbol}`),
   scan: (symbol: InstrumentSymbol, tf: string) =>
     getJSON<SignalCard & { timeframe: string }>(`/scan?symbol=${symbol}&tf=${tf}`),
+  candles: (symbol: InstrumentSymbol, tf: string) =>
+    getJSON<{ tradingSymbol: string; timeframe: string; candles: Candle[] }>(`/candles?symbol=${symbol}&tf=${tf}`),
 };
