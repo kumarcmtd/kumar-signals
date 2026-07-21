@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useOptionsAnalytics } from "../api/hooks";
+import { useOptionsAnalytics, useMarketStatus } from "../api/hooks";
 import type { InstrumentSymbol, OptionRowAnalytics } from "../types";
 
 function fmt(n: number | null | undefined, digits = 2) {
@@ -10,6 +10,7 @@ function fmt(n: number | null | undefined, digits = 2) {
 export function Options() {
   const [symbol, setSymbol] = useState<InstrumentSymbol>("CRUDEOIL");
   const { data, isLoading, error } = useOptionsAnalytics(symbol);
+  const { data: market } = useMarketStatus();
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
 
   useEffect(() => {
@@ -37,7 +38,13 @@ export function Options() {
 
       {isLoading && <div className="card p-4 text-sm text-[var(--color-muted)]">Loading option chain…</div>}
       {error && <div className="card p-4 text-sm text-[var(--color-sell)]">{(error as Error).message}</div>}
-      {data?.error && <div className="card p-4 text-sm text-[var(--color-sell)]">{data.error}</div>}
+      {data?.error && (
+        <div className="card p-4 text-sm text-[var(--color-sell)]">
+          {market && !market.isOpen
+            ? `Option chain data isn't available while the market is closed. ${market.mcxStatus}`
+            : data.error}
+        </div>
+      )}
 
       {data && !data.error && (
         <>
