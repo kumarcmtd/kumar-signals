@@ -1,9 +1,14 @@
 {
   "name": "kumar-signals",
-  "main": "worker.js",
+  "main": "worker.ts",
   "compatibility_date": "2024-01-01",
+  "compatibility_flags": ["nodejs_compat"],
   "account_id": "41deea4e3bcf70f14b4ee0fdaafe56ce",
   "kv_namespaces": [
     { "binding": "COMMODITY_KV", "id": "ee2c93e58b91477d8950796f0e51697f" }
-  ]
+  ],
+  "assets": {
+    "directory": "./frontend/dist",
+    "binding": "ASSETS"
+  }
 }

@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --color-surface: #ffffff;
+  --color-surface-soft: #f8fafc;
+  --color-border: #e5e9f0;
+
+  --color-primary: #2563eb;
+  --color-primary-dark: #1d4ed8;
+  --color-buy: #16a34a;
+  --color-buy-soft: #dcfce7;
+  --color-sell: #dc2626;
+  --color-sell-soft: #fee2e2;
+  --color-warn: #f59e0b;
+  --color-warn-soft: #fef3c7;
+
+  --color-ink: #0f172a;
+  --color-muted: #64748b;
+
+  --radius-card: 20px;
+  --radius-tile: 16px;
+
+  --shadow-card: 0 4px 20px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 8px 28px rgba(15, 23, 42, 0.1);
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    background: var(--color-surface-soft);
+    color: var(--color-ink);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer utilities {
+  .card {
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 240ms ease, transform 240ms ease;
+  }
+  .card-tile {
+    background: var(--color-surface);
+    border-radius: var(--radius-tile);
+    box-shadow: var(--shadow-card);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
