@@ -65,6 +65,41 @@ export interface SignalCard {
   error?: string;
 }
 
+export interface Greeks {
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
+  rho?: number;
+}
+
+export interface OptionLeg extends Greeks {
+  ltp: number | null;
+  oi: number | null;
+  iv: number | null;
+}
+
+export interface OptionRowAnalytics {
+  strike: number;
+  call: OptionLeg;
+  put: OptionLeg;
+}
+
+export interface OptionsAnalytics {
+  symbol: InstrumentSymbol;
+  tradingSymbol: string;
+  expiry: string;
+  spot: number;
+  atmStrike: number | null;
+  pcr: number | null;
+  bias: Direction;
+  support: number | null;
+  resistance: number | null;
+  maxPain: number | null;
+  rows: OptionRowAnalytics[];
+  error?: string;
+}
+
 export interface IndicatorSnapshot {
   ema9: number | null;
   ema20: number | null;

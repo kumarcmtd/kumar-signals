@@ -51,3 +51,11 @@ export function useCandles(symbol: InstrumentSymbol, tf: string) {
     refetchInterval: tf === "1D" ? 60_000 : 15_000,
   });
 }
+
+export function useOptionsAnalytics(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["options-analytics", symbol],
+    queryFn: () => api.optionsAnalytics(symbol),
+    refetchInterval: 20_000,
+  });
+}
