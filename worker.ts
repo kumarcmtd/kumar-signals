@@ -1000,6 +1000,97 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   };
 }
 
+interface PortfolioTrade {
+  id: string;
+  symbol: Symbol;
+  optSide?: "CE" | "PE";
+  strike?: number;
+  entryPrice: number;
+  exitPrice?: number;
+  quantity: number; // number of lots
+  lotSize: number;
+  stopLoss?: number;
+  target?: number;
+  entryDate: string;
+  exitDate?: string;
+  status: "OPEN" | "CLOSED";
+  pnl?: number;
+  notes?: string;
+  source?: "manual" | "master-ai" | "signal";
+}
+
+const PORTFOLIO_KV_KEY = "portfolio_trades";
+
+async function getPortfolioTrades(env: Env): Promise<PortfolioTrade[]> {
+  const raw = await env.COMMODITY_KV.get(PORTFOLIO_KV_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function savePortfolioTrades(env: Env, trades: PortfolioTrade[]): Promise<void> {
+  await env.COMMODITY_KV.put(PORTFOLIO_KV_KEY, JSON.stringify(trades));
+}
+
+function computePnl(trade: PortfolioTrade): number | undefined {
+  if (trade.exitPrice === undefined) return undefined;
+  return r2((trade.exitPrice - trade.entryPrice) * trade.quantity * trade.lotSize);
+}
+
+async function createPortfolioTrade(env: Env, body: Partial<PortfolioTrade>): Promise<PortfolioTrade> {
+  if (!body.symbol || !ALL_SYMBOLS.includes(body.symbol as Symbol)) throw new Error("symbol is required");
+  if (typeof body.entryPrice !== "number") throw new Error("entryPrice is required");
+  if (typeof body.quantity !== "number" || body.quantity <= 0) throw new Error("quantity is required");
+  if (typeof body.lotSize !== "number" || body.lotSize <= 0) throw new Error("lotSize is required");
+
+  const trade: PortfolioTrade = {
+    id: crypto.randomUUID(),
+    symbol: body.symbol as Symbol,
+    optSide: body.optSide,
+    strike: body.strike,
+    entryPrice: body.entryPrice,
+    quantity: body.quantity,
+    lotSize: body.lotSize,
+    stopLoss: body.stopLoss,
+    target: body.target,
+    entryDate: body.entryDate ?? new Date().toISOString(),
+    status: "OPEN",
+    notes: body.notes,
+    source: body.source ?? "manual",
+  };
+
+  const trades = await getPortfolioTrades(env);
+  trades.unshift(trade);
+  await savePortfolioTrades(env, trades);
+  return trade;
+}
+
+async function updatePortfolioTrade(env: Env, id: string, patch: Partial<PortfolioTrade>): Promise<PortfolioTrade> {
+  const trades = await getPortfolioTrades(env);
+  const idx = trades.findIndex((t) => t.id === id);
+  if (idx === -1) throw new Error("Trade not found");
+
+  const updated: PortfolioTrade = { ...trades[idx], ...patch, id: trades[idx].id };
+  if (patch.exitPrice !== undefined && !patch.status) updated.status = "CLOSED";
+  if (updated.status === "CLOSED") {
+    updated.exitDate = updated.exitDate ?? new Date().toISOString();
+    updated.pnl = computePnl(updated);
+  }
+  trades[idx] = updated;
+  await savePortfolioTrades(env, trades);
+  return updated;
+}
+
+async function deletePortfolioTrade(env: Env, id: string): Promise<void> {
+  const trades = await getPortfolioTrades(env);
+  const next = trades.filter((t) => t.id !== id);
+  await savePortfolioTrades(env, next);
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1073,6 +1164,29 @@ export default {
           const token = await requireToken(env);
           if (token instanceof Response) return token;
           return json(await computeOptionsAnalytics(token, symbol));
+        }
+
+        if (url.pathname === "/api/portfolio") {
+          if (request.method === "GET") return json(await getPortfolioTrades(env));
+          if (request.method === "POST") {
+            const body = (await request.json().catch(() => ({}))) as Partial<PortfolioTrade>;
+            return json(await createPortfolioTrade(env, body), 201);
+          }
+          return json({ error: "Method not allowed" }, 405);
+        }
+
+        const portfolioMatch = url.pathname.match(/^\/api\/portfolio\/([a-zA-Z0-9-]+)$/);
+        if (portfolioMatch) {
+          const id = portfolioMatch[1];
+          if (request.method === "PATCH") {
+            const body = (await request.json().catch(() => ({}))) as Partial<PortfolioTrade>;
+            return json(await updatePortfolioTrade(env, id, body));
+          }
+          if (request.method === "DELETE") {
+            await deletePortfolioTrade(env, id);
+            return json({ ok: true });
+          }
+          return json({ error: "Method not allowed" }, 405);
         }
 
         return json({ error: "Not found" }, 404);

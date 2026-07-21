@@ -1,7 +1,20 @@
-import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, GlobalQuote } from "../types";
+import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, GlobalQuote, PortfolioTrade } from "../types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+async function sendJSON<T>(path: string, method: "POST" | "PATCH" | "DELETE", data?: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: data !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: data !== undefined ? JSON.stringify(data) : undefined,
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `Request failed: ${res.status}`);
@@ -20,4 +33,8 @@ export const api = {
     getJSON<{ tradingSymbol: string; timeframe: string; candles: Candle[] }>(`/candles?symbol=${symbol}&tf=${tf}`),
   optionsAnalytics: (symbol: InstrumentSymbol) => getJSON<OptionsAnalytics>(`/options/${symbol}`),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
+  portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
+  createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
+  updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),
+  deleteTrade: (id: string) => sendJSON<{ ok: true }>(`/portfolio/${id}`, "DELETE"),
 };

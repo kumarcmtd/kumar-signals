@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ThumbsUp, ThumbsDown } from "lucide-react";
-import { useCandles, useOptionsAnalytics, useSignal } from "../api/hooks";
+import { useCandles, useOptionsAnalytics, useSignal, useCreateTrade } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { useJournalStore, journalStats } from "../store/journalStore";
 import { computeMasterAI, type Decision } from "../utils/masterEngine";
@@ -26,6 +26,8 @@ export function MasterAI() {
   const [symbol, setSymbol] = useState<InstrumentSymbol>("CRUDEOIL");
   const { risk } = useAppStore();
   const { logSignal, entries } = useJournalStore();
+  const createTrade = useCreateTrade();
+  const [logged, setLogged] = useState(false);
 
   const c1D = useCandles(symbol, "1D");
   const c30 = useCandles(symbol, "30");
@@ -58,6 +60,7 @@ export function MasterAI() {
       stop: result.stop,
       target1: result.target1,
     });
+    setLogged(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result?.decision, result?.strike, result?.optSide, symbol]);
 
@@ -178,6 +181,28 @@ export function MasterAI() {
                 )}
                 {result.trailingStopNote && <p className="text-xs text-[var(--color-muted)]">{result.trailingStopNote}</p>}
               </div>
+              <button
+                disabled={logged || createTrade.isPending}
+                onClick={() =>
+                  createTrade.mutate(
+                    {
+                      symbol,
+                      optSide: result.optSide,
+                      strike: result.strike,
+                      entryPrice: result.entry!,
+                      stopLoss: result.stop ?? undefined,
+                      target: result.target1 ?? undefined,
+                      quantity: lots && lots > 0 ? lots : 1,
+                      lotSize,
+                      source: "master-ai",
+                    },
+                    { onSuccess: () => setLogged(true) }
+                  )
+                }
+                className="w-full py-2 rounded-xl text-sm font-bold bg-slate-800 text-white disabled:opacity-50"
+              >
+                {logged ? "Logged to Portfolio ✓" : createTrade.isPending ? "Logging…" : "Log this call to Portfolio"}
+              </button>
             </div>
           )}
 

@@ -117,6 +117,25 @@ export interface IndicatorSnapshot {
   momentumScore: number | null;
 }
 
+export interface PortfolioTrade {
+  id: string;
+  symbol: InstrumentSymbol;
+  optSide?: OptionSide;
+  strike?: number;
+  entryPrice: number;
+  exitPrice?: number;
+  quantity: number;
+  lotSize: number;
+  stopLoss?: number;
+  target?: number;
+  entryDate: string;
+  exitDate?: string;
+  status: "OPEN" | "CLOSED";
+  pnl?: number;
+  notes?: string;
+  source?: "manual" | "master-ai" | "signal";
+}
+
 export interface GlobalQuote {
   symbol: string;
   name: string;

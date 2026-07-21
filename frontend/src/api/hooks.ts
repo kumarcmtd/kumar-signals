@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { InstrumentSymbol } from "../types";
+import type { InstrumentSymbol, PortfolioTrade } from "../types";
 
 export function useMarketStatus() {
   return useQuery({
@@ -65,5 +65,37 @@ export function useGlobalMarkets() {
     queryKey: ["global-markets"],
     queryFn: api.globalMarkets,
     refetchInterval: 30_000,
+  });
+}
+
+export function usePortfolio() {
+  return useQuery({
+    queryKey: ["portfolio"],
+    queryFn: api.portfolio,
+    refetchInterval: 20_000,
+  });
+}
+
+export function useCreateTrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (trade: Partial<PortfolioTrade>) => api.createTrade(trade),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
+}
+
+export function useUpdateTrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<PortfolioTrade> }) => api.updateTrade(id, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
+}
+
+export function useDeleteTrade() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTrade(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
   });
 }
