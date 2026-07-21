@@ -675,7 +675,15 @@ function renderSignalsHTML(signals) {
     --text:#e5e9f0; --muted:#8892a6; --green:#16c784; --red:#ff4757; --amber:#ffb020; --blue:#3b82f6;
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, Roboto, sans-serif; background:var(--bg); color:var(--text); margin:0; padding:16px; }
+  body {
+    font-family: -apple-system, Roboto, sans-serif; color:var(--text); margin:0; padding:16px;
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(circle at 10% 0%, rgba(138,92,246,0.18), transparent 40%),
+      radial-gradient(circle at 90% 15%, rgba(59,130,246,0.16), transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(20,184,166,0.12), transparent 45%);
+    background-attachment: fixed;
+  }
   h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#8a5cf6,#3b82f6); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .sub { font-size:13px; color:var(--muted); margin-bottom:14px; }
   .nav { font-size:13px; color:var(--blue); text-decoration:none; display:inline-block; margin-bottom:16px; }
@@ -690,9 +698,9 @@ function renderSignalsHTML(signals) {
   .setupsTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px; }
   .setupsRow { display:flex; gap:10px; flex-wrap:wrap; }
   .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
-  .setupMini.buy { background:linear-gradient(135deg,rgba(22,199,132,0.20),rgba(22,199,132,0.05)); border-color:rgba(22,199,132,0.4); }
-  .setupMini.sell { background:linear-gradient(135deg,rgba(255,71,87,0.20),rgba(255,71,87,0.05)); border-color:rgba(255,71,87,0.4); }
-  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.22),rgba(255,176,32,0.06)); border-color:rgba(255,176,32,0.45); }
+  .setupMini.buy { background:linear-gradient(135deg,rgba(22,199,132,0.32),rgba(22,199,132,0.08)); border:2px solid #16c784; }
+  .setupMini.sell { background:linear-gradient(135deg,rgba(255,71,87,0.32),rgba(255,71,87,0.08)); border:2px solid #ff4757; }
+  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.32),rgba(255,176,32,0.08)); border:2px solid #ffb020; }
   .setupSym { font-size:11px; color:var(--muted); }
   .setupAction { font-size:15px; font-weight:bold; }
   .setupAction.buy { color:var(--green); }
@@ -722,9 +730,9 @@ function renderSignalsHTML(signals) {
   .tradeGrid .conf { font-size:13px; }
   .tradeNote { font-size:12px; color:var(--muted); line-height:1.5; margin:0; }
   .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; }
-  .optionCard.buy { background:linear-gradient(135deg,rgba(22,199,132,0.22),rgba(22,199,132,0.04)); border:1px solid rgba(22,199,132,0.5); }
-  .optionCard.sell { background:linear-gradient(135deg,rgba(255,71,87,0.22),rgba(255,71,87,0.04)); border:1px solid rgba(255,71,87,0.5); }
-  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.24),rgba(255,176,32,0.06)); border:1px solid rgba(255,176,32,0.5); }
+  .optionCard.buy { background:linear-gradient(135deg,rgba(22,199,132,0.35),rgba(22,199,132,0.08)); border:2px solid #16c784; }
+  .optionCard.sell { background:linear-gradient(135deg,rgba(255,71,87,0.35),rgba(255,71,87,0.08)); border:2px solid #ff4757; }
+  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.35),rgba(255,176,32,0.08)); border:2px solid #ffb020; }
   .optionCard .tradeGrid .gcell { background:rgba(0,0,0,0.25); }
   .optionHead { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
   .optionAction { font-size:22px; font-weight:900; margin:0; }
@@ -735,10 +743,10 @@ function renderSignalsHTML(signals) {
   .confChip.high { background:var(--green); color:#04241a; }
   .confChip.medium { background:var(--amber); color:#2b1b00; }
   .confChip.low { background:var(--red); color:#2b0000; }
-  .techBasis { padding:12px 14px; background:linear-gradient(135deg,rgba(59,130,246,0.12),rgba(59,130,246,0.02)); border:1px solid rgba(59,130,246,0.3); border-radius:10px; }
+  .techBasis { padding:12px 14px; background:linear-gradient(135deg,rgba(59,130,246,0.30),rgba(59,130,246,0.08)); border:1px solid rgba(59,130,246,0.6); border-left:5px solid #3b82f6; border-radius:10px; }
   .techTitle { font-size:11px; color:#7ab3ff; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .err { color:var(--red); padding:14px; }
-  .scanner { background:linear-gradient(135deg,rgba(168,85,247,0.10),rgba(168,85,247,0.02)); border-top:1px solid rgba(168,85,247,0.3); padding:14px 18px; }
+  .scanner { background:linear-gradient(135deg,rgba(168,85,247,0.26),rgba(168,85,247,0.06)); border-top:3px solid #a855f7; padding:14px 18px; }
   .scannerTitle { color:#c98bff; }
   .calcTitle { color:#5eead4; }
   .scannerTitle, .calcTitle { font-size:11px; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
@@ -747,7 +755,7 @@ function renderSignalsHTML(signals) {
   .tfBtn.active { background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff; border-color:transparent; }
   .scanHint { font-size:12px; color:var(--muted); margin:0; }
   .scanLoading { font-size:12px; color:var(--muted); margin:0; }
-  .calc { background:linear-gradient(135deg,rgba(20,184,166,0.10),rgba(20,184,166,0.02)); border-top:1px solid rgba(20,184,166,0.3); padding:14px 18px; }
+  .calc { background:linear-gradient(135deg,rgba(20,184,166,0.26),rgba(20,184,166,0.06)); border-top:3px solid #14b8a6; padding:14px 18px; }
   .calcInputs { display:flex; gap:10px; margin-bottom:10px; }
   .calcInputs label { flex:1; font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
   .calcInputs input { background:rgba(0,0,0,0.25); border:1px solid rgba(20,184,166,0.35); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
