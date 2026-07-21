@@ -6,6 +6,7 @@ import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
 import { Risk } from "./pages/Risk";
 import { Global } from "./pages/Global";
+import { MasterAI } from "./pages/MasterAI";
 import { Settings } from "./pages/Settings";
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
           <Route path="/options" element={<Options />} />
           <Route path="/risk" element={<Risk />} />
           <Route path="/global" element={<Global />} />
+          <Route path="/master-ai" element={<MasterAI />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </ErrorBoundary>
