@@ -692,7 +692,7 @@ function renderSignalsHTML(signals) {
   .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
   .setupMini.buy { background:linear-gradient(135deg,rgba(22,199,132,0.20),rgba(22,199,132,0.05)); border-color:rgba(22,199,132,0.4); }
   .setupMini.sell { background:linear-gradient(135deg,rgba(255,71,87,0.20),rgba(255,71,87,0.05)); border-color:rgba(255,71,87,0.4); }
-  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.14),rgba(255,176,32,0.03)); border-color:rgba(255,176,32,0.3); }
+  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.22),rgba(255,176,32,0.06)); border-color:rgba(255,176,32,0.45); }
   .setupSym { font-size:11px; color:var(--muted); }
   .setupAction { font-size:15px; font-weight:bold; }
   .setupAction.buy { color:var(--green); }
@@ -724,7 +724,7 @@ function renderSignalsHTML(signals) {
   .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; }
   .optionCard.buy { background:linear-gradient(135deg,rgba(22,199,132,0.22),rgba(22,199,132,0.04)); border:1px solid rgba(22,199,132,0.5); }
   .optionCard.sell { background:linear-gradient(135deg,rgba(255,71,87,0.22),rgba(255,71,87,0.04)); border:1px solid rgba(255,71,87,0.5); }
-  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.16),rgba(255,176,32,0.03)); border:1px solid rgba(255,176,32,0.4); }
+  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.24),rgba(255,176,32,0.06)); border:1px solid rgba(255,176,32,0.5); }
   .optionCard .tradeGrid .gcell { background:rgba(0,0,0,0.25); }
   .optionHead { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
   .optionAction { font-size:22px; font-weight:900; margin:0; }
@@ -735,20 +735,22 @@ function renderSignalsHTML(signals) {
   .confChip.high { background:var(--green); color:#04241a; }
   .confChip.medium { background:var(--amber); color:#2b1b00; }
   .confChip.low { background:var(--red); color:#2b0000; }
-  .techBasis { padding:12px 14px; background:var(--card2); border:1px solid var(--border); border-radius:10px; }
-  .techTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
+  .techBasis { padding:12px 14px; background:linear-gradient(135deg,rgba(59,130,246,0.12),rgba(59,130,246,0.02)); border:1px solid rgba(59,130,246,0.3); border-radius:10px; }
+  .techTitle { font-size:11px; color:#7ab3ff; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .err { color:var(--red); padding:14px; }
-  .scanner { background:var(--card2); border-top:1px solid var(--border); padding:14px 18px; }
-  .scannerTitle, .calcTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
+  .scanner { background:linear-gradient(135deg,rgba(168,85,247,0.10),rgba(168,85,247,0.02)); border-top:1px solid rgba(168,85,247,0.3); padding:14px 18px; }
+  .scannerTitle { color:#c98bff; }
+  .calcTitle { color:#5eead4; }
+  .scannerTitle, .calcTitle { font-size:11px; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .tfRow { display:flex; gap:8px; margin-bottom:12px; }
-  .tfBtn { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:8px 0; border-radius:8px; font-weight:bold; font-size:13px; }
-  .tfBtn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .tfBtn { flex:1; background:rgba(0,0,0,0.25); border:1px solid rgba(168,85,247,0.3); color:var(--muted); padding:8px 0; border-radius:8px; font-weight:bold; font-size:13px; }
+  .tfBtn.active { background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff; border-color:transparent; }
   .scanHint { font-size:12px; color:var(--muted); margin:0; }
   .scanLoading { font-size:12px; color:var(--muted); margin:0; }
-  .calc { background:var(--card2); border-top:1px solid var(--border); padding:14px 18px; }
+  .calc { background:linear-gradient(135deg,rgba(20,184,166,0.10),rgba(20,184,166,0.02)); border-top:1px solid rgba(20,184,166,0.3); padding:14px 18px; }
   .calcInputs { display:flex; gap:10px; margin-bottom:10px; }
   .calcInputs label { flex:1; font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
-  .calcInputs input { background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
+  .calcInputs input { background:rgba(0,0,0,0.25); border:1px solid rgba(20,184,166,0.35); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
   .calcOut { font-size:12px; color:var(--muted); line-height:1.5; }
   .calcOut b { color:var(--text); }
   .disclaimer { font-size:11px; color:var(--muted); line-height:1.6; margin-top:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; }
