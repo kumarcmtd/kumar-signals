@@ -1,9 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, LineChart, ListTree, Calculator, Globe2, Settings, Brain, Briefcase } from "lucide-react";
+import { Zap, LayoutGrid, LineChart, ListTree, Calculator, Globe2, Settings, Brain, Briefcase } from "lucide-react";
 
 const items = [
-  { to: "/", label: "Home", icon: LayoutGrid, end: true },
-  { to: "/master-ai", label: "AI", icon: Brain },
+  { to: "/", label: "Trade", icon: Zap, end: true },
+  { to: "/master-ai", label: "Analysis", icon: Brain },
+  { to: "/prices", label: "Prices", icon: LayoutGrid },
   { to: "/charts", label: "Charts", icon: LineChart },
   { to: "/options", label: "Options", icon: ListTree },
   { to: "/portfolio", label: "Portfolio", icon: Briefcase },

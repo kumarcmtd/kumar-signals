@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AITrade } from "./pages/AITrade";
 import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
@@ -15,7 +16,8 @@ function App() {
     <AppShell>
       <ErrorBoundary>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<AITrade />} />
+          <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
           <Route path="/risk" element={<Risk />} />
