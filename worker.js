@@ -1017,11 +1017,11 @@ export default {
         if (!token) {
           return new Response(
             "No token found in KV yet. Log in via your main kumarcmtd worker's /login page first, then reload this page.",
-            { headers: { "Content-Type": "text/html" } }
+            { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } }
           );
         }
         const results = await computeOptionsSignals(token);
-        return new Response(renderOptionsHTML(results), { headers: { "Content-Type": "text/html" } });
+        return new Response(renderOptionsHTML(results), { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
       }
 
       if (url.pathname === "/") {
@@ -1029,11 +1029,11 @@ export default {
         if (!token) {
           return new Response(
             "No token found in KV yet. Log in via your main kumarcmtd worker's /login page first, then reload this page.",
-            { headers: { "Content-Type": "text/html" } }
+            { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } }
           );
         }
         const results = await computeSignals(token);
-        return new Response(renderSignalsHTML(results), { headers: { "Content-Type": "text/html" } });
+        return new Response(renderSignalsHTML(results), { headers: { "Content-Type": "text/html", "Cache-Control": "no-store" } });
               }
       return new Response("Not found", { status: 404 });
     } catch (err) {
