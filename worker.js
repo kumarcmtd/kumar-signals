@@ -1,5 +1,6 @@
 const UPSTOX_SEARCH_URL = "https://api.upstox.com/v2/instruments/search";
 const UPSTOX_HIST_URL = "https://api.upstox.com/v2/historical-candle";
+const UPSTOX_OPTION_CHAIN_URL = "https://api.upstox.com/v2/option/chain";
 
 const THEME = {
   CRUDEOIL: { grad: "linear-gradient(135deg,#ff8a00,#e52e71)", light: "#fff4e8" },
@@ -297,6 +298,88 @@ async function getHistoricalCandles(token, instrumentKey) {
   return candles;
 }
 
+// MCX commodity options are options on the futures contract, so the option
+// chain is queried with the same instrument_key/expiry as the nearest future.
+async function getOptionChain(token, instrumentKey, expiryDate) {
+  const usp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
+  const res = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${usp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  const json = await res.json();
+  if (json.status !== "success" || !json.data || !json.data.length) {
+    const msg = json.errors ? json.errors.map(e => e.message).join("; ") : (json.status !== "success" ? "Option chain request failed" : "No strikes returned");
+    return { error: msg };
+  }
+  return { chain: json.data };
+}
+
+function nearestStrikes(chain, spot, sideCount = 6) {
+  const sorted = [...chain].sort((a, b) => a.strike_price - b.strike_price);
+  let atmIdx = 0, atmDiff = Infinity;
+  sorted.forEach((row, i) => {
+    const diff = Math.abs(row.strike_price - spot);
+    if (diff < atmDiff) { atmDiff = diff; atmIdx = i; }
+  });
+  const start = Math.max(0, atmIdx - sideCount);
+  const end = Math.min(sorted.length, atmIdx + sideCount + 1);
+  return { rows: sorted.slice(start, end), atmStrike: sorted.length ? sorted[atmIdx].strike_price : null };
+}
+
+function analyzeChain(chain) {
+  let maxCallOI = null, maxPutOI = null, totalCallOI = 0, totalPutOI = 0;
+  for (const r of chain) {
+    const callOI = r.call_options?.market_data?.oi || 0;
+    const putOI = r.put_options?.market_data?.oi || 0;
+    totalCallOI += callOI;
+    totalPutOI += putOI;
+    if (!maxCallOI || callOI > maxCallOI.oi) maxCallOI = { strike: r.strike_price, oi: callOI };
+    if (!maxPutOI || putOI > maxPutOI.oi) maxPutOI = { strike: r.strike_price, oi: putOI };
+  }
+  const pcr = totalCallOI > 0 ? r2(totalPutOI / totalCallOI) : null;
+  const bias = pcr == null ? "neutral" : pcr > 1.2 ? "bullish" : pcr < 0.8 ? "bearish" : "neutral";
+  return {
+    pcr,
+    resistance: maxCallOI ? maxCallOI.strike : null, // heaviest Call OI = resistance
+    support: maxPutOI ? maxPutOI.strike : null,       // heaviest Put OI = support
+    bias,
+  };
+}
+
+async function computeOptionsSignals(token) {
+  const out = {};
+  for (const q of ["CRUDEOIL", "NATURALGAS"]) {
+    try {
+      const fut = await getNearestFuture(token, q);
+      if (!fut) { out[q] = { error: "No instrument found" }; continue; }
+
+      const candles = await getHistoricalCandles(token, fut.instrument_key);
+      const spot = candles && candles.length ? candles[candles.length - 1].close : null;
+
+      const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
+      if (chainRes.error) {
+        out[q] = { error: chainRes.error, trading_symbol: fut.trading_symbol, expiry: fut.expiry };
+        continue;
+      }
+
+      const refPrice = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
+      const { rows, atmStrike } = nearestStrikes(chainRes.chain, refPrice, 6);
+      const analysis = analyzeChain(chainRes.chain);
+
+      out[q] = {
+        trading_symbol: fut.trading_symbol,
+        expiry: fut.expiry,
+        spot: refPrice,
+        atmStrike,
+        rows,
+        ...analysis,
+      };
+    } catch (e) {
+      out[q] = { error: e.message };
+    }
+  }
+  return out;
+}
+
 async function computeSignals(token) {
   const out = {};
   for (const q of ["CRUDEOIL", "NATURALGAS"]) {
@@ -380,6 +463,7 @@ function renderSignalsHTML(signals) {
   body { font-family: -apple-system, Roboto, sans-serif; background:#f5f6fa; color:#222; margin:0; padding:16px; }
   h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#6a11cb,#2575fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
   .sub { font-size:13px; color:#888; margin-bottom:16px; }
+  .nav { font-size:13px; color:#2575fc; text-decoration:none; display:inline-block; margin-bottom:16px; }
   .card { border-radius:16px; overflow:hidden; margin-bottom:18px; box-shadow:0 4px 14px rgba(0,0,0,0.08); }
   .hero { padding:18px 20px; color:#fff; }
   .symbol { margin:0; font-size:14px; opacity:0.9; }
@@ -403,6 +487,7 @@ function renderSignalsHTML(signals) {
 <body>
   <h1>Kumar Commodity Signals</h1>
   <p class="sub">Reads the token your main Kumar Commodity Options worker already keeps in KV — no separate login needed here.</p>
+  <a class="nav" href="/options">Option chain (strikes, OI, PCR) →</a>
   ${cards}
   <div class="disclaimer">
     *Reliability figures are approximate historical success rates commonly cited in
@@ -416,6 +501,127 @@ function renderSignalsHTML(signals) {
 </html>`;
 }
 
+function fmtNum(n) { return (n === null || n === undefined || Number.isNaN(n)) ? "-" : (Math.round(n * 100) / 100).toLocaleString("en-IN"); }
+
+function renderOptionsHTML(signals) {
+  const keys = Object.keys(signals);
+  let tabButtons = "";
+  let panels = "";
+
+  keys.forEach((q, i) => {
+    const s = signals[q];
+    const theme = THEME[q] || { grad: "linear-gradient(135deg,#999,#666)", light: "#f2f2f2" };
+    const active = i === 0 ? "active" : "";
+    tabButtons += `<button class="tab ${active}" style="background:${theme.grad}" onclick="showTab('${q}')" id="btn-${q}">${q}</button>`;
+
+    if (s.error) {
+      panels += `
+      <div class="panel ${active}" id="panel-${q}">
+        <p class="err">${s.error}${s.trading_symbol ? " (" + s.trading_symbol + ")" : ""}</p>
+      </div>`;
+      return;
+    }
+
+    const dirColor = s.bias === "bullish" ? "#0a9d3f" : s.bias === "bearish" ? "#e0263f" : "#888";
+    const dirLabel = s.bias === "bullish" ? "PCR BULLISH" : s.bias === "bearish" ? "PCR BEARISH" : "PCR NEUTRAL";
+
+    let rows = "";
+    s.rows.forEach(r => {
+      const isAtm = r.strike_price === s.atmStrike;
+      const ce = r.call_options?.market_data || {};
+      const pe = r.put_options?.market_data || {};
+      rows += `
+      <tr class="${isAtm ? "atm" : ""}">
+        <td>${fmtNum(ce.oi)}</td>
+        <td>${fmtNum(ce.ltp)}</td>
+        <td class="strike">${fmtNum(r.strike_price)}</td>
+        <td>${fmtNum(pe.ltp)}</td>
+        <td>${fmtNum(pe.oi)}</td>
+      </tr>`;
+    });
+
+    panels += `
+    <div class="panel ${active}" id="panel-${q}">
+      <div class="hero" style="background:${theme.grad}">
+        <p class="symbol">${q} · ${s.trading_symbol}</p>
+        <p class="expiry">Expiry ${s.expiry} · Spot ₹${fmtNum(s.spot)}</p>
+        <span class="dirBadge" style="background:${dirColor}">${dirLabel} (${s.pcr ?? "-"})</span>
+      </div>
+      <div class="body" style="background:${theme.light}">
+        <div class="grid">
+          <div class="gcell"><span>Support (Max Put OI)</span><b>${fmtNum(s.support)}</b></div>
+          <div class="gcell"><span>Resistance (Max Call OI)</span><b>${fmtNum(s.resistance)}</b></div>
+        </div>
+        <div class="tableWrap">
+          <table>
+            <thead><tr><th>Call OI</th><th>Call LTP</th><th>Strike</th><th>Put LTP</th><th>Put OI</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  });
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kumar Commodity Options Chain</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Roboto, sans-serif; background:#f5f6fa; color:#222; margin:0; padding:16px; }
+  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#6a11cb,#2575fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { font-size:13px; color:#888; margin-bottom:16px; }
+  .nav { font-size:13px; color:#2575fc; text-decoration:none; display:inline-block; margin-bottom:16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .tab { flex:1; border:none; padding:12px 0; border-radius:12px; color:#fff; font-weight:bold; font-size:15px; opacity:0.5; }
+  .tab.active { opacity:1; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .hero { border-radius:16px 16px 0 0; padding:18px 20px; color:#fff; }
+  .symbol { margin:0; font-size:14px; opacity:0.9; }
+  .expiry { margin:2px 0 10px 0; font-size:12px; opacity:0.8; }
+  .dirBadge { color:#fff; font-size:12px; font-weight:bold; padding:5px 10px; border-radius:20px; background:rgba(255,255,255,0.25); }
+  .body { padding:16px 18px 18px 18px; border-radius:0 0 16px 16px; margin-bottom:18px; box-shadow:0 4px 14px rgba(0,0,0,0.08); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+  .gcell { background:#fff; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; }
+  .gcell span { font-size:11px; color:#888; }
+  .gcell b { font-size:16px; color:#222; margin-top:2px; }
+  .tableWrap { overflow-x:auto; background:#fff; border-radius:10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { padding:8px 10px; text-align:center; white-space:nowrap; }
+  th { color:#888; font-size:11px; border-bottom:1px solid #eee; }
+  td.strike { font-weight:bold; }
+  tr.atm { background:#fff9e0; }
+  .err { color:#e0263f; padding:14px; background:#fff; border-radius:12px; }
+  .disclaimer { font-size:11px; color:#999; line-height:1.6; margin-top:14px; padding:14px; background:#fff; border-radius:12px; }
+</style>
+</head>
+<body>
+  <h1>Kumar Commodity Options Chain</h1>
+  <p class="sub">Nearest-expiry MCX option chain for the token your main Kumar Commodity Options worker keeps in KV.</p>
+  <a class="nav" href="/">← Back to pattern signals</a>
+  <div class="tabs">${tabButtons}</div>
+  ${panels}
+  <div class="disclaimer">
+    OI = open interest. Support/Resistance are the strikes carrying the heaviest Put/Call OI in the
+    displayed window, a common (not guaranteed) read of where price may find friction. PCR = total Put OI
+    ÷ total Call OI across the window; above ~1.2 is read as bullish, below ~0.8 as bearish. Educational
+    reference only — not financial advice.
+  </div>
+  <script>
+    function showTab(q) {
+      document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+      document.getElementById('btn-' + q).classList.add('active');
+      document.getElementById('panel-' + q).classList.add('active');
+    }
+  </script>
+</body>
+</html>`;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -425,6 +631,25 @@ export default {
         if (!token) return new Response("No token found in KV. Log in via your main kumarcmtd worker's /login first.", { status: 400 });
         const results = await computeSignals(token);
         return new Response(JSON.stringify(results, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/options/json") {
+        const token = await env.COMMODITY_KV.get("access_token");
+        if (!token) return new Response("No token found in KV. Log in via your main kumarcmtd worker's /login first.", { status: 400 });
+        const results = await computeOptionsSignals(token);
+        return new Response(JSON.stringify(results, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/options") {
+        const token = await env.COMMODITY_KV.get("access_token");
+        if (!token) {
+          return new Response(
+            "No token found in KV yet. Log in via your main kumarcmtd worker's /login page first, then reload this page.",
+            { headers: { "Content-Type": "text/html" } }
+          );
+        }
+        const results = await computeOptionsSignals(token);
+        return new Response(renderOptionsHTML(results), { headers: { "Content-Type": "text/html" } });
       }
 
       if (url.pathname === "/") {
