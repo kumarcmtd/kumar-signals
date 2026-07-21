@@ -59,3 +59,11 @@ export function useOptionsAnalytics(symbol: InstrumentSymbol) {
     refetchInterval: 20_000,
   });
 }
+
+export function useGlobalMarkets() {
+  return useQuery({
+    queryKey: ["global-markets"],
+    queryFn: api.globalMarkets,
+    refetchInterval: 30_000,
+  });
+}

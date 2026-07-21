@@ -116,3 +116,16 @@ export interface IndicatorSnapshot {
   trendDirection: Direction;
   momentumScore: number | null;
 }
+
+export interface GlobalQuote {
+  symbol: string;
+  name: string;
+  tracksMCX: string;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  currency: string | null;
+  marketState: string | null;
+  asOf: string | null;
+  error?: string;
+}

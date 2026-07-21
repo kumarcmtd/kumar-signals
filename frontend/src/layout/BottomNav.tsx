@@ -1,18 +1,19 @@
 import { NavLink } from "react-router-dom";
-import { LayoutGrid, LineChart, ListTree, Calculator, Settings } from "lucide-react";
+import { LayoutGrid, LineChart, ListTree, Calculator, Globe2, Settings } from "lucide-react";
 
 const items = [
-  { to: "/", label: "Dashboard", icon: LayoutGrid, end: true },
+  { to: "/", label: "Home", icon: LayoutGrid, end: true },
   { to: "/charts", label: "Charts", icon: LineChart },
   { to: "/options", label: "Options", icon: ListTree },
   { to: "/risk", label: "Risk", icon: Calculator },
+  { to: "/global", label: "Global", icon: Globe2 },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
   return (
     <nav className="safe-bottom fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[var(--color-border)]">
-      <div className="max-w-lg mx-auto grid grid-cols-5">
+      <div className="max-w-lg mx-auto grid grid-cols-6">
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}

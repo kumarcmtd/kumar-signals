@@ -5,6 +5,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
 import { Risk } from "./pages/Risk";
+import { Global } from "./pages/Global";
 import { Settings } from "./pages/Settings";
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
           <Route path="/risk" element={<Risk />} />
+          <Route path="/global" element={<Global />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </ErrorBoundary>

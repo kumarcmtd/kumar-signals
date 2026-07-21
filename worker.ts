@@ -862,6 +862,79 @@ async function computePrices(token: string) {
   return out;
 }
 
+// ---- Global reference markets (overseas benchmarks MCX contracts track) ----
+// MCX Crude Oil settles off a basket referencing WTI/Brent; MCX Natural Gas
+// settles off Henry Hub. Those overseas markets trade on NYMEX/ICE well past
+// MCX's ~23:30 IST close, so this is how a trader sees which way things are
+// likely to gap when MCX reopens. Uses Yahoo Finance's public (unofficial,
+// unauthenticated) chart endpoint, independent of the Upstox/KV token -- this
+// works even when the user hasn't logged in via the main worker.
+const GLOBAL_INSTRUMENTS: { symbol: string; name: string; tracksMCX: string }[] = [
+  { symbol: "CL=F", name: "WTI Crude Oil (NYMEX)", tracksMCX: "CRUDEOIL" },
+  { symbol: "BZ=F", name: "Brent Crude Oil (ICE)", tracksMCX: "CRUDEOIL" },
+  { symbol: "NG=F", name: "Henry Hub Natural Gas (NYMEX)", tracksMCX: "NATURALGAS" },
+];
+
+interface GlobalQuote {
+  symbol: string;
+  name: string;
+  tracksMCX: string;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  currency: string | null;
+  marketState: string | null;
+  asOf: string | null;
+  error?: string;
+}
+
+async function getYahooQuote(symbol: string, name: string, tracksMCX: string): Promise<GlobalQuote> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; KumarSignalsPro/1.0)",
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    return { symbol, name, tracksMCX, price: null, change: null, changePercent: null, currency: null, marketState: null, asOf: null, error: `Yahoo Finance returned ${res.status}` };
+  }
+  const json: any = await res.json();
+  const meta = json?.chart?.result?.[0]?.meta;
+  if (!meta || typeof meta.regularMarketPrice !== "number") {
+    const errMsg = json?.chart?.error?.description || "No quote data returned";
+    return { symbol, name, tracksMCX, price: null, change: null, changePercent: null, currency: null, marketState: null, asOf: null, error: errMsg };
+  }
+  const price = meta.regularMarketPrice;
+  const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+  const change = prevClose !== null ? r2(price - prevClose) : null;
+  const changePercent = prevClose ? r2((change! / prevClose) * 100) : null;
+  return {
+    symbol,
+    name,
+    tracksMCX,
+    price: r2(price),
+    change,
+    changePercent,
+    currency: meta.currency ?? null,
+    marketState: meta.marketState ?? null,
+    asOf: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
+  };
+}
+
+async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
+  const results = await Promise.all(
+    GLOBAL_INSTRUMENTS.map(async (inst) => {
+      try {
+        return await getYahooQuote(inst.symbol, inst.name, inst.tracksMCX);
+      } catch (e: any) {
+        return { symbol: inst.symbol, name: inst.name, tracksMCX: inst.tracksMCX, price: null, change: null, changePercent: null, currency: null, marketState: null, asOf: null, error: e.message };
+      }
+    })
+  );
+  return results;
+}
+
 interface OptionRowAnalytics {
   strike: number;
   call: { ltp: number | null; oi: number | null; iv: number | null } & Partial<Greeks>;
@@ -948,6 +1021,10 @@ export default {
       try {
         if (url.pathname === "/api/market-status") {
           return json(getMarketStatus());
+        }
+
+        if (url.pathname === "/api/global-markets") {
+          return json(await computeGlobalMarkets());
         }
 
         if (url.pathname === "/api/prices") {
