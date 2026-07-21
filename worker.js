@@ -540,18 +540,33 @@ async function computeScan(token, symbol, tf) {
   return { timeframe: tfMinutes, barsUsed: candles.length, ...signal };
 }
 
-function renderTradeBox(t, dirColor) {
+function confLevel(confidence) {
+  if (!confidence) return "medium";
+  if (confidence.startsWith("High")) return "high";
+  if (confidence.startsWith("Low")) return "low";
+  return "medium";
+}
+
+// The options BUY/SELL call is the headline — it's what a trader actually
+// acts on. The underlying chart pattern (entry/stop/target on the future)
+// is demoted to a supporting "technical basis" section beneath it.
+function renderOptionSignal(t) {
   if (!t) return "";
   const tradeIsLive = t.action !== "NO TRADE";
+  const kind = !tradeIsLive ? "none" : t.optSide === "CE" ? "buy" : "sell";
+  const level = confLevel(t.confidence);
   return `
-        <div class="tradeBox" style="border-left-color:${tradeIsLive ? dirColor : "var(--border)"}">
-          <p class="tradeAction" style="color:${tradeIsLive ? dirColor : "var(--muted)"}">${t.action}</p>
+        <div class="optionCard ${kind}">
+          <div class="optionHead">
+            <p class="optionAction ${kind}">${tradeIsLive ? "🎯 " + t.action : "⏸ NO TRADE"}</p>
+            ${tradeIsLive ? `<span class="confChip ${level}">${t.confidence}</span>` : ``}
+          </div>
           ${tradeIsLive ? `
           <div class="tradeGrid">
             <div class="gcell"><span>Premium Entry</span><b>₹${t.premiumEntry}</b></div>
             <div class="gcell"><span>Premium Target</span><b>₹${t.premiumTarget}</b></div>
             <div class="gcell"><span>Premium SL</span><b>₹${t.premiumStop}</b></div>
-            <div class="gcell"><span>Confidence</span><b class="conf">${t.confidence}</b></div>
+            <div class="gcell"><span>PCR</span><b>${t.pcr ?? "-"}</b></div>
           </div>` : ``}
           <p class="tradeNote">${t.note}</p>
         </div>`;
@@ -559,23 +574,26 @@ function renderTradeBox(t, dirColor) {
 
 function renderSignalBody(q, s) {
   const dirColor = s.direction === "bullish" ? "var(--green)" : s.direction === "bearish" ? "var(--red)" : "var(--muted)";
-  const dirLabel = s.direction === "bullish" ? "BUY / BULLISH" : s.direction === "bearish" ? "SELL / BEARISH" : "NEUTRAL / WAIT";
+  const dirLabel = s.direction === "bullish" ? "BULLISH" : s.direction === "bearish" ? "BEARISH" : "NEUTRAL";
   const relBadge = s.reliability
     ? `<span class="relbadge">~${s.reliability}% typical reliability*</span>`
     : `<span class="relbadge muted">n/a</span>`;
   return `
-        <div class="patternRow">
-          <span class="patternName">${s.pattern}</span>
-          <span class="dirBadge" style="background:${dirColor}">${dirLabel}</span>
-        </div>
-        <div class="grid">
-          <div class="gcell"><span>Entry</span><b>${s.entry}</b></div>
-          <div class="gcell"><span>Stop Loss</span><b>${s.stop}</b></div>
-          <div class="gcell"><span>Target</span><b>${s.target}</b></div>
-          <div class="gcell"><span>Price</span><b>₹${s.currentPrice ?? "-"}</b></div>
-        </div>
-        <p class="note">${s.note}${s.reliability ? ` ${relBadge}` : ""}</p>
-        ${renderTradeBox(s.trade, dirColor)}`;
+        ${renderOptionSignal(s.trade)}
+        <div class="techBasis">
+          <div class="techTitle">📊 TECHNICAL BASIS (nearest-month future)</div>
+          <div class="patternRow">
+            <span class="patternName">${s.pattern}</span>
+            <span class="dirBadge" style="background:${dirColor}">${dirLabel}</span>
+          </div>
+          <div class="grid">
+            <div class="gcell"><span>Entry</span><b>${s.entry}</b></div>
+            <div class="gcell"><span>Stop Loss</span><b>${s.stop}</b></div>
+            <div class="gcell"><span>Target</span><b>${s.target}</b></div>
+            <div class="gcell"><span>Future Price</span><b>₹${s.currentPrice ?? "-"}</b></div>
+          </div>
+          <p class="note">${s.note}${s.reliability ? ` ${relBadge}` : ""}</p>
+        </div>`;
 }
 
 function renderSignalsHTML(signals) {
@@ -599,16 +617,15 @@ function renderSignalsHTML(signals) {
       return;
     }
 
-    const dirColor = s.direction === "bullish" ? "var(--green)" : s.direction === "bearish" ? "var(--red)" : "var(--muted)";
-    const dirLabel = s.direction === "bullish" ? "BUY / BULLISH" : s.direction === "bearish" ? "SELL / BEARISH" : "NEUTRAL / WAIT";
     const t = s.trade;
     const tradeIsLive = t && t.action !== "NO TRADE";
+    const setupKind = !tradeIsLive ? "none" : t.optSide === "CE" ? "buy" : "sell";
 
     setupsRow += `
-      <div class="setupMini">
+      <div class="setupMini ${setupKind}">
         <span class="setupSym">${q}</span>
-        <span class="setupAction" style="color:${tradeIsLive ? dirColor : "var(--muted)"}">${tradeIsLive ? t.action : "NO TRADE"}</span>
-        <span class="setupPrice">₹${s.currentPrice}</span>
+        <span class="setupAction ${setupKind}">${tradeIsLive ? `${t.action} @ ₹${t.premiumEntry}` : "NO TRADE"}</span>
+        <span class="setupPrice">Future ₹${s.currentPrice}</span>
       </div>`;
 
     if (tradeIsLive) {
@@ -628,10 +645,10 @@ function renderSignalsHTML(signals) {
       <div class="scanner">
         <div class="scannerTitle">⏱ MULTI-TIMEFRAME SCAN</div>
         <div class="tfRow" id="tfrow-${q}">
-          <button class="tfBtn active" onclick="scanTF('${q}','1D',this)">1D</button>
-          <button class="tfBtn" onclick="scanTF('${q}','30',this)">30m</button>
-          <button class="tfBtn" onclick="scanTF('${q}','15',this)">15m</button>
-          <button class="tfBtn" onclick="scanTF('${q}','5',this)">5m</button>
+          <button class="tfBtn active" style="background:${theme.grad};border-color:transparent" onclick="scanTF('${q}','1D',this,'${theme.grad}')">1D</button>
+          <button class="tfBtn" onclick="scanTF('${q}','30',this,'${theme.grad}')">30m</button>
+          <button class="tfBtn" onclick="scanTF('${q}','15',this,'${theme.grad}')">15m</button>
+          <button class="tfBtn" onclick="scanTF('${q}','5',this,'${theme.grad}')">5m</button>
         </div>
         <div class="scanResult" id="scan-${q}"><p class="scanHint">Showing the 1D signal above. Tap a timeframe to scan intraday (needs the market open for fresh candles).</p></div>
       </div>
@@ -673,9 +690,14 @@ function renderSignalsHTML(signals) {
   .setupsTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px; }
   .setupsRow { display:flex; gap:10px; flex-wrap:wrap; }
   .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
+  .setupMini.buy { background:linear-gradient(135deg,rgba(22,199,132,0.20),rgba(22,199,132,0.05)); border-color:rgba(22,199,132,0.4); }
+  .setupMini.sell { background:linear-gradient(135deg,rgba(255,71,87,0.20),rgba(255,71,87,0.05)); border-color:rgba(255,71,87,0.4); }
+  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.14),rgba(255,176,32,0.03)); border-color:rgba(255,176,32,0.3); }
   .setupSym { font-size:11px; color:var(--muted); }
   .setupAction { font-size:15px; font-weight:bold; }
-  .setupAction.muted { color:var(--muted); }
+  .setupAction.buy { color:var(--green); }
+  .setupAction.sell { color:var(--red); }
+  .setupAction.none { color:var(--amber); }
   .setupPrice { font-size:12px; color:var(--muted); }
   .card { border-radius:16px; overflow:hidden; margin-bottom:18px; border:1px solid var(--border); }
   .hero { padding:18px 20px; color:#fff; }
@@ -699,6 +721,22 @@ function renderSignalsHTML(signals) {
   .tradeGrid .gcell { background:var(--bg); }
   .tradeGrid .conf { font-size:13px; }
   .tradeNote { font-size:12px; color:var(--muted); line-height:1.5; margin:0; }
+  .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; }
+  .optionCard.buy { background:linear-gradient(135deg,rgba(22,199,132,0.22),rgba(22,199,132,0.04)); border:1px solid rgba(22,199,132,0.5); }
+  .optionCard.sell { background:linear-gradient(135deg,rgba(255,71,87,0.22),rgba(255,71,87,0.04)); border:1px solid rgba(255,71,87,0.5); }
+  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.16),rgba(255,176,32,0.03)); border:1px solid rgba(255,176,32,0.4); }
+  .optionCard .tradeGrid .gcell { background:rgba(0,0,0,0.25); }
+  .optionHead { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .optionAction { font-size:22px; font-weight:900; margin:0; }
+  .optionAction.buy { color:var(--green); }
+  .optionAction.sell { color:var(--red); }
+  .optionAction.none { color:var(--amber); }
+  .confChip { font-size:11px; font-weight:bold; padding:5px 12px; border-radius:20px; white-space:nowrap; }
+  .confChip.high { background:var(--green); color:#04241a; }
+  .confChip.medium { background:var(--amber); color:#2b1b00; }
+  .confChip.low { background:var(--red); color:#2b0000; }
+  .techBasis { padding:12px 14px; background:var(--card2); border:1px solid var(--border); border-radius:10px; }
+  .techTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .err { color:var(--red); padding:14px; }
   .scanner { background:var(--card2); border-top:1px solid var(--border); padding:14px 18px; }
   .scannerTitle, .calcTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
@@ -767,24 +805,39 @@ function renderSignalsHTML(signals) {
       const qty = Math.floor(riskAmount / perUnitRisk);
       out.innerHTML = 'Risk amount: ₹' + riskAmount.toFixed(0) + ' → quantity ≈ <b>' + qty + '</b> units of premium risk (verify the contract\\'s real lot size before ordering).';
     }
+    function confLevelJS(confidence) {
+      if (!confidence) return 'medium';
+      if (confidence.indexOf('High') === 0) return 'high';
+      if (confidence.indexOf('Low') === 0) return 'low';
+      return 'medium';
+    }
     function renderScanResult(d) {
       if (d.error) return '<p class="err">' + d.error + (d.trading_symbol ? ' (' + d.trading_symbol + ')' : '') + '</p>';
       const dirColor = d.direction === 'bullish' ? 'var(--green)' : d.direction === 'bearish' ? 'var(--red)' : 'var(--muted)';
-      const dirLabel = d.direction === 'bullish' ? 'BUY / BULLISH' : d.direction === 'bearish' ? 'SELL / BEARISH' : 'NEUTRAL / WAIT';
-      let html = '<div class="patternRow"><span class="patternName">' + d.pattern + '</span><span class="dirBadge" style="background:' + dirColor + '">' + dirLabel + '</span></div>';
-      html += '<div class="grid"><div class="gcell"><span>Entry</span><b>' + d.entry + '</b></div><div class="gcell"><span>Stop</span><b>' + d.stop + '</b></div><div class="gcell"><span>Target</span><b>' + d.target + '</b></div><div class="gcell"><span>Price</span><b>₹' + d.currentPrice + '</b></div></div>';
-      if (d.trade && d.trade.action !== 'NO TRADE') {
-        html += '<div class="tradeBox" style="border-left-color:' + dirColor + '"><p class="tradeAction" style="color:' + dirColor + '">' + d.trade.action + '</p>';
-        html += '<div class="tradeGrid"><div class="gcell"><span>Premium Entry</span><b>₹' + d.trade.premiumEntry + '</b></div><div class="gcell"><span>Premium Target</span><b>₹' + d.trade.premiumTarget + '</b></div><div class="gcell"><span>Premium SL</span><b>₹' + d.trade.premiumStop + '</b></div><div class="gcell"><span>Confidence</span><b>' + d.trade.confidence + '</b></div></div>';
-        html += '<p class="tradeNote">' + d.trade.note + '</p></div>';
-      } else if (d.trade) {
-        html += '<p class="tradeNote">' + d.trade.note + '</p>';
+      const dirLabel = d.direction === 'bullish' ? 'BULLISH' : d.direction === 'bearish' ? 'BEARISH' : 'NEUTRAL';
+      let html = '';
+      const t = d.trade;
+      const tradeIsLive = t && t.action !== 'NO TRADE';
+      const kind = !tradeIsLive ? 'none' : t.optSide === 'CE' ? 'buy' : 'sell';
+      if (t) {
+        html += '<div class="optionCard ' + kind + '"><div class="optionHead"><p class="optionAction ' + kind + '">' + (tradeIsLive ? '🎯 ' + t.action : '⏸ NO TRADE') + '</p>';
+        if (tradeIsLive) html += '<span class="confChip ' + confLevelJS(t.confidence) + '">' + t.confidence + '</span>';
+        html += '</div>';
+        if (tradeIsLive) {
+          html += '<div class="tradeGrid"><div class="gcell"><span>Premium Entry</span><b>₹' + t.premiumEntry + '</b></div><div class="gcell"><span>Premium Target</span><b>₹' + t.premiumTarget + '</b></div><div class="gcell"><span>Premium SL</span><b>₹' + t.premiumStop + '</b></div><div class="gcell"><span>PCR</span><b>' + (t.pcr ?? '-') + '</b></div></div>';
+        }
+        html += '<p class="tradeNote">' + t.note + '</p></div>';
       }
+      html += '<div class="techBasis"><div class="techTitle">📊 TECHNICAL BASIS (' + d.timeframe + ')</div>';
+      html += '<div class="patternRow"><span class="patternName">' + d.pattern + '</span><span class="dirBadge" style="background:' + dirColor + '">' + dirLabel + '</span></div>';
+      html += '<div class="grid"><div class="gcell"><span>Entry</span><b>' + d.entry + '</b></div><div class="gcell"><span>Stop</span><b>' + d.stop + '</b></div><div class="gcell"><span>Target</span><b>' + d.target + '</b></div><div class="gcell"><span>Price</span><b>₹' + d.currentPrice + '</b></div></div>';
+      html += '<p class="note">' + d.note + '</p></div>';
       return html;
     }
-    async function scanTF(q, tf, btnEl) {
-      document.querySelectorAll('#tfrow-' + q + ' .tfBtn').forEach(b => b.classList.remove('active'));
+    async function scanTF(q, tf, btnEl, themeGrad) {
+      document.querySelectorAll('#tfrow-' + q + ' .tfBtn').forEach(b => { b.classList.remove('active'); b.style.background = ''; b.style.borderColor = ''; });
       btnEl.classList.add('active');
+      if (themeGrad) { btnEl.style.background = themeGrad; btnEl.style.borderColor = 'transparent'; }
       const resultEl = document.getElementById('scan-' + q);
       resultEl.innerHTML = '<p class="scanLoading">Scanning ' + tf + '...</p>';
       try {
