@@ -698,14 +698,17 @@ function renderSignalsHTML(signals) {
   .setupsTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px; }
   .setupsRow { display:flex; gap:10px; flex-wrap:wrap; }
   .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
-  .setupMini.buy { background:linear-gradient(135deg,rgba(22,199,132,0.32),rgba(22,199,132,0.08)); border:2px solid #16c784; }
-  .setupMini.sell { background:linear-gradient(135deg,rgba(255,71,87,0.32),rgba(255,71,87,0.08)); border:2px solid #ff4757; }
-  .setupMini.none { background:linear-gradient(135deg,rgba(255,176,32,0.32),rgba(255,176,32,0.08)); border:2px solid #ffb020; }
+  .setupMini.buy { background:linear-gradient(135deg,#d1fae5,#a7f3d0); border:none; }
+  .setupMini.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); border:none; }
+  .setupMini.none { background:linear-gradient(135deg,#fef3c7,#fde68a); border:none; }
+  .setupMini.buy .setupSym, .setupMini.buy .setupPrice { color:#065f46; }
+  .setupMini.sell .setupSym, .setupMini.sell .setupPrice { color:#991b1b; }
+  .setupMini.none .setupSym, .setupMini.none .setupPrice { color:#92400e; }
   .setupSym { font-size:11px; color:var(--muted); }
   .setupAction { font-size:15px; font-weight:bold; }
-  .setupAction.buy { color:var(--green); }
-  .setupAction.sell { color:var(--red); }
-  .setupAction.none { color:var(--amber); }
+  .setupAction.buy { color:#047857; }
+  .setupAction.sell { color:#b91c1c; }
+  .setupAction.none { color:#92400e; }
   .setupPrice { font-size:12px; color:var(--muted); }
   .card { border-radius:16px; overflow:hidden; margin-bottom:18px; border:1px solid var(--border); }
   .hero { padding:18px 20px; color:#fff; }
@@ -730,19 +733,22 @@ function renderSignalsHTML(signals) {
   .tradeGrid .conf { font-size:13px; }
   .tradeNote { font-size:12px; color:var(--muted); line-height:1.5; margin:0; }
   .optionCard { border-radius:14px; padding:16px 18px; margin-bottom:14px; }
-  .optionCard.buy { background:linear-gradient(135deg,rgba(22,199,132,0.35),rgba(22,199,132,0.08)); border:2px solid #16c784; }
-  .optionCard.sell { background:linear-gradient(135deg,rgba(255,71,87,0.35),rgba(255,71,87,0.08)); border:2px solid #ff4757; }
-  .optionCard.none { background:linear-gradient(135deg,rgba(255,176,32,0.35),rgba(255,176,32,0.08)); border:2px solid #ffb020; }
-  .optionCard .tradeGrid .gcell { background:rgba(0,0,0,0.25); }
+  .optionCard.buy { background:linear-gradient(135deg,#d1fae5,#a7f3d0); }
+  .optionCard.sell { background:linear-gradient(135deg,#fee2e2,#fecaca); }
+  .optionCard.none { background:linear-gradient(135deg,#fef3c7,#fde68a); }
+  .optionCard .tradeGrid .gcell { background:rgba(255,255,255,0.6); border:none; }
+  .optionCard .tradeGrid .gcell span { color:rgba(0,0,0,0.55); }
+  .optionCard .tradeGrid .gcell b { color:#111; }
+  .optionCard .tradeNote { color:rgba(0,0,0,0.65); }
   .optionHead { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
   .optionAction { font-size:22px; font-weight:900; margin:0; }
-  .optionAction.buy { color:var(--green); }
-  .optionAction.sell { color:var(--red); }
-  .optionAction.none { color:var(--amber); }
+  .optionAction.buy { color:#047857; }
+  .optionAction.sell { color:#b91c1c; }
+  .optionAction.none { color:#92400e; }
   .confChip { font-size:11px; font-weight:bold; padding:5px 12px; border-radius:20px; white-space:nowrap; }
-  .confChip.high { background:var(--green); color:#04241a; }
-  .confChip.medium { background:var(--amber); color:#2b1b00; }
-  .confChip.low { background:var(--red); color:#2b0000; }
+  .confChip.high { background:#047857; color:#fff; }
+  .confChip.medium { background:#92400e; color:#fff; }
+  .confChip.low { background:#b91c1c; color:#fff; }
   .techBasis { padding:12px 14px; background:linear-gradient(135deg,rgba(59,130,246,0.30),rgba(59,130,246,0.08)); border:1px solid rgba(59,130,246,0.6); border-left:5px solid #3b82f6; border-radius:10px; }
   .techTitle { font-size:11px; color:#7ab3ff; letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
   .err { color:var(--red); padding:14px; }
