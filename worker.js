@@ -345,6 +345,50 @@ function analyzeChain(chain) {
   };
 }
 
+// Combines the chart-pattern direction (from the future's price action) with
+// the option chain's PCR/OI bias into one actionable ATM option buy call.
+// Premium target/stop are a rough delta≈0.5 (ATM) projection off the pattern's
+// underlying target/stop — not a pricing model. Theta decay & IV moves mean
+// actual premiums can diverge; always track the live quote.
+function buildTradeSignal(pattern, spot, chainAnalysis, atmRow) {
+  if (pattern.direction === "neutral" || typeof pattern.entry !== "number" ||
+      typeof pattern.stop !== "number" || typeof pattern.target !== "number") {
+    return { action: "NO TRADE", note: "No clear directional pattern yet — wait for a breakout before buying an option." };
+  }
+  if (!atmRow) {
+    return { action: "NO TRADE", note: "Option chain strikes unavailable near spot." };
+  }
+
+  const isBullish = pattern.direction === "bullish";
+  const optSide = isBullish ? "CE" : "PE";
+  const optData = isBullish ? atmRow.call_options?.market_data : atmRow.put_options?.market_data;
+  const premium = optData?.ltp;
+  if (!premium || premium <= 0) {
+    return { action: "NO TRADE", note: "No live premium quote for the ATM strike right now." };
+  }
+
+  const favMove = isBullish ? (pattern.target - spot) : (spot - pattern.target);
+  const riskMove = isBullish ? (spot - pattern.stop) : (pattern.stop - spot);
+  const DELTA = 0.5;
+  const premiumTarget = r2(premium + DELTA * favMove);
+  const premiumStop = r2(Math.max(premium * 0.35, premium - DELTA * riskMove));
+
+  let confidence = "Medium (pattern only, OI neutral)";
+  if (chainAnalysis.bias === pattern.direction) confidence = "High (pattern + OI agree)";
+  else if (chainAnalysis.bias !== "neutral" && chainAnalysis.bias !== pattern.direction) confidence = "Low (OI data conflicts with pattern)";
+
+  return {
+    action: `BUY ${atmRow.strike_price} ${optSide}`,
+    optSide,
+    strike: atmRow.strike_price,
+    premiumEntry: premium,
+    premiumTarget,
+    premiumStop,
+    confidence,
+    note: `${isBullish ? "Call" : "Put"} bought near ATM strike ${atmRow.strike_price}, premium ~₹${premium}. Premium target/SL are a rough delta-based estimate off the ${pattern.pattern} target/stop — track the live premium, don't rely on this alone.`
+  };
+}
+
 async function computeOptionsSignals(token) {
   const out = {};
   for (const q of ["CRUDEOIL", "NATURALGAS"]) {
@@ -392,12 +436,27 @@ async function computeSignals(token) {
         continue;
       }
       const analysis = analyzeCommodity(candles);
+      const spot = candles[candles.length - 1].close;
+
+      let trade = { action: "NO TRADE", note: "Option chain unavailable." };
+      const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
+      if (!chainRes.error) {
+        const chainAnalysis = analyzeChain(chainRes.chain);
+        const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
+        const atmRow = chainRes.chain.find(r => r.strike_price === atmStrike);
+        trade = buildTradeSignal(analysis, spot, chainAnalysis, atmRow);
+        trade.pcr = chainAnalysis.pcr;
+      } else {
+        trade = { action: "NO TRADE", note: chainRes.error };
+      }
+
       out[q] = {
         trading_symbol: fut.trading_symbol,
         expiry: fut.expiry,
-        currentPrice: candles[candles.length - 1].close,
+        currentPrice: spot,
         lastDate: candles[candles.length - 1].date,
         ...analysis,
+        trade,
       };
     } catch (e) {
       out[q] = { error: e.message };
@@ -429,6 +488,21 @@ function renderSignalsHTML(signals) {
       ? `<span class="relbadge">~${s.reliability}% typical reliability*</span>`
       : `<span class="relbadge muted">n/a</span>`;
 
+    const t = s.trade;
+    const tradeIsLive = t && t.action !== "NO TRADE";
+    const tradeBox = t ? `
+        <div class="tradeBox" style="border-left-color:${tradeIsLive ? dirColor : '#ccc'}">
+          <p class="tradeAction" style="color:${tradeIsLive ? dirColor : '#888'}">${t.action}</p>
+          ${tradeIsLive ? `
+          <div class="tradeGrid">
+            <div class="gcell"><span>Premium Entry</span><b>₹${t.premiumEntry}</b></div>
+            <div class="gcell"><span>Premium Target</span><b>₹${t.premiumTarget}</b></div>
+            <div class="gcell"><span>Premium SL</span><b>₹${t.premiumStop}</b></div>
+            <div class="gcell"><span>Confidence</span><b class="conf">${t.confidence}</b></div>
+          </div>` : ``}
+          <p class="tradeNote">${t.note}</p>
+        </div>` : ``;
+
     cards += `
     <div class="card">
       <div class="hero" style="background:${theme.grad}">
@@ -448,6 +522,7 @@ function renderSignalsHTML(signals) {
           <div class="gcell"><span>Reliability</span><b>${relBadge}</b></div>
         </div>
         <p class="note">${s.note}</p>
+        ${tradeBox}
       </div>
     </div>`;
   });
@@ -480,6 +555,12 @@ function renderSignalsHTML(signals) {
   .relbadge { font-size:14px; color:#2575fc; }
   .relbadge.muted { color:#999; }
   .note { font-size:13px; color:#444; line-height:1.5; margin:0; }
+  .tradeBox { margin-top:14px; padding:12px 14px; background:#fff; border-radius:10px; border-left:4px solid #ccc; }
+  .tradeAction { margin:0 0 8px 0; font-size:16px; font-weight:bold; }
+  .tradeGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
+  .tradeGrid .gcell { background:#f7f7fa; padding:8px 10px; }
+  .tradeGrid .conf { font-size:13px; }
+  .tradeNote { font-size:12px; color:#666; line-height:1.5; margin:0; }
   .err { color:#e0263f; padding:14px; }
   .disclaimer { font-size:11px; color:#999; line-height:1.6; margin-top:14px; padding:14px; background:#fff; border-radius:12px; }
 </style>
@@ -495,7 +576,13 @@ function renderSignalsHTML(signals) {
     numbers only — not a backtest of MCX Crude Oil / Natural Gas specifically, and not
     a guarantee of future results. Patterns are detected algorithmically from daily
     candles of the nearest-month future using swing-pivot rules — always confirm on the
-    live chart and manage risk before acting. This is not financial advice.
+    live chart and manage risk before acting.<br><br>
+    Options trade calls (BUY CE/PE) combine that pattern direction with the nearest-expiry
+    ATM strike's live premium and the chain's Put/Call OI bias for a confidence read — they
+    are not a priced option model. Premium target/SL are a rough delta≈0.5 projection off
+    the pattern's underlying target/stop; actual premiums also move with time decay (theta)
+    and implied volatility, especially close to expiry, so track the live quote and size
+    positions accordingly. This is not financial advice.
   </div>
 </body>
 </html>`;
