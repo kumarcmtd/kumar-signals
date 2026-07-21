@@ -1,8 +1,25 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { LayoutGrid, Globe2, ChevronRight } from "lucide-react";
 
 export function Settings() {
   return (
     <div className="space-y-4">
+      <SettingsGroup title="More pages">
+        <Link to="/prices" className="flex items-center justify-between px-4 py-3">
+          <span className="flex items-center gap-2 text-sm">
+            <LayoutGrid size={16} className="text-[var(--color-muted)]" /> Live Prices (all instruments)
+          </span>
+          <ChevronRight size={16} className="text-[var(--color-muted)]" />
+        </Link>
+        <Link to="/global" className="flex items-center justify-between px-4 py-3">
+          <span className="flex items-center gap-2 text-sm">
+            <Globe2 size={16} className="text-[var(--color-muted)]" /> Global Markets (WTI/Brent/Henry Hub)
+          </span>
+          <ChevronRight size={16} className="text-[var(--color-muted)]" />
+        </Link>
+      </SettingsGroup>
+
       <SettingsGroup title="Appearance">
         <SettingsRow label="Theme" value="Light (premium)" />
       </SettingsGroup>
@@ -15,6 +32,16 @@ export function Settings() {
       <SettingsGroup title="Notifications">
         <SettingsRow label="Push Notifications" value="Not configured" note="Coming soon" />
         <SettingsRow label="Telegram Alerts" value="Planned" note="Future" />
+        <SettingsRow label="WhatsApp Alerts" value="Planned" note="Future" />
+        <SettingsRow label="Voice Alerts" value="Planned" note="Future" />
+      </SettingsGroup>
+
+      <SettingsGroup title="Trading (future)">
+        <SettingsRow label="Broker Order Placement" value="Not connected" note="Future" />
+        <SettingsRow label="Auto Trading" value="Not enabled" note="Future" />
+        <SettingsRow label="Paper Trading Mode" value="Not enabled" note="Future" />
+        <SettingsRow label="Strategy Builder" value="Not available" note="Future" />
+        <SettingsRow label="Backtesting" value="Not available" note="Future" />
       </SettingsGroup>
 
       <SettingsGroup title="About">

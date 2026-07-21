@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2, Download } from "lucide-react";
 import { usePortfolio, useCreateTrade, useUpdateTrade, useDeleteTrade } from "../api/hooks";
 import { CardSkeleton } from "../components/Skeleton";
 import { computePortfolioSummary } from "../utils/portfolioStats";
@@ -7,7 +7,51 @@ import type { InstrumentSymbol, OptionSide, PortfolioTrade } from "../types";
 
 const LOT_SIZE: Record<InstrumentSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250, GOLD: 100, SILVER: 30 };
 
-export function Portfolio() {
+type RangeKey = "today" | "yesterday" | "week" | "month" | "all";
+const RANGES: { key: RangeKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+  { key: "all", label: "All" },
+];
+
+function inRange(dateStr: string, range: RangeKey): boolean {
+  if (range === "all") return true;
+  const d = new Date(dateStr);
+  const now = new Date();
+  if (range === "today") return d.toDateString() === now.toDateString();
+  if (range === "yesterday") {
+    const y = new Date(now);
+    y.setDate(y.getDate() - 1);
+    return d.toDateString() === y.toDateString();
+  }
+  if (range === "week") {
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return d >= weekAgo && d <= now;
+  }
+  // month
+  return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+}
+
+function toCSV(trades: PortfolioTrade[]): string {
+  const headers = ["symbol", "optSide", "strike", "entryPrice", "exitPrice", "quantity", "lotSize", "stopLoss", "target", "entryDate", "exitDate", "status", "pnl", "source", "notes"];
+  const rows = trades.map((t) => headers.map((h) => JSON.stringify((t as any)[h] ?? "")).join(","));
+  return [headers.join(","), ...rows].join("\n");
+}
+
+function downloadCSV(trades: PortfolioTrade[]) {
+  const blob = new Blob([toCSV(trades)], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `kumar-signals-journal-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function Journal() {
   const { data: trades, isLoading, error } = usePortfolio();
   const createTrade = useCreateTrade();
   const updateTrade = useUpdateTrade();
@@ -15,17 +59,63 @@ export function Portfolio() {
   const [showForm, setShowForm] = useState(false);
   const [closingId, setClosingId] = useState<string | null>(null);
   const [exitPrice, setExitPrice] = useState("");
+  const [range, setRange] = useState<RangeKey>("all");
+  const [search, setSearch] = useState("");
 
-  const summary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
-  const openTrades = (trades ?? []).filter((t) => t.status === "OPEN");
-  const closedTrades = (trades ?? []).filter((t) => t.status === "CLOSED");
+  const filtered = useMemo(() => {
+    const all = trades ?? [];
+    return all.filter((t) => {
+      const refDate = t.exitDate ?? t.entryDate;
+      if (!inRange(refDate, range)) return false;
+      if (search && !`${t.symbol} ${t.strike ?? ""} ${t.optSide ?? ""}`.toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [trades, range, search]);
+
+  const summary = useMemo(() => computePortfolioSummary(filtered), [filtered]);
+  const openTrades = filtered.filter((t) => t.status === "OPEN");
+  const closedTrades = filtered.filter((t) => t.status === "CLOSED");
 
   return (
     <div className="space-y-4">
-      <div className="card p-4">
-        <p className="text-sm font-bold">Portfolio</p>
-        <p className="text-xs text-[var(--color-muted)] mt-1">Your own trade ledger — log entries manually or from a Master AI call, close them out, and track real performance.</p>
+      <div className="card p-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold">Journal</p>
+          <p className="text-xs text-[var(--color-muted)] mt-1">
+            Signal history + trade journal — logged automatically from AI Trade calls or added manually. Stored in Cloudflare KV, so it
+            survives across devices.
+          </p>
+        </div>
+        <button
+          onClick={() => downloadCSV(filtered)}
+          disabled={!filtered.length}
+          className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-[var(--color-surface-soft)] disabled:opacity-40"
+        >
+          <Download size={14} /> CSV
+        </button>
       </div>
+
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+        {RANGES.map((r) => (
+          <button
+            key={r.key}
+            onClick={() => setRange(r.key)}
+            className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold ${
+              range === r.key ? "bg-slate-900 text-white" : "bg-[var(--color-surface-soft)] text-[var(--color-muted)]"
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      <input
+        type="text"
+        placeholder="Search by symbol or strike…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 text-sm"
+      />
 
       {isLoading && <CardSkeleton />}
       {error && <div className="card p-4 text-sm text-[var(--color-sell)]">{(error as Error).message}</div>}
@@ -63,7 +153,7 @@ export function Portfolio() {
 
           <section>
             <SectionTitle>Open positions</SectionTitle>
-            {openTrades.length === 0 && <p className="text-xs text-[var(--color-muted)] px-1">No open positions.</p>}
+            {openTrades.length === 0 && <p className="text-xs text-[var(--color-muted)] px-1">No open positions in this range.</p>}
             <div className="space-y-2">
               {openTrades.map((t) => (
                 <div key={t.id} className="card p-3 space-y-2">
@@ -84,7 +174,7 @@ export function Portfolio() {
                   </div>
                   <p className="text-[10px] text-[var(--color-muted)]">
                     Opened {new Date(t.entryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                    {t.source && t.source !== "manual" ? ` · from ${t.source === "master-ai" ? "Master AI" : "Signal"}` : ""}
+                    {t.source && t.source !== "manual" ? ` · from ${t.source === "master-ai" ? "AI Trade" : "Signal"}` : ""}
                   </p>
                   {closingId === t.id ? (
                     <div className="flex gap-2">
@@ -113,10 +203,7 @@ export function Portfolio() {
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={() => setClosingId(t.id)}
-                      className="w-full py-1.5 rounded-lg text-xs font-bold bg-[var(--color-surface-soft)]"
-                    >
+                    <button onClick={() => setClosingId(t.id)} className="w-full py-1.5 rounded-lg text-xs font-bold bg-[var(--color-surface-soft)]">
                       Close position
                     </button>
                   )}
@@ -127,30 +214,10 @@ export function Portfolio() {
 
           <section>
             <SectionTitle>Closed trades</SectionTitle>
-            {closedTrades.length === 0 && <p className="text-xs text-[var(--color-muted)] px-1">No closed trades yet.</p>}
+            {closedTrades.length === 0 && <p className="text-xs text-[var(--color-muted)] px-1">No closed trades in this range.</p>}
             <div className="space-y-2">
               {closedTrades.map((t) => (
-                <div key={t.id} className="card p-3 flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-bold">
-                      {t.symbol}
-                      {t.strike ? ` ${t.strike} ${t.optSide}` : ""}
-                    </p>
-                    <p className="text-[11px] text-[var(--color-muted)]">
-                      ₹{t.entryPrice} → ₹{t.exitPrice} · {t.quantity} lot(s) ·{" "}
-                      {t.exitDate ? new Date(t.exitDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className={`text-sm font-black ${(t.pnl ?? 0) >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
-                      {(t.pnl ?? 0) >= 0 ? "+" : ""}
-                      ₹{(t.pnl ?? 0).toFixed(0)}
-                    </p>
-                    <button onClick={() => deleteTrade.mutate(t.id)} className="text-[var(--color-muted)]">
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
+                <ClosedTradeCard key={t.id} trade={t} onDelete={() => deleteTrade.mutate(t.id)} onNote={(patch) => updateTrade.mutate({ id: t.id, patch })} />
               ))}
             </div>
           </section>
@@ -158,10 +225,62 @@ export function Portfolio() {
       )}
 
       <p className="text-[10px] text-[var(--color-muted)] leading-relaxed px-1">
-        Educational reference only. This ledger is stored in the app's backend (Cloudflare KV) so it survives across devices — it does not
-        place real orders or read your broker account.
+        Educational reference only. This ledger does not place real orders or read your broker account.
       </p>
     </div>
+  );
+}
+
+function ClosedTradeCard({ trade: t, onDelete, onNote }: { trade: PortfolioTrade; onDelete: () => void; onNote: (patch: Partial<PortfolioTrade>) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="card p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <button className="text-left flex-1" onClick={() => setOpen((o) => !o)}>
+          <p className="text-sm font-bold">
+            {t.symbol}
+            {t.strike ? ` ${t.strike} ${t.optSide}` : ""}
+          </p>
+          <p className="text-[11px] text-[var(--color-muted)]">
+            ₹{t.entryPrice} → ₹{t.exitPrice} · {t.quantity} lot(s) ·{" "}
+            {t.exitDate ? new Date(t.exitDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : ""}
+          </p>
+        </button>
+        <div className="flex items-center gap-2">
+          <p className={`text-sm font-black ${(t.pnl ?? 0) >= 0 ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"}`}>
+            {(t.pnl ?? 0) >= 0 ? "+" : ""}
+            ₹{(t.pnl ?? 0).toFixed(0)}
+          </p>
+          <button onClick={onDelete} className="text-[var(--color-muted)]">
+            <Trash2 size={16} />
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div className="space-y-2 pt-1 border-t border-[var(--color-border)]">
+          <JournalField label="Notes" defaultValue={t.notes} onSave={(v) => onNote({ notes: v })} />
+          <JournalField label="Mistakes" defaultValue={t.mistakes} onSave={(v) => onNote({ mistakes: v })} />
+          <JournalField label="Lessons" defaultValue={t.lessons} onSave={(v) => onNote({ lessons: v })} />
+          <JournalField label="Emotion" defaultValue={t.emotion} onSave={(v) => onNote({ emotion: v })} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function JournalField({ label, defaultValue, onSave }: { label: string; defaultValue?: string; onSave: (v: string) => void }) {
+  return (
+    <label className="block text-xs">
+      <span className="text-[var(--color-muted)]">{label}</span>
+      <textarea
+        defaultValue={defaultValue ?? ""}
+        onBlur={(e) => {
+          if (e.target.value !== (defaultValue ?? "")) onSave(e.target.value);
+        }}
+        rows={2}
+        className="mt-1 w-full rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-xs resize-none"
+      />
+    </label>
   );
 }
 

@@ -8,7 +8,7 @@ import { Options } from "./pages/Options";
 import { Risk } from "./pages/Risk";
 import { Global } from "./pages/Global";
 import { MasterAI } from "./pages/MasterAI";
-import { Portfolio } from "./pages/Portfolio";
+import { Journal } from "./pages/Journal";
 import { Settings } from "./pages/Settings";
 
 function App() {
@@ -23,7 +23,7 @@ function App() {
           <Route path="/risk" element={<Risk />} />
           <Route path="/global" element={<Global />} />
           <Route path="/master-ai" element={<MasterAI />} />
-          <Route path="/portfolio" element={<Portfolio />} />
+          <Route path="/journal" element={<Journal />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </ErrorBoundary>

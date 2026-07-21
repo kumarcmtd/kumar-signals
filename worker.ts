@@ -935,10 +935,19 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
   return results;
 }
 
+interface OptionLegAnalytics {
+  ltp: number | null;
+  oi: number | null;
+  iv: number | null;
+  volume: number | null;
+  change: number | null;
+  changePercent: number | null;
+}
+
 interface OptionRowAnalytics {
   strike: number;
-  call: { ltp: number | null; oi: number | null; iv: number | null } & Partial<Greeks>;
-  put: { ltp: number | null; oi: number | null; iv: number | null } & Partial<Greeks>;
+  call: OptionLegAnalytics & Partial<Greeks>;
+  put: OptionLegAnalytics & Partial<Greeks>;
 }
 
 interface OptionsAnalytics {
@@ -978,10 +987,28 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
     const putIV = putLtp ? impliedVolatility(putLtp, refSpot, r.strike_price, T, RISK_FREE_RATE, false) : null;
     const callGreeks = callIV ? black76Greeks(refSpot, r.strike_price, T, RISK_FREE_RATE, callIV / 100, true) : null;
     const putGreeks = putIV ? black76Greeks(refSpot, r.strike_price, T, RISK_FREE_RATE, putIV / 100, false) : null;
+    const callClose = r.call_options?.market_data?.close_price || null;
+    const putClose = r.put_options?.market_data?.close_price || null;
     return {
       strike: r.strike_price,
-      call: { ltp: callLtp, oi: r.call_options?.market_data?.oi || null, iv: callIV, ...(callGreeks ?? {}) },
-      put: { ltp: putLtp, oi: r.put_options?.market_data?.oi || null, iv: putIV, ...(putGreeks ?? {}) },
+      call: {
+        ltp: callLtp,
+        oi: r.call_options?.market_data?.oi || null,
+        iv: callIV,
+        volume: r.call_options?.market_data?.volume ?? null,
+        change: callLtp && callClose ? r2(callLtp - callClose) : null,
+        changePercent: callLtp && callClose ? r2(((callLtp - callClose) / callClose) * 100) : null,
+        ...(callGreeks ?? {}),
+      },
+      put: {
+        ltp: putLtp,
+        oi: r.put_options?.market_data?.oi || null,
+        iv: putIV,
+        volume: r.put_options?.market_data?.volume ?? null,
+        change: putLtp && putClose ? r2(putLtp - putClose) : null,
+        changePercent: putLtp && putClose ? r2(((putLtp - putClose) / putClose) * 100) : null,
+        ...(putGreeks ?? {}),
+      },
     };
   });
 
@@ -1016,6 +1043,9 @@ interface PortfolioTrade {
   status: "OPEN" | "CLOSED";
   pnl?: number;
   notes?: string;
+  mistakes?: string;
+  lessons?: string;
+  emotion?: string;
   source?: "manual" | "master-ai" | "signal";
 }
 
@@ -1060,6 +1090,9 @@ async function createPortfolioTrade(env: Env, body: Partial<PortfolioTrade>): Pr
     entryDate: body.entryDate ?? new Date().toISOString(),
     status: "OPEN",
     notes: body.notes,
+    mistakes: body.mistakes,
+    lessons: body.lessons,
+    emotion: body.emotion,
     source: body.source ?? "manual",
   };
 

@@ -77,6 +77,9 @@ export interface OptionLeg extends Greeks {
   ltp: number | null;
   oi: number | null;
   iv: number | null;
+  volume: number | null;
+  change: number | null;
+  changePercent: number | null;
 }
 
 export interface OptionRowAnalytics {
@@ -133,6 +136,9 @@ export interface PortfolioTrade {
   status: "OPEN" | "CLOSED";
   pnl?: number;
   notes?: string;
+  mistakes?: string;
+  lessons?: string;
+  emotion?: string;
   source?: "manual" | "master-ai" | "signal";
 }
 

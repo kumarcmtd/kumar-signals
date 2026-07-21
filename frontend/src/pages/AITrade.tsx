@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Inbox, CheckCircle2, Wallet, History, Trophy, NotebookText } from "lucide-react";
-import { useCandles, useOptionsAnalytics, useSignal, usePortfolio, useCreateTrade, useUpdateTrade } from "../api/hooks";
+import { Inbox, CheckCircle2, Wallet, History, Trophy, NotebookText, Radio, Timer } from "lucide-react";
+import { useCandles, useOptionsAnalytics, useSignal, usePortfolio, useCreateTrade, useUpdateTrade, useMarketStatus } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { computeMasterAI } from "../utils/masterEngine";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { ConfidenceRing } from "../components/ConfidenceRing";
 import { CardSkeleton } from "../components/Skeleton";
 import type { InstrumentSymbol, PortfolioTrade } from "../types";
+
+const SIGNAL_VALIDITY_MS = 20 * 60 * 1000; // how long a generated call is treated as fresh
+
+function fmtCountdown(ms: number): string {
+  if (ms <= 0) return "Expired";
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}m ${s.toString().padStart(2, "0")}s`;
+}
+
+function riskLevel(riskScore: number): { label: string; color: string } {
+  if (riskScore <= 30) return { label: "Low", color: "text-[var(--color-buy)]" };
+  if (riskScore <= 60) return { label: "Medium", color: "text-amber-600" };
+  return { label: "High", color: "text-[var(--color-sell)]" };
+}
 
 const LOT_SIZE: Record<InstrumentSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250, GOLD: 100, SILVER: 30 };
 const DISPLAY_NAME: Record<InstrumentSymbol, string> = { CRUDEOIL: "CRUDE OIL", NATURALGAS: "NATURAL GAS", GOLD: "GOLD", SILVER: "SILVER" };
@@ -37,15 +53,22 @@ export function AITrade() {
   const [symbol, setSymbol] = useState<InstrumentSymbol>("CRUDEOIL");
   const [tab, setTab] = useState<TabKey>("open");
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const { risk } = useAppStore();
   const createTrade = useCreateTrade();
   const [logged, setLogged] = useState(false);
 
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const { data: market } = useMarketStatus();
   const c1D = useCandles(symbol, "1D");
   const c30 = useCandles(symbol, "30");
   const c15 = useCandles(symbol, "15");
   const c5 = useCandles(symbol, "5");
-  const { data: options, error: optionsError } = useOptionsAnalytics(symbol);
+  const { data: options, error: optionsError, dataUpdatedAt: optionsUpdatedAt } = useOptionsAnalytics(symbol);
   const { data: signal, error: signalError } = useSignal(symbol);
   const { data: trades } = usePortfolio();
 
@@ -95,6 +118,20 @@ export function AITrade() {
 
   const directionLabel = actionable ? (result!.bias === "bullish" ? "BUY CE" : "BUY PE") : "WAIT / NO TRADE";
 
+  const validUntil = generatedAt ? generatedAt.getTime() + SIGNAL_VALIDITY_MS : null;
+  const remainingMs = validUntil !== null ? validUntil - now : null;
+  const signalAgeSec = generatedAt ? Math.max(0, Math.floor((now - generatedAt.getTime()) / 1000)) : null;
+  const optionsLatencySec = optionsUpdatedAt ? Math.max(0, Math.floor((now - optionsUpdatedAt) / 1000)) : null;
+
+  const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
+
+  const optionRow = actionable ? options?.rows.find((r) => r.strike === result!.strike) : undefined;
+  const optionLeg = optionRow ? (result!.optSide === "CE" ? optionRow.call : optionRow.put) : undefined;
+
+  const expectedProfit = actionable && quantity !== null ? Number(((result!.target1! - result!.entry!) * quantity * lotSize).toFixed(0)) : null;
+  const maxLoss = actionable && quantity !== null ? Number(((result!.entry! - result!.stop!) * quantity * lotSize).toFixed(0)) : null;
+  const rl = actionable ? riskLevel(result!.riskScore) : null;
+
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
@@ -109,6 +146,18 @@ export function AITrade() {
             {DISPLAY_NAME[sym]}
           </button>
         ))}
+      </div>
+
+      <div className="flex items-center justify-between rounded-2xl bg-white/70 backdrop-blur border border-[var(--color-border)] px-3.5 py-2 text-[11px]">
+        <span className="flex items-center gap-1.5 font-semibold">
+          <Radio size={13} className={market?.isOpen ? "text-[var(--color-buy)]" : "text-[var(--color-sell)]"} />
+          {market ? (market.isOpen ? "Market Open" : "Market Closed") : "Loading…"}
+          {market?.timeLabel && <span className="text-[var(--color-muted)] font-normal">· {market.timeLabel}</span>}
+        </span>
+        <span className="flex items-center gap-1.5 text-[var(--color-muted)]">
+          <Timer size={13} />
+          {optionsLatencySec !== null ? `data ${optionsLatencySec}s ago` : "—"}
+        </span>
       </div>
 
       {loading && <CardSkeleton />}
@@ -149,7 +198,25 @@ export function AITrade() {
                 </div>
                 <ConfidenceRing score={result.overallScore} size={84} />
               </div>
+
+              {actionable && rl && (
+                <div className="grid grid-cols-3 gap-2 mt-4">
+                  <MetaChip label="Win Probability" value={result.expectedProbability !== null ? `${result.expectedProbability}%` : "—"} valueClass="text-white" />
+                  <MetaChip label="Risk Level" value={rl.label} valueClass="text-white" />
+                  <MetaChip label="Trade Quality" value={result.confidenceLabel} valueClass="text-white" />
+                </div>
+              )}
             </div>
+
+            {actionable && (
+              <div className="flex items-center justify-between px-5 py-2.5 bg-slate-900/95 text-white text-[11px]">
+                <span>Generated {generatedAt ? generatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                <span className="flex items-center gap-1">
+                  <Timer size={12} /> Valid for {remainingMs !== null ? fmtCountdown(remainingMs) : "—"}
+                </span>
+                <span>Signal age {signalAgeSec !== null ? `${signalAgeSec}s` : "—"}</span>
+              </div>
+            )}
 
             {actionable ? (
               <div className="p-5 space-y-4">
@@ -173,16 +240,54 @@ export function AITrade() {
                   <Field label="Capital Required" value={capitalRequired !== null ? `₹${capitalRequired.toFixed(0)}` : "—"} span />
                 </div>
 
-                <p className="text-[11px] text-[var(--color-muted)]">
-                  Signal generated: {generatedAt ? generatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}
-                </p>
+                <div>
+                  <p className="text-[11px] font-bold text-[var(--color-muted)] uppercase mb-2">Risk management</p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Field label="Expected Profit" value={expectedProfit !== null ? `₹${expectedProfit}` : "—"} tone="buy" />
+                    <Field label="Maximum Loss" value={maxLoss !== null ? `₹${maxLoss}` : "—"} tone="sell" />
+                    <Field label="Break Even" value={`₹${recommendedBuyPrice}`} />
+                    <Field label="Lot Size" value={String(lotSize)} />
+                  </div>
+                  {result.trailingStopNote && <p className="text-[11px] text-[var(--color-muted)] mt-2">{result.trailingStopNote}</p>}
+                </div>
+
+                {optionLeg && (
+                  <div>
+                    <p className="text-[11px] font-bold text-[var(--color-muted)] uppercase mb-2">Live option details</p>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <Field label="OI" value={optionLeg.oi !== null ? optionLeg.oi.toLocaleString("en-IN") : "—"} />
+                      <Field label="Volume" value={optionLeg.volume !== null ? optionLeg.volume.toLocaleString("en-IN") : "—"} />
+                      <Field label="IV" value={optionLeg.iv !== null ? `${optionLeg.iv.toFixed(1)}%` : "—"} />
+                      <Field label="Delta" value={optionLeg.delta !== undefined ? optionLeg.delta.toFixed(3) : "—"} />
+                      <Field label="Gamma" value={optionLeg.gamma !== undefined ? optionLeg.gamma.toFixed(4) : "—"} />
+                      <Field label="Theta" value={optionLeg.theta !== undefined ? optionLeg.theta.toFixed(2) : "—"} />
+                      <Field label="Vega" value={optionLeg.vega !== undefined ? optionLeg.vega.toFixed(2) : "—"} />
+                      <Field label="PCR" value={options?.pcr !== null && options?.pcr !== undefined ? options.pcr.toFixed(2) : "—"} />
+                      <Field
+                        label="Premium Chg %"
+                        value={optionLeg.changePercent !== null ? `${optionLeg.changePercent >= 0 ? "+" : ""}${optionLeg.changePercent.toFixed(1)}%` : "—"}
+                        tone={optionLeg.changePercent !== null ? (optionLeg.changePercent >= 0 ? "buy" : "sell") : undefined}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {journalSummary.closedCount > 0 && (
+                  <div className="rounded-2xl bg-[var(--color-surface-soft)] p-3.5">
+                    <p className="text-[11px] font-bold text-[var(--color-muted)] uppercase mb-1.5">Historical accuracy (your journal)</p>
+                    <p className="text-xs">
+                      {journalSummary.winRate?.toFixed(0)}% win rate over {journalSummary.closedCount} closed trade(s) you've logged — not a
+                      guarantee, just your own track record so far.
+                    </p>
+                  </div>
+                )}
 
                 {result.reasons.length > 0 && (
                   <div className="rounded-2xl bg-[var(--color-surface-soft)] p-3.5 space-y-1">
-                    <p className="text-[11px] font-bold text-[var(--color-muted)] uppercase">Reason</p>
+                    <p className="text-[11px] font-bold text-[var(--color-muted)] uppercase">Why AI generated this trade</p>
                     {result.reasons.slice(0, 9).map((r, i) => (
                       <p key={i} className="text-xs text-black/70 leading-relaxed">
-                        • {r}
+                        ✅ {r}
                       </p>
                     ))}
                   </div>
@@ -208,7 +313,7 @@ export function AITrade() {
                   }
                   className="w-full py-3 rounded-2xl text-sm font-bold bg-slate-900 text-white disabled:opacity-50"
                 >
-                  {logged ? "Logged to Portfolio ✓" : createTrade.isPending ? "Logging…" : "Take this trade → Log to Portfolio"}
+                  {logged ? "Logged to Journal ✓" : createTrade.isPending ? "Logging…" : "Take this trade → Log to Journal"}
                 </button>
               </div>
             ) : (
@@ -259,6 +364,15 @@ function formatExpiry(expiry: string): string {
   } catch {
     return expiry;
   }
+}
+
+function MetaChip({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
+  return (
+    <div className="rounded-xl bg-white/15 backdrop-blur px-2.5 py-2 text-center">
+      <p className={`text-sm font-black ${valueClass ?? ""}`}>{value}</p>
+      <p className="text-[9px] text-white/80 mt-0.5">{label}</p>
+    </div>
+  );
 }
 
 function Field({ label, value, tone, span }: { label: string; value: string; tone?: "buy" | "sell"; span?: boolean }) {
