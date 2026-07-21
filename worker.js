@@ -1,6 +1,21 @@
 const UPSTOX_SEARCH_URL = "https://api.upstox.com/v2/instruments/search";
 const UPSTOX_HIST_URL = "https://api.upstox.com/v2/historical-candle";
+const UPSTOX_INTRADAY_URL = "https://api.upstox.com/v2/historical-candle/intraday";
 const UPSTOX_OPTION_CHAIN_URL = "https://api.upstox.com/v2/option/chain";
+
+// MCX commodity trading session, approximated (actual close varies 23:30-23:55
+// IST depending on day/DST-linked international session). Good enough for a
+// LIVE/CLOSED indicator, not a precise exchange calendar (doesn't know holidays).
+function getMarketStatus() {
+  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  const day = ist.getUTCDay();
+  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const isWeekday = day >= 1 && day <= 5;
+  const isOpen = isWeekday && minutes >= 9 * 60 && minutes < 23 * 60 + 30;
+  const hh = String(ist.getUTCHours()).padStart(2, "0");
+  const mm = String(ist.getUTCMinutes()).padStart(2, "0");
+  return { isOpen, timeLabel: `${hh}:${mm} IST` };
+}
 
 const THEME = {
   CRUDEOIL: { grad: "linear-gradient(135deg,#ff8a00,#e52e71)", light: "#fff4e8" },
@@ -298,6 +313,39 @@ async function getHistoricalCandles(token, instrumentKey) {
   return candles;
 }
 
+async function getIntradayCandles(token, instrumentKey) {
+  const url = `${UPSTOX_INTRADAY_URL}/${encodeURIComponent(instrumentKey)}/1minute`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const json = await res.json();
+  if (json.status !== "success" || !json.data || !json.data.candles) return null;
+  const candles = json.data.candles.map(c => ({ date: c[0], open: c[1], high: c[2], low: c[3], close: c[4] }));
+  candles.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return candles;
+}
+
+// Upstox's intraday endpoint only serves 1-minute (or 30-minute) candles, so
+// 5m/15m/30m scans are built by bucketing 1-minute candles ourselves.
+function resampleCandles(candles, minutesPerBucket) {
+  if (!candles || !candles.length) return [];
+  const bucketMs = minutesPerBucket * 60 * 1000;
+  const out = [];
+  let bucketStart = null, cur = null;
+  for (const c of candles) {
+    const t = Math.floor(new Date(c.date).getTime() / bucketMs) * bucketMs;
+    if (t !== bucketStart) {
+      if (cur) out.push(cur);
+      bucketStart = t;
+      cur = { date: new Date(t).toISOString(), open: c.open, high: c.high, low: c.low, close: c.close };
+    } else {
+      cur.high = Math.max(cur.high, c.high);
+      cur.low = Math.min(cur.low, c.low);
+      cur.close = c.close;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 // MCX commodity options are options on the futures contract, so the option
 // chain is queried with the same instrument_key/expiry as the nearest future.
 async function getOptionChain(token, instrumentKey, expiryDate) {
@@ -424,6 +472,32 @@ async function computeOptionsSignals(token) {
   return out;
 }
 
+async function buildSignalForCandles(token, fut, candles) {
+  const analysis = analyzeCommodity(candles);
+  const spot = candles[candles.length - 1].close;
+
+  let trade = { action: "NO TRADE", note: "Option chain unavailable." };
+  const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
+  if (!chainRes.error) {
+    const chainAnalysis = analyzeChain(chainRes.chain);
+    const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
+    const atmRow = chainRes.chain.find(r => r.strike_price === atmStrike);
+    trade = buildTradeSignal(analysis, spot, chainAnalysis, atmRow);
+    trade.pcr = chainAnalysis.pcr;
+  } else {
+    trade = { action: "NO TRADE", note: chainRes.error };
+  }
+
+  return {
+    trading_symbol: fut.trading_symbol,
+    expiry: fut.expiry,
+    currentPrice: spot,
+    lastDate: candles[candles.length - 1].date,
+    ...analysis,
+    trade,
+  };
+}
+
 async function computeSignals(token) {
   const out = {};
   for (const q of ["CRUDEOIL", "NATURALGAS"]) {
@@ -435,29 +509,7 @@ async function computeSignals(token) {
         out[q] = { error: "Not enough historical data yet", trading_symbol: fut.trading_symbol };
         continue;
       }
-      const analysis = analyzeCommodity(candles);
-      const spot = candles[candles.length - 1].close;
-
-      let trade = { action: "NO TRADE", note: "Option chain unavailable." };
-      const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
-      if (!chainRes.error) {
-        const chainAnalysis = analyzeChain(chainRes.chain);
-        const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
-        const atmRow = chainRes.chain.find(r => r.strike_price === atmStrike);
-        trade = buildTradeSignal(analysis, spot, chainAnalysis, atmRow);
-        trade.pcr = chainAnalysis.pcr;
-      } else {
-        trade = { action: "NO TRADE", note: chainRes.error };
-      }
-
-      out[q] = {
-        trading_symbol: fut.trading_symbol,
-        expiry: fut.expiry,
-        currentPrice: spot,
-        lastDate: candles[candles.length - 1].date,
-        ...analysis,
-        trade,
-      };
+      out[q] = await buildSignalForCandles(token, fut, candles);
     } catch (e) {
       out[q] = { error: e.message };
     }
@@ -465,9 +517,73 @@ async function computeSignals(token) {
   return out;
 }
 
+// Powers the multi-timeframe scanner: tf is "1D" (daily candles, same as the
+// main signal) or a minute count (5/15/30) resampled from 1-minute intraday
+// candles, which only exist for the current session.
+async function computeScan(token, symbol, tf) {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: "No instrument found" };
+
+  if (tf === "1D") {
+    const candles = await getHistoricalCandles(token, fut.instrument_key);
+    if (!candles || candles.length < 40) return { error: "Not enough historical data yet", trading_symbol: fut.trading_symbol };
+    const signal = await buildSignalForCandles(token, fut, candles);
+    return { timeframe: "1D", ...signal };
+  }
+
+  const tfMinutes = parseInt(tf, 10);
+  const oneMin = await getIntradayCandles(token, fut.instrument_key);
+  if (!oneMin || oneMin.length < 20) return { error: "Not enough intraday data yet — market may be closed", trading_symbol: fut.trading_symbol };
+  const candles = tfMinutes === 1 ? oneMin : resampleCandles(oneMin, tfMinutes);
+  if (candles.length < 15) return { error: "Not enough bars yet at this timeframe — try again later in the session", trading_symbol: fut.trading_symbol };
+  const signal = await buildSignalForCandles(token, fut, candles);
+  return { timeframe: tfMinutes, barsUsed: candles.length, ...signal };
+}
+
+function renderTradeBox(t, dirColor) {
+  if (!t) return "";
+  const tradeIsLive = t.action !== "NO TRADE";
+  return `
+        <div class="tradeBox" style="border-left-color:${tradeIsLive ? dirColor : "var(--border)"}">
+          <p class="tradeAction" style="color:${tradeIsLive ? dirColor : "var(--muted)"}">${t.action}</p>
+          ${tradeIsLive ? `
+          <div class="tradeGrid">
+            <div class="gcell"><span>Premium Entry</span><b>₹${t.premiumEntry}</b></div>
+            <div class="gcell"><span>Premium Target</span><b>₹${t.premiumTarget}</b></div>
+            <div class="gcell"><span>Premium SL</span><b>₹${t.premiumStop}</b></div>
+            <div class="gcell"><span>Confidence</span><b class="conf">${t.confidence}</b></div>
+          </div>` : ``}
+          <p class="tradeNote">${t.note}</p>
+        </div>`;
+}
+
+function renderSignalBody(q, s) {
+  const dirColor = s.direction === "bullish" ? "var(--green)" : s.direction === "bearish" ? "var(--red)" : "var(--muted)";
+  const dirLabel = s.direction === "bullish" ? "BUY / BULLISH" : s.direction === "bearish" ? "SELL / BEARISH" : "NEUTRAL / WAIT";
+  const relBadge = s.reliability
+    ? `<span class="relbadge">~${s.reliability}% typical reliability*</span>`
+    : `<span class="relbadge muted">n/a</span>`;
+  return `
+        <div class="patternRow">
+          <span class="patternName">${s.pattern}</span>
+          <span class="dirBadge" style="background:${dirColor}">${dirLabel}</span>
+        </div>
+        <div class="grid">
+          <div class="gcell"><span>Entry</span><b>${s.entry}</b></div>
+          <div class="gcell"><span>Stop Loss</span><b>${s.stop}</b></div>
+          <div class="gcell"><span>Target</span><b>${s.target}</b></div>
+          <div class="gcell"><span>Price</span><b>₹${s.currentPrice ?? "-"}</b></div>
+        </div>
+        <p class="note">${s.note}${s.reliability ? ` ${relBadge}` : ""}</p>
+        ${renderTradeBox(s.trade, dirColor)}`;
+}
+
 function renderSignalsHTML(signals) {
   const keys = Object.keys(signals);
+  const market = getMarketStatus();
   let cards = "";
+  let setupsRow = "";
+  let calcInit = "";
 
   keys.forEach(q => {
     const s = signals[q];
@@ -479,29 +595,25 @@ function renderSignalsHTML(signals) {
         <div class="hero" style="background:${theme.grad}"><p class="symbol">${q}</p></div>
         <div class="body"><p class="err">${s.error}${s.trading_symbol ? " (" + s.trading_symbol + ")" : ""}</p></div>
       </div>`;
+      setupsRow += `<div class="setupMini"><span class="setupSym">${q}</span><span class="setupAction muted">NO DATA</span></div>`;
       return;
     }
 
-    const dirColor = s.direction === "bullish" ? "#0a9d3f" : s.direction === "bearish" ? "#e0263f" : "#888";
+    const dirColor = s.direction === "bullish" ? "var(--green)" : s.direction === "bearish" ? "var(--red)" : "var(--muted)";
     const dirLabel = s.direction === "bullish" ? "BUY / BULLISH" : s.direction === "bearish" ? "SELL / BEARISH" : "NEUTRAL / WAIT";
-    const relBadge = s.reliability
-      ? `<span class="relbadge">~${s.reliability}% typical reliability*</span>`
-      : `<span class="relbadge muted">n/a</span>`;
-
     const t = s.trade;
     const tradeIsLive = t && t.action !== "NO TRADE";
-    const tradeBox = t ? `
-        <div class="tradeBox" style="border-left-color:${tradeIsLive ? dirColor : '#ccc'}">
-          <p class="tradeAction" style="color:${tradeIsLive ? dirColor : '#888'}">${t.action}</p>
-          ${tradeIsLive ? `
-          <div class="tradeGrid">
-            <div class="gcell"><span>Premium Entry</span><b>₹${t.premiumEntry}</b></div>
-            <div class="gcell"><span>Premium Target</span><b>₹${t.premiumTarget}</b></div>
-            <div class="gcell"><span>Premium SL</span><b>₹${t.premiumStop}</b></div>
-            <div class="gcell"><span>Confidence</span><b class="conf">${t.confidence}</b></div>
-          </div>` : ``}
-          <p class="tradeNote">${t.note}</p>
-        </div>` : ``;
+
+    setupsRow += `
+      <div class="setupMini">
+        <span class="setupSym">${q}</span>
+        <span class="setupAction" style="color:${tradeIsLive ? dirColor : "var(--muted)"}">${tradeIsLive ? t.action : "NO TRADE"}</span>
+        <span class="setupPrice">₹${s.currentPrice}</span>
+      </div>`;
+
+    if (tradeIsLive) {
+      calcInit += `updateCalc('${q}', ${t.premiumEntry}, ${t.premiumStop});\n`;
+    }
 
     cards += `
     <div class="card">
@@ -510,19 +622,26 @@ function renderSignalsHTML(signals) {
         <p class="expiry">Expiry ${s.expiry} · as of ${s.lastDate}</p>
         <p class="ltp">₹${s.currentPrice}</p>
       </div>
-      <div class="body" style="background:${theme.light}">
-        <div class="patternRow">
-          <span class="patternName">${s.pattern}</span>
-          <span class="dirBadge" style="background:${dirColor}">${dirLabel}</span>
+      <div class="body" style="background:${theme.light}" id="body-${q}">
+        ${renderSignalBody(q, s)}
+      </div>
+      <div class="scanner">
+        <div class="scannerTitle">⏱ MULTI-TIMEFRAME SCAN</div>
+        <div class="tfRow" id="tfrow-${q}">
+          <button class="tfBtn active" onclick="scanTF('${q}','1D',this)">1D</button>
+          <button class="tfBtn" onclick="scanTF('${q}','30',this)">30m</button>
+          <button class="tfBtn" onclick="scanTF('${q}','15',this)">15m</button>
+          <button class="tfBtn" onclick="scanTF('${q}','5',this)">5m</button>
         </div>
-        <div class="grid">
-          <div class="gcell"><span>Entry</span><b>${s.entry}</b></div>
-          <div class="gcell"><span>Stop Loss</span><b>${s.stop}</b></div>
-          <div class="gcell"><span>Target</span><b>${s.target}</b></div>
-          <div class="gcell"><span>Reliability</span><b>${relBadge}</b></div>
+        <div class="scanResult" id="scan-${q}"><p class="scanHint">Showing the 1D signal above. Tap a timeframe to scan intraday (needs the market open for fresh candles).</p></div>
+      </div>
+      <div class="calc">
+        <div class="calcTitle">💰 POSITION SIZE CALCULATOR</div>
+        <div class="calcInputs">
+          <label>Capital ₹<input type="number" id="cap-${q}" value="200000" oninput="recalc('${q}')"></label>
+          <label>Risk % / trade<input type="number" id="riskpct-${q}" value="3" oninput="recalc('${q}')"></label>
         </div>
-        <p class="note">${s.note}</p>
-        ${tradeBox}
+        <div class="calcOut" id="calcout-${q}">Waiting for a live BUY/SELL trade signal to size against.</div>
       </div>
     </div>`;
   });
@@ -534,56 +653,151 @@ function renderSignalsHTML(signals) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kumar Commodity Signals</title>
 <style>
+  :root {
+    --bg:#0b0f1a; --card:#131a2b; --card2:#0f1522; --border:rgba(255,255,255,0.08);
+    --text:#e5e9f0; --muted:#8892a6; --green:#16c784; --red:#ff4757; --amber:#ffb020; --blue:#3b82f6;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, Roboto, sans-serif; background:#f5f6fa; color:#222; margin:0; padding:16px; }
-  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#6a11cb,#2575fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
-  .sub { font-size:13px; color:#888; margin-bottom:16px; }
-  .nav { font-size:13px; color:#2575fc; text-decoration:none; display:inline-block; margin-bottom:16px; }
-  .card { border-radius:16px; overflow:hidden; margin-bottom:18px; box-shadow:0 4px 14px rgba(0,0,0,0.08); }
+  body { font-family: -apple-system, Roboto, sans-serif; background:var(--bg); color:var(--text); margin:0; padding:16px; }
+  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#8a5cf6,#3b82f6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { font-size:13px; color:var(--muted); margin-bottom:14px; }
+  .nav { font-size:13px; color:var(--blue); text-decoration:none; display:inline-block; margin-bottom:16px; }
+  .statusBar { display:flex; align-items:center; justify-content:space-between; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; margin-bottom:10px; }
+  .statusLeft { display:flex; align-items:center; gap:8px; font-weight:bold; font-size:13px; }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .dot.live { background:var(--green); box-shadow:0 0 8px var(--green); }
+  .dot.closed { background:var(--red); }
+  .statusTime { font-size:12px; color:var(--muted); }
+  .closedBanner { background:rgba(255,176,32,0.12); border:1px solid rgba(255,176,32,0.35); color:var(--amber); font-size:12px; padding:10px 14px; border-radius:12px; margin-bottom:14px; line-height:1.5; }
+  .setupsStrip { margin-bottom:18px; }
+  .setupsTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:8px; }
+  .setupsRow { display:flex; gap:10px; flex-wrap:wrap; }
+  .setupMini { flex:1; min-width:140px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; flex-direction:column; gap:2px; }
+  .setupSym { font-size:11px; color:var(--muted); }
+  .setupAction { font-size:15px; font-weight:bold; }
+  .setupAction.muted { color:var(--muted); }
+  .setupPrice { font-size:12px; color:var(--muted); }
+  .card { border-radius:16px; overflow:hidden; margin-bottom:18px; border:1px solid var(--border); }
   .hero { padding:18px 20px; color:#fff; }
   .symbol { margin:0; font-size:14px; opacity:0.9; }
   .expiry { margin:2px 0 8px 0; font-size:12px; opacity:0.8; }
   .ltp { margin:0; font-size:30px; font-weight:bold; }
-  .body { padding:16px 18px 18px 18px; }
+  .body { padding:16px 18px 18px 18px; background:var(--card) !important; }
   .patternRow { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
-  .patternName { font-size:17px; font-weight:bold; color:#222; }
+  .patternName { font-size:17px; font-weight:bold; color:var(--text); }
   .dirBadge { color:#fff; font-size:12px; font-weight:bold; padding:5px 10px; border-radius:20px; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; }
-  .gcell { background:#fff; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; }
-  .gcell span { font-size:11px; color:#888; }
-  .gcell b { font-size:16px; color:#222; margin-top:2px; }
-  .relbadge { font-size:14px; color:#2575fc; }
-  .relbadge.muted { color:#999; }
-  .note { font-size:13px; color:#444; line-height:1.5; margin:0; }
-  .tradeBox { margin-top:14px; padding:12px 14px; background:#fff; border-radius:10px; border-left:4px solid #ccc; }
+  .gcell { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; }
+  .gcell span { font-size:11px; color:var(--muted); }
+  .gcell b { font-size:16px; color:var(--text); margin-top:2px; }
+  .relbadge { font-size:12px; color:var(--blue); }
+  .relbadge.muted { color:var(--muted); }
+  .note { font-size:13px; color:var(--muted); line-height:1.5; margin:0; }
+  .tradeBox { margin-top:14px; padding:12px 14px; background:var(--card2); border-radius:10px; border-left:4px solid var(--border); }
   .tradeAction { margin:0 0 8px 0; font-size:16px; font-weight:bold; }
   .tradeGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px; }
-  .tradeGrid .gcell { background:#f7f7fa; padding:8px 10px; }
+  .tradeGrid .gcell { background:var(--bg); }
   .tradeGrid .conf { font-size:13px; }
-  .tradeNote { font-size:12px; color:#666; line-height:1.5; margin:0; }
-  .err { color:#e0263f; padding:14px; }
-  .disclaimer { font-size:11px; color:#999; line-height:1.6; margin-top:14px; padding:14px; background:#fff; border-radius:12px; }
+  .tradeNote { font-size:12px; color:var(--muted); line-height:1.5; margin:0; }
+  .err { color:var(--red); padding:14px; }
+  .scanner { background:var(--card2); border-top:1px solid var(--border); padding:14px 18px; }
+  .scannerTitle, .calcTitle { font-size:11px; color:var(--muted); letter-spacing:0.5px; margin-bottom:10px; font-weight:bold; }
+  .tfRow { display:flex; gap:8px; margin-bottom:12px; }
+  .tfBtn { flex:1; background:var(--bg); border:1px solid var(--border); color:var(--muted); padding:8px 0; border-radius:8px; font-weight:bold; font-size:13px; }
+  .tfBtn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .scanHint { font-size:12px; color:var(--muted); margin:0; }
+  .scanLoading { font-size:12px; color:var(--muted); margin:0; }
+  .calc { background:var(--card2); border-top:1px solid var(--border); padding:14px 18px; }
+  .calcInputs { display:flex; gap:10px; margin-bottom:10px; }
+  .calcInputs label { flex:1; font-size:11px; color:var(--muted); display:flex; flex-direction:column; gap:4px; }
+  .calcInputs input { background:var(--bg); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 10px; font-size:14px; }
+  .calcOut { font-size:12px; color:var(--muted); line-height:1.5; }
+  .calcOut b { color:var(--text); }
+  .disclaimer { font-size:11px; color:var(--muted); line-height:1.6; margin-top:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; }
 </style>
 </head>
 <body>
   <h1>Kumar Commodity Signals</h1>
   <p class="sub">Reads the token your main Kumar Commodity Options worker already keeps in KV — no separate login needed here.</p>
+  <div class="statusBar">
+    <div class="statusLeft">
+      <span class="dot ${market.isOpen ? "live" : "closed"}"></span>
+      <span>${market.isOpen ? "LIVE" : "CLOSED"}</span>
+    </div>
+    <div class="statusTime">${market.timeLabel}</div>
+  </div>
+  ${!market.isOpen ? `<div class="closedBanner">Market closed — showing last cached daily data. Intraday scans (5m/15m/30m) need a live session to return fresh candles.</div>` : ``}
   <a class="nav" href="/options">Option chain (strikes, OI, PCR) →</a>
+  <div class="setupsStrip">
+    <div class="setupsTitle">TODAY'S SETUPS</div>
+    <div class="setupsRow">${setupsRow}</div>
+  </div>
   ${cards}
   <div class="disclaimer">
     *Reliability figures are approximate historical success rates commonly cited in
     technical-analysis literature for each classical chart pattern. General reference
     numbers only — not a backtest of MCX Crude Oil / Natural Gas specifically, and not
-    a guarantee of future results. Patterns are detected algorithmically from daily
-    candles of the nearest-month future using swing-pivot rules — always confirm on the
-    live chart and manage risk before acting.<br><br>
+    a guarantee of future results. Patterns are detected algorithmically using swing-pivot
+    rules — always confirm on the live chart and manage risk before acting.<br><br>
     Options trade calls (BUY CE/PE) combine that pattern direction with the nearest-expiry
     ATM strike's live premium and the chain's Put/Call OI bias for a confidence read — they
     are not a priced option model. Premium target/SL are a rough delta≈0.5 projection off
     the pattern's underlying target/stop; actual premiums also move with time decay (theta)
-    and implied volatility, especially close to expiry, so track the live quote and size
-    positions accordingly. This is not financial advice.
+    and implied volatility, especially close to expiry, so track the live quote.<br><br>
+    The position-size calculator divides your risk amount by the raw premium-point distance
+    to the stop-loss — it is NOT lot-adjusted. Confirm the actual MCX lot size for the
+    contract before placing any order. This is not financial advice.
   </div>
+  <script>
+    const lastTrade = {};
+    function updateCalc(q, premiumEntry, premiumStop) {
+      lastTrade[q] = { premiumEntry, premiumStop };
+      recalc(q);
+    }
+    function recalc(q) {
+      const out = document.getElementById('calcout-' + q);
+      if (!out) return;
+      const t = lastTrade[q];
+      if (!t) { out.innerHTML = 'Waiting for a live BUY/SELL trade signal to size against.'; return; }
+      const capital = parseFloat(document.getElementById('cap-' + q).value) || 0;
+      const riskPct = parseFloat(document.getElementById('riskpct-' + q).value) || 0;
+      const riskAmount = capital * riskPct / 100;
+      const perUnitRisk = Math.abs(t.premiumEntry - t.premiumStop);
+      if (perUnitRisk <= 0) { out.innerHTML = 'No stop distance to size against.'; return; }
+      const qty = Math.floor(riskAmount / perUnitRisk);
+      out.innerHTML = 'Risk amount: ₹' + riskAmount.toFixed(0) + ' → quantity ≈ <b>' + qty + '</b> units of premium risk (verify the contract\\'s real lot size before ordering).';
+    }
+    function renderScanResult(d) {
+      if (d.error) return '<p class="err">' + d.error + (d.trading_symbol ? ' (' + d.trading_symbol + ')' : '') + '</p>';
+      const dirColor = d.direction === 'bullish' ? 'var(--green)' : d.direction === 'bearish' ? 'var(--red)' : 'var(--muted)';
+      const dirLabel = d.direction === 'bullish' ? 'BUY / BULLISH' : d.direction === 'bearish' ? 'SELL / BEARISH' : 'NEUTRAL / WAIT';
+      let html = '<div class="patternRow"><span class="patternName">' + d.pattern + '</span><span class="dirBadge" style="background:' + dirColor + '">' + dirLabel + '</span></div>';
+      html += '<div class="grid"><div class="gcell"><span>Entry</span><b>' + d.entry + '</b></div><div class="gcell"><span>Stop</span><b>' + d.stop + '</b></div><div class="gcell"><span>Target</span><b>' + d.target + '</b></div><div class="gcell"><span>Price</span><b>₹' + d.currentPrice + '</b></div></div>';
+      if (d.trade && d.trade.action !== 'NO TRADE') {
+        html += '<div class="tradeBox" style="border-left-color:' + dirColor + '"><p class="tradeAction" style="color:' + dirColor + '">' + d.trade.action + '</p>';
+        html += '<div class="tradeGrid"><div class="gcell"><span>Premium Entry</span><b>₹' + d.trade.premiumEntry + '</b></div><div class="gcell"><span>Premium Target</span><b>₹' + d.trade.premiumTarget + '</b></div><div class="gcell"><span>Premium SL</span><b>₹' + d.trade.premiumStop + '</b></div><div class="gcell"><span>Confidence</span><b>' + d.trade.confidence + '</b></div></div>';
+        html += '<p class="tradeNote">' + d.trade.note + '</p></div>';
+      } else if (d.trade) {
+        html += '<p class="tradeNote">' + d.trade.note + '</p>';
+      }
+      return html;
+    }
+    async function scanTF(q, tf, btnEl) {
+      document.querySelectorAll('#tfrow-' + q + ' .tfBtn').forEach(b => b.classList.remove('active'));
+      btnEl.classList.add('active');
+      const resultEl = document.getElementById('scan-' + q);
+      resultEl.innerHTML = '<p class="scanLoading">Scanning ' + tf + '...</p>';
+      try {
+        const res = await fetch('/scan?symbol=' + q + '&tf=' + tf);
+        const data = await res.json();
+        resultEl.innerHTML = renderScanResult(data);
+        if (data.trade && data.trade.premiumEntry) updateCalc(q, data.trade.premiumEntry, data.trade.premiumStop);
+      } catch (e) {
+        resultEl.innerHTML = '<p class="err">Scan failed: ' + e.message + '</p>';
+      }
+    }
+    ${calcInit}
+  </script>
 </body>
 </html>`;
 }
@@ -609,7 +823,7 @@ function renderOptionsHTML(signals) {
       return;
     }
 
-    const dirColor = s.bias === "bullish" ? "#0a9d3f" : s.bias === "bearish" ? "#e0263f" : "#888";
+    const dirColor = s.bias === "bullish" ? "var(--green)" : s.bias === "bearish" ? "var(--red)" : "var(--muted)";
     const dirLabel = s.bias === "bullish" ? "PCR BULLISH" : s.bias === "bearish" ? "PCR BEARISH" : "PCR NEUTRAL";
 
     let rows = "";
@@ -656,33 +870,37 @@ function renderOptionsHTML(signals) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kumar Commodity Options Chain</title>
 <style>
+  :root {
+    --bg:#0b0f1a; --card:#131a2b; --card2:#0f1522; --border:rgba(255,255,255,0.08);
+    --text:#e5e9f0; --muted:#8892a6; --green:#16c784; --red:#ff4757; --amber:#ffb020; --blue:#3b82f6;
+  }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, Roboto, sans-serif; background:#f5f6fa; color:#222; margin:0; padding:16px; }
-  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#6a11cb,#2575fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
-  .sub { font-size:13px; color:#888; margin-bottom:16px; }
-  .nav { font-size:13px; color:#2575fc; text-decoration:none; display:inline-block; margin-bottom:16px; }
+  body { font-family: -apple-system, Roboto, sans-serif; background:var(--bg); color:var(--text); margin:0; padding:16px; }
+  h1 { font-size:22px; margin:0 0 4px 0; background:linear-gradient(90deg,#8a5cf6,#3b82f6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { font-size:13px; color:var(--muted); margin-bottom:16px; }
+  .nav { font-size:13px; color:var(--blue); text-decoration:none; display:inline-block; margin-bottom:16px; }
   .tabs { display:flex; gap:8px; margin-bottom:16px; }
   .tab { flex:1; border:none; padding:12px 0; border-radius:12px; color:#fff; font-weight:bold; font-size:15px; opacity:0.5; }
-  .tab.active { opacity:1; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+  .tab.active { opacity:1; box-shadow:0 4px 12px rgba(0,0,0,0.4); }
   .panel { display:none; }
   .panel.active { display:block; }
   .hero { border-radius:16px 16px 0 0; padding:18px 20px; color:#fff; }
   .symbol { margin:0; font-size:14px; opacity:0.9; }
   .expiry { margin:2px 0 10px 0; font-size:12px; opacity:0.8; }
   .dirBadge { color:#fff; font-size:12px; font-weight:bold; padding:5px 10px; border-radius:20px; background:rgba(255,255,255,0.25); }
-  .body { padding:16px 18px 18px 18px; border-radius:0 0 16px 16px; margin-bottom:18px; box-shadow:0 4px 14px rgba(0,0,0,0.08); }
+  .body { padding:16px 18px 18px 18px; border-radius:0 0 16px 16px; margin-bottom:18px; background:var(--card); border:1px solid var(--border); border-top:none; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
-  .gcell { background:#fff; border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; }
-  .gcell span { font-size:11px; color:#888; }
-  .gcell b { font-size:16px; color:#222; margin-top:2px; }
-  .tableWrap { overflow-x:auto; background:#fff; border-radius:10px; }
+  .gcell { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; }
+  .gcell span { font-size:11px; color:var(--muted); }
+  .gcell b { font-size:16px; color:var(--text); margin-top:2px; }
+  .tableWrap { overflow-x:auto; background:var(--card2); border:1px solid var(--border); border-radius:10px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { padding:8px 10px; text-align:center; white-space:nowrap; }
-  th { color:#888; font-size:11px; border-bottom:1px solid #eee; }
+  th, td { padding:8px 10px; text-align:center; white-space:nowrap; color:var(--text); }
+  th { color:var(--muted); font-size:11px; border-bottom:1px solid var(--border); }
   td.strike { font-weight:bold; }
-  tr.atm { background:#fff9e0; }
-  .err { color:#e0263f; padding:14px; background:#fff; border-radius:12px; }
-  .disclaimer { font-size:11px; color:#999; line-height:1.6; margin-top:14px; padding:14px; background:#fff; border-radius:12px; }
+  tr.atm { background:rgba(255,176,32,0.12); }
+  .err { color:var(--red); padding:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; }
+  .disclaimer { font-size:11px; color:var(--muted); line-height:1.6; margin-top:14px; padding:14px; background:var(--card); border:1px solid var(--border); border-radius:12px; }
 </style>
 </head>
 <body>
@@ -718,6 +936,18 @@ export default {
         if (!token) return new Response("No token found in KV. Log in via your main kumarcmtd worker's /login first.", { status: 400 });
         const results = await computeSignals(token);
         return new Response(JSON.stringify(results, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
+      if (url.pathname === "/scan") {
+        const token = await env.COMMODITY_KV.get("access_token");
+        if (!token) return new Response(JSON.stringify({ error: "No token found in KV. Log in via /login first." }), { status: 400, headers: { "Content-Type": "application/json" } });
+        const symbol = url.searchParams.get("symbol");
+        const tf = url.searchParams.get("tf") || "15";
+        if (!["CRUDEOIL", "NATURALGAS"].includes(symbol)) {
+          return new Response(JSON.stringify({ error: "invalid symbol" }), { status: 400, headers: { "Content-Type": "application/json" } });
+        }
+        const result = await computeScan(token, symbol, tf);
+        return new Response(JSON.stringify(result), { headers: { "Content-Type": "application/json" } });
       }
 
       if (url.pathname === "/options/json") {
