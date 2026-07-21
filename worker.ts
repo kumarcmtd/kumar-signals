@@ -15,7 +15,7 @@ const UPSTOX_OPTION_CHAIN_URL = "https://api.upstox.com/v2/option/chain";
 // All price-card instruments. Only CRUDEOIL/NATURALGAS have the options-based
 // BUY/SELL signal logic wired up so far (OPTION_SYMBOLS) -- Gold/Silver/Copper/
 // Aluminium show live price data only until that's extended.
-const ALL_SYMBOLS = ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER", "COPPER", "ALUMINIUM"] as const;
+const ALL_SYMBOLS = ["CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"] as const;
 const OPTION_SYMBOLS = ["CRUDEOIL", "NATURALGAS"] as const;
 type Symbol = (typeof ALL_SYMBOLS)[number];
 

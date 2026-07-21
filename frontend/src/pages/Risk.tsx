@@ -11,8 +11,6 @@ const LOT_SIZE: Record<InstrumentSymbol, number> = {
   NATURALGAS: 1250,
   GOLD: 100,
   SILVER: 30,
-  COPPER: 1000,
-  ALUMINIUM: 1000,
 };
 
 export function Risk() {

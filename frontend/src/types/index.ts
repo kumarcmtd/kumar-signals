@@ -1,10 +1,4 @@
-export type InstrumentSymbol =
-  | "CRUDEOIL"
-  | "NATURALGAS"
-  | "GOLD"
-  | "SILVER"
-  | "COPPER"
-  | "ALUMINIUM";
+export type InstrumentSymbol = "CRUDEOIL" | "NATURALGAS" | "GOLD" | "SILVER";
 
 export type Direction = "bullish" | "bearish" | "neutral";
 export type OptionSide = "CE" | "PE";

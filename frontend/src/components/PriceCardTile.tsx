@@ -7,8 +7,6 @@ const THEME: Record<string, string> = {
   NATURALGAS: "from-sky-400 to-blue-600",
   GOLD: "from-amber-400 to-yellow-600",
   SILVER: "from-slate-400 to-slate-600",
-  COPPER: "from-orange-700 to-amber-800",
-  ALUMINIUM: "from-zinc-400 to-zinc-600",
 };
 
 export function PriceCardTile({ card }: { card: PriceCard }) {
