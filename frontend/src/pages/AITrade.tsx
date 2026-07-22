@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Inbox, CheckCircle2, Wallet, History, Trophy, NotebookText, Radio, Timer } from "lucide-react";
-import { useCandles, useOptionsAnalytics, useSignal, usePortfolio, useCreateTrade, useUpdateTrade, useMarketStatus } from "../api/hooks";
+import { usePortfolio, useCreateTrade, useUpdateTrade, useMarketStatus } from "../api/hooks";
+import { useSymbolMasterAI } from "../hooks/useSymbolMasterAI";
 import { useAppStore } from "../store/appStore";
-import { computeMasterAI } from "../utils/masterEngine";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { ConfidenceRing } from "../components/ConfidenceRing";
+import { ScoreBoard, marketMood } from "../components/ScoreBoard";
 import { CardSkeleton } from "../components/Skeleton";
 import type { InstrumentSymbol, PortfolioTrade } from "../types";
+
+type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
+const TRADABLE_SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 
 const SIGNAL_VALIDITY_MS = 20 * 60 * 1000; // how long a generated call is treated as fresh
 
@@ -50,7 +54,7 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"];
 
 export function AITrade() {
-  const [symbol, setSymbol] = useState<InstrumentSymbol>("CRUDEOIL");
+  const [symbol, setSymbol] = useState<TradableSymbol>("CRUDEOIL");
   const [tab, setTab] = useState<TabKey>("open");
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -64,27 +68,22 @@ export function AITrade() {
   }, []);
 
   const { data: market } = useMarketStatus();
-  const c1D = useCandles(symbol, "1D");
-  const c30 = useCandles(symbol, "30");
-  const c15 = useCandles(symbol, "15");
-  const c5 = useCandles(symbol, "5");
-  const { data: options, error: optionsError, dataUpdatedAt: optionsUpdatedAt } = useOptionsAnalytics(symbol);
-  const { data: signal, error: signalError } = useSignal(symbol);
   const { data: trades } = usePortfolio();
 
-  const candlesReady = !!(c1D.data && c30.data && c15.data && c5.data);
-  const loading = c1D.isLoading || c30.isLoading || c15.isLoading || c5.isLoading;
+  const crudeOil = useSymbolMasterAI("CRUDEOIL");
+  const naturalGas = useSymbolMasterAI("NATURALGAS");
+  const board = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas } as const;
+  const current = board[symbol];
 
-  const liveDataUnavailable = !!signalError || !!optionsError || !!signal?.error || !!options?.error;
+  const { result, loading, liveDataUnavailable, options, signal, optionsUpdatedAt } = current;
 
-  const result = useMemo(() => {
-    if (!candlesReady || liveDataUnavailable) return null;
-    return computeMasterAI({
-      candlesByTf: { "1D": c1D.data!.candles, "30": c30.data!.candles, "15": c15.data!.candles, "5": c5.data!.candles },
-      options,
-      signal,
-    });
-  }, [candlesReady, liveDataUnavailable, c1D.data, c30.data, c15.data, c5.data, options, signal]);
+  const scoreBoardEntries = TRADABLE_SYMBOLS.map((sym) => ({
+    symbol: sym,
+    result: board[sym].result,
+    loading: board[sym].loading,
+    unavailable: board[sym].liveDataUnavailable,
+  }));
+  const moodLabel = marketMood(scoreBoardEntries);
 
   // "AI Trade" enforces a stricter bar than the Master AI analysis page: only
   // ever surface a real trade card above 90% confidence, with a live premium.
@@ -134,18 +133,9 @@ export function AITrade() {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-2">
-        {(["CRUDEOIL", "NATURALGAS"] as const).map((sym) => (
-          <button
-            key={sym}
-            onClick={() => setSymbol(sym)}
-            className={`flex-1 rounded-2xl py-2.5 text-sm font-bold transition-all ${
-              symbol === sym ? "bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-md" : "bg-white/80 backdrop-blur text-[var(--color-muted)] border border-[var(--color-border)]"
-            }`}
-          >
-            {DISPLAY_NAME[sym]}
-          </button>
-        ))}
+      <div className="space-y-1.5">
+        {moodLabel && <p className="text-[11px] font-semibold text-[var(--color-muted)] px-1">{moodLabel}</p>}
+        <ScoreBoard entries={scoreBoardEntries} selected={symbol} onSelect={setSymbol} />
       </div>
 
       <div className="flex items-center justify-between rounded-2xl bg-white/70 backdrop-blur border border-[var(--color-border)] px-3.5 py-2 text-[11px]">
