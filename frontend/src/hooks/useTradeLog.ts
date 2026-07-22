@@ -124,3 +124,33 @@ export function useTradeLog(symbol: string, analyses: TimeframeAnalysis[], proje
 
   return tradeLogs;
 }
+
+// Same tracking logic as useTradeLog, but for a single named line rather
+// than one per timeframe -- used by AI Elite, which only ever tracks the
+// one candidate that clears its stricter bar (or nothing at all). Stored
+// under a distinct "ELITE-<symbol>" key in the SAME shared tradeLogs
+// dictionary so it can't collide with any real "<symbol>-<tf>" key.
+export function useEliteTradeLog(
+  trackingKey: string | null,
+  decision: Decision6 | null,
+  optSide: "CE" | "PE" | null,
+  proj: ProjLike | null,
+  options: OptionsAnalytics | undefined
+) {
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
+  const setTradeLog = useAppStore((s) => s.setTradeLog);
+
+  useEffect(() => {
+    if (!trackingKey) return;
+    const now = Date.now();
+    const history = tradeLogs[trackingKey] ?? [];
+    const last = history[history.length - 1];
+    const open = last && !last.closed ? last : undefined;
+    const liveLtpForOpen = open ? liveLtpFor(options, open.strike, open.optSide) : null;
+    const next = advanceTradeLog(history, { decision: decision ?? "WAIT", insufficient: null, optSide, proj, liveLtpForOpen }, now);
+    if (next !== history) setTradeLog(trackingKey, next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackingKey, decision, optSide, proj, options]);
+
+  return trackingKey ? tradeLogs[trackingKey] ?? [] : [];
+}

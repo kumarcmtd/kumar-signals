@@ -1,9 +1,10 @@
 import { NavLink } from "react-router-dom";
-import { FlaskConical, Crown, LineChart, ListTree, Calculator, NotebookText, Settings } from "lucide-react";
+import { FlaskConical, Crown, ShieldCheck, LineChart, ListTree, Calculator, NotebookText, Settings } from "lucide-react";
 
 const items = [
   { to: "/", label: "AI-Test V2", icon: FlaskConical, end: true },
   { to: "/ai-test-pro", label: "AI-Test Pro", icon: Crown },
+  { to: "/ai-elite", label: "AI Elite", icon: ShieldCheck },
   { to: "/charts", label: "Charts", icon: LineChart },
   { to: "/options", label: "Options", icon: ListTree },
   { to: "/risk", label: "Risk", icon: Calculator },
