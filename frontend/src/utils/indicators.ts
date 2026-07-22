@@ -216,6 +216,20 @@ export function superTrend(
   return { value: stValue, direction: trendUp ? "bullish" : "bearish" };
 }
 
+// Commodity Channel Index: how far the typical price sits from its moving
+// average, scaled by mean absolute deviation. Standard reading: > +100
+// overbought/strong uptrend, < -100 oversold/strong downtrend.
+export function cci(candles: Candle[], period = 20): number | null {
+  if (candles.length < period) return null;
+  const window = candles.slice(candles.length - period);
+  const typicalPrices = window.map((c) => (c.high + c.low + c.close) / 3);
+  const sma = typicalPrices.reduce((s, v) => s + v, 0) / period;
+  const meanDeviation = typicalPrices.reduce((s, v) => s + Math.abs(v - sma), 0) / period;
+  if (meanDeviation === 0) return 0;
+  const lastTypical = typicalPrices[typicalPrices.length - 1];
+  return (lastTypical - sma) / (0.015 * meanDeviation);
+}
+
 export function bollingerBands(
   values: number[],
   period = 20,
