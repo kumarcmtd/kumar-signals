@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Zap, LineChart, Brain, ListTree, Calculator, NotebookText, Settings } from "lucide-react";
+import { Zap, LineChart, Brain, ListTree, Calculator, NotebookText, Settings, Gem } from "lucide-react";
 
 const items = [
   { to: "/", label: "AI Trade", icon: Zap, end: true },
@@ -8,13 +8,14 @@ const items = [
   { to: "/options", label: "Options", icon: ListTree },
   { to: "/risk", label: "Risk", icon: Calculator },
   { to: "/journal", label: "Journal", icon: NotebookText },
+  { to: "/ai-3v", label: "AI 3V", icon: Gem },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
   return (
     <nav className="safe-bottom fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-[var(--color-border)]">
-      <div className="max-w-lg mx-auto grid grid-cols-7">
+      <div className="max-w-lg mx-auto grid grid-cols-8">
         {items.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}

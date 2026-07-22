@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AITrade } from "./pages/AITrade";
+import { AI3V } from "./pages/AI3V";
 import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
@@ -17,6 +18,7 @@ function App() {
       <ErrorBoundary>
         <Routes>
           <Route path="/" element={<AITrade />} />
+          <Route path="/ai-3v" element={<AI3V />} />
           <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />

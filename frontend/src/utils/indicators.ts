@@ -177,6 +177,17 @@ export function pivotPoints(prevCandle: Candle) {
   return { pivot, r1, r2, r3, s1, s2, s3 };
 }
 
+// Central Pivot Range: bc/tc bracket the pivot into a "value area" band.
+// A narrow CPR (tc close to bc) suggests a trending day; a wide CPR suggests
+// more likely range-bound/sideways action.
+export function centralPivotRange(prevCandle: Candle) {
+  const { high, low, close } = prevCandle;
+  const pivot = (high + low + close) / 3;
+  const bc = (high + low) / 2;
+  const tc = pivot + (pivot - bc);
+  return { pivot, bc: Math.min(bc, tc), tc: Math.max(bc, tc) };
+}
+
 export function computeIndicatorSnapshot(candles: Candle[]): IndicatorSnapshot {
   const closes = candles.map((c) => c.close);
   const macdResult = macd(closes);
