@@ -503,32 +503,85 @@ async function resolveOptionExpiry(token: string, fut: FutureInfo): Promise<stri
   return upcoming ?? expiries[expiries.length - 1];
 }
 
-async function getOptionChain(token: string, instrumentKey: string, expiryDate: string): Promise<{ chain?: any[]; error?: string }> {
-  const usp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
-  const res = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${usp.toString()}`, {
+// Confirmed via a live diagnostic call that Upstox's /v2/option/chain
+// endpoint returns HTTP 200 "success" with an always-empty data array for
+// MCX, regardless of instrument_key/expiry -- it just doesn't support this
+// exchange. option/contract (strikes + per-contract instrument_key) and
+// market-quote/quotes (live LTP/OI/volume, keyed by each object's own
+// instrument_token) both work fine for MCX, so the chain is assembled from
+// those two instead, into the same { strike_price, call_options: { market_data
+// }, put_options: { market_data } } row shape the rest of this file already
+// expects -- so analyzeChain/nearestStrikes/computeMaxPain/Greeks are
+// untouched.
+async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null): Promise<{ chain?: any[]; error?: string }> {
+  const contractUsp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
+  const contractRes = await fetch(`https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
 
-  let json: any;
+  let contractJson: any;
   try {
-    json = await res.json();
+    contractJson = await contractRes.json();
   } catch {
-    return { error: `Option chain request failed (HTTP ${res.status} ${res.statusText}): response was not valid JSON -- likely an upstream/gateway error` };
+    return { error: `Option contract request failed (HTTP ${contractRes.status} ${contractRes.statusText}): response was not valid JSON` };
+  }
+  if (contractJson.errors && contractJson.errors.length) {
+    const msg = contractJson.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
+    return { error: `Upstox rejected the option-contract request (HTTP ${contractRes.status}): ${msg} -- if this mentions auth/token, the Upstox access token likely needs a fresh login` };
+  }
+  if (contractJson.status !== "success" || !Array.isArray(contractJson.data) || !contractJson.data.length) {
+    return { error: `Upstox returned no option contracts for expiry ${expiryDate} (HTTP ${contractRes.status})` };
   }
 
-  if (json.errors && json.errors.length) {
-    const msg = json.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
-    return { error: `Upstox rejected the request (HTTP ${res.status}): ${msg} -- if this mentions auth/token, the Upstox access token likely needs a fresh login` };
+  const allContracts: any[] = contractJson.data;
+  const allStrikes = Array.from(new Set<number>(allContracts.map((c) => c.strike_price))).sort((a, b) => a - b);
+
+  // Narrow to strikes near spot before fetching quotes -- MCX chains can
+  // list 100+ strikes across a huge range, and there's no reason to spend
+  // subrequest/rate-limit budget quoting deep ITM/OTM strikes nobody trades.
+  const WINDOW = 10;
+  let keepStrikes = new Set(allStrikes);
+  if (spot !== null && allStrikes.length > WINDOW * 2 + 1) {
+    const nearestIdx = allStrikes.reduce((best, s, i) => (Math.abs(s - spot) < Math.abs(allStrikes[best] - spot) ? i : best), 0);
+    keepStrikes = new Set(allStrikes.slice(Math.max(0, nearestIdx - WINDOW), nearestIdx + WINDOW + 1));
   }
-  if (json.status !== "success") {
-    return { error: `Option chain request failed (HTTP ${res.status}, status "${json.status ?? "unknown"}")` };
+  const contracts = allContracts.filter((c) => keepStrikes.has(c.strike_price));
+
+  const quotesByToken = new Map<string, any>();
+  const CHUNK = 200;
+  const instrumentKeys = contracts.map((c) => c.instrument_key);
+  for (let i = 0; i < instrumentKeys.length; i += CHUNK) {
+    const chunk = instrumentKeys.slice(i, i + CHUNK);
+    const quoteUsp = new URLSearchParams({ instrument_key: chunk.join(",") });
+    const quoteRes = await fetch(`https://api.upstox.com/v2/market-quote/quotes?${quoteUsp.toString()}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    let quoteJson: any;
+    try {
+      quoteJson = await quoteRes.json();
+    } catch {
+      continue; // best-effort -- those contracts just end up with no market_data below
+    }
+    if (quoteJson.status === "success" && quoteJson.data) {
+      for (const q of Object.values(quoteJson.data) as any[]) {
+        if (q?.instrument_token) quotesByToken.set(q.instrument_token, q);
+      }
+    }
   }
-  if (!json.data || !json.data.length) {
-    return {
-      error: `Upstox returned zero strikes for expiry ${expiryDate} (HTTP ${res.status}) -- the contract may not have listed options yet, or check the Upstox token is fresh`,
-    };
+
+  const rowsByStrike = new Map<number, any>();
+  for (const c of contracts) {
+    if (!rowsByStrike.has(c.strike_price)) rowsByStrike.set(c.strike_price, { strike_price: c.strike_price, call_options: null, put_options: null });
+    const row = rowsByStrike.get(c.strike_price);
+    const quote = quotesByToken.get(c.instrument_key);
+    const marketData = quote
+      ? { ltp: quote.last_price ?? null, oi: quote.oi ?? null, volume: quote.volume ?? null, close_price: quote.ohlc?.close ?? null }
+      : {};
+    if (c.instrument_type === "CE") row.call_options = { market_data: marketData };
+    else if (c.instrument_type === "PE") row.put_options = { market_data: marketData };
   }
-  return { chain: json.data };
+
+  return { chain: Array.from(rowsByStrike.values()) };
 }
 
 function nearestStrikes(chain: any[], spot: number, sideCount = 6) {
@@ -756,7 +809,7 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
 
   const optionExpiry = await resolveOptionExpiry(token, fut);
   let trade: TradeSignal = { action: "NO TRADE", note: "Option chain unavailable." };
-  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry);
+  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
   if (!chainRes.error && chainRes.chain) {
     const chainAnalysis = analyzeChain(chainRes.chain);
     const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
@@ -1021,7 +1074,7 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
   const optionExpiry = await resolveOptionExpiry(token, fut);
-  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry);
+  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
   if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
 
   const refSpot = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
@@ -1181,72 +1234,31 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function safeJsonParse(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { unparsableRawText: text.slice(0, 2000) };
-  }
-}
-
-// Temporary diagnostic route: bypasses all of this app's own error-wrapping
-// and returns Upstox's raw, verbatim response for both the option-contract
-// discovery call and the option-chain call, so a genuine "is MCX supported
-// by this endpoint at all" question can be answered by inspection rather
-// than by guessing at instrument_key/expiry formats blind.
+// Temporary diagnostic route: runs the actual production getOptionChain()
+// (contract discovery + market-quote reconstruction, now that /v2/option/chain
+// is confirmed broken for MCX) and returns a compact summary -- row count and
+// a sample ATM-ish row -- so the real result can be eyeballed without
+// re-dumping the entire 100+ strike raw contract list every time.
 async function debugOptionChain(token: string, symbol: Symbol) {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: `No instrument found for ${symbol}` };
 
-  const contractUsp = new URLSearchParams({ instrument_key: fut.instrument_key });
-  const contractRes = await fetch(`https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  const contractBody = await contractRes.text();
+  const candles = await getHistoricalCandles(token, fut.instrument_key);
+  const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const chainUsp = new URLSearchParams({ instrument_key: fut.instrument_key, expiry_date: fut.expiry });
-  const chainRes = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${chainUsp.toString()}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  const chainBody = await chainRes.text();
-
-  // If contract discovery found real option instrument_keys, test the
-  // market-quote endpoint live against a couple of them -- this determines
-  // the actual response shape (which fields exist, how it's keyed) instead
-  // of guessing from documentation before writing any real code against it.
-  let quoteCheck: unknown = null;
-  const contractJson = safeJsonParse(contractBody) as any;
-  const sampleKeys: string[] = Array.isArray(contractJson?.data) ? contractJson.data.slice(0, 2).map((c: any) => c.instrument_key).filter(Boolean) : [];
-  if (sampleKeys.length) {
-    const quoteUsp = new URLSearchParams({ instrument_key: sampleKeys.join(",") });
-    const quoteRes = await fetch(`https://api.upstox.com/v2/market-quote/quotes?${quoteUsp.toString()}`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-    });
-    const quoteBody = await quoteRes.text();
-    quoteCheck = {
-      requestUrl: `https://api.upstox.com/v2/market-quote/quotes?${quoteUsp.toString()}`,
-      sampleKeysUsed: sampleKeys,
-      httpStatus: quoteRes.status,
-      body: safeJsonParse(quoteBody),
-    };
-  }
+  const optionExpiry = await resolveOptionExpiry(token, fut);
+  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
 
   return {
     symbol,
     futuresInstrumentKey: fut.instrument_key,
     futuresTradingSymbol: fut.trading_symbol,
     futuresExpiry: fut.expiry,
-    optionContractLookup: {
-      requestUrl: `https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`,
-      httpStatus: contractRes.status,
-      body: contractJson,
-    },
-    optionChainLookup: {
-      requestUrl: `${UPSTOX_OPTION_CHAIN_URL}?${chainUsp.toString()}`,
-      httpStatus: chainRes.status,
-      body: safeJsonParse(chainBody),
-    },
-    marketQuoteCheck: quoteCheck,
+    resolvedOptionExpiry: optionExpiry,
+    spot,
+    error: chainRes.error ?? null,
+    rowCount: chainRes.chain?.length ?? 0,
+    sampleRows: chainRes.chain?.slice(0, 5) ?? [],
   };
 }
 
