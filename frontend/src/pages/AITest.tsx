@@ -7,6 +7,7 @@ import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
 import { computePortfolioSummary } from "../utils/portfolioStats";
+import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
@@ -169,11 +170,20 @@ export function AITest() {
   const marketSummary = useMemo(() => buildMarketSummary(symbol, current.analyses), [symbol, current.analyses]);
   const dashboardUpdatedAt = Math.max(crudeOil.dataUpdatedAt, naturalGas.dataUpdatedAt);
 
-  const projections = useMemo(
-    () => current.analyses.map((a) => projectPremium(a, current.options)),
-    [current.analyses, current.options]
+  const crudeOilProjections = useMemo(
+    () => crudeOil.analyses.map((a) => projectPremium(a, crudeOil.options)),
+    [crudeOil.analyses, crudeOil.options]
   );
-  const tradeLogs = useTradeLog(symbol, current.analyses, projections, current.options);
+  const naturalGasProjections = useMemo(
+    () => naturalGas.analyses.map((a) => projectPremium(a, naturalGas.options)),
+    [naturalGas.analyses, naturalGas.options]
+  );
+  // Both symbols must be ticked every render regardless of which tab is
+  // selected -- otherwise the unselected symbol's trades silently stop
+  // advancing (and its day-wise stats would go stale) the moment you switch away.
+  useTradeLog("CRUDEOIL", crudeOil.analyses, crudeOilProjections, crudeOil.options);
+  const tradeLogs = useTradeLog("NATURALGAS", naturalGas.analyses, naturalGasProjections, naturalGas.options);
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 bg-gradient-to-b from-[#07050C] via-[#0D0A17] to-[#0D0A17] text-white min-h-screen space-y-5">
@@ -308,6 +318,38 @@ export function AITest() {
             })}
           </tbody>
         </table>
+      </section>
+
+      {/* DAY-WISE TRADE LOG SUMMARY */}
+      <section className="rounded-2xl bg-white/[0.05] backdrop-blur-xl border border-white/10 p-4 overflow-x-auto">
+        <p className="text-xs font-bold uppercase text-white/70 mb-1">Day-wise Trade Log — Both Symbols</p>
+        <p className="text-[10px] text-white/40 mb-3">One MCX session = 9:00am – 11:55pm IST. Counts every closed trade across all timeframes for Natural Gas and Crude Oil.</p>
+        {dayStats.length === 0 ? (
+          <p className="text-xs text-white/40 text-center py-3">No trades have closed yet — this fills in as signals run their course.</p>
+        ) : (
+          <table className="w-full text-[11px] min-w-[420px]">
+            <thead>
+              <tr className="text-white/40 text-left">
+                <th className="font-semibold pb-2">Date</th>
+                <th className="font-semibold pb-2">Target Hit</th>
+                <th className="font-semibold pb-2">Breakeven</th>
+                <th className="font-semibold pb-2">SL Hit</th>
+                <th className="font-semibold pb-2">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dayStats.map((d) => (
+                <tr key={d.dateKey} className="border-t border-white/10">
+                  <td className="py-2 font-semibold">{d.label}</td>
+                  <td className="py-2 font-bold text-[#22c55e]">{d.targetHit}</td>
+                  <td className="py-2 font-bold text-[#a3e635]">{d.breakeven}</td>
+                  <td className="py-2 font-bold text-[#f43f5e]">{d.slHit}</td>
+                  <td className="py-2 text-white/60">{d.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </section>
 
       {/* PER-TIMEFRAME TRADE CARDS */}
