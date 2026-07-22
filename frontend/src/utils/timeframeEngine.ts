@@ -329,7 +329,15 @@ export function analyzeTimeframe(params: {
   };
 
   if (!candles || candles.length < MIN_BARS) {
-    return { ...base, insufficient: `Not enough ${label} bars yet for a reliable read (need ${MIN_BARS}+, have ${candles?.length ?? 0})` };
+    // The backend only ever returns a real candles array once it has 15+
+    // resampled bars -- anything below that (common for 1H/4H early or
+    // mid-session, since this app's intraday feed only covers the current
+    // day) gets collapsed into a bare {error}, discarding the true count.
+    // A count of exactly 0 is therefore ambiguous (still loading, or a
+    // hidden real count below 15) and would be a misleading specific number
+    // to assert; only show the count when it's actually known to be real.
+    const suffix = candles && candles.length > 0 ? ` (need ${MIN_BARS}+, have ${candles.length})` : " (this timeframe may not have built up enough bars yet this session)";
+    return { ...base, insufficient: `Not enough ${label} bars yet for a reliable read${suffix}` };
   }
 
   const closes = candles.map((c) => c.close);
