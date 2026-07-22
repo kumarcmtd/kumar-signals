@@ -104,13 +104,23 @@ export function adx(candles: Candle[], period = 14): number | null {
   const smoothMinusDM = ema(minusDM, period);
   const dx: number[] = [];
   for (let i = 0; i < smoothTR.length; i++) {
+    if (smoothTR[i] === 0) {
+      // No true-range movement at all (e.g. a stretch of identical-OHLC
+      // candles during an illiquid/no-trade period) -- 0/0 would be NaN,
+      // and once introduced it poisons every later EMA value permanently.
+      // No range movement means no directional strength either, so 0 is
+      // the correct reading, not an error.
+      dx.push(0);
+      continue;
+    }
     const plusDI = (smoothPlusDM[i] / smoothTR[i]) * 100;
     const minusDI = (smoothMinusDM[i] / smoothTR[i]) * 100;
     const sum = plusDI + minusDI;
     dx.push(sum === 0 ? 0 : (Math.abs(plusDI - minusDI) / sum) * 100);
   }
   const adxSeries = ema(dx, period);
-  return adxSeries[adxSeries.length - 1];
+  const result = adxSeries[adxSeries.length - 1];
+  return Number.isFinite(result) ? result : null;
 }
 
 export function superTrend(

@@ -337,7 +337,11 @@ export function computeMasterAI(params: {
       overallScore += w * contribution;
     });
   }
-  overallScore = Math.max(0, Math.min(100, Math.round(overallScore)));
+  // Defense-in-depth: a single indicator producing NaN/Infinity from a data
+  // edge case (e.g. a division by a zero true-range) must never leak into
+  // the displayed confidence -- treat it as "no confluence" rather than show
+  // NaN.
+  overallScore = Number.isFinite(overallScore) ? Math.max(0, Math.min(100, Math.round(overallScore))) : 0;
 
   const confidenceLabel: MasterAIResult["confidenceLabel"] =
     overallScore >= 95 ? "Extremely Strong" : overallScore >= 90 ? "Strong" : overallScore >= 80 ? "Good" : overallScore >= 70 ? "Moderate" : "No Trade";
