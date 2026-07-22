@@ -23,12 +23,18 @@ export function useTimeframeSuite(symbol: InstrumentSymbol, journalWinRate: numb
   const c60 = useCandles(symbol, "60");
   const c240 = useCandles(symbol, "240");
   const c1D = useCandles(symbol, "1D");
-  const { data: options, error: optionsError } = useOptionsAnalytics(symbol);
-  const { data: signal, error: signalError } = useSignal(symbol);
+  const optionsQ = useOptionsAnalytics(symbol);
+  const signalQ = useSignal(symbol);
+  const { data: options, error: optionsError } = optionsQ;
+  const { data: signal, error: signalError } = signalQ;
 
   const queries = [c5, c10, c15, c30, c60, c240];
+  const allQueries = [...queries, c1D, optionsQ, signalQ];
   const loading = queries.some((q) => q.isLoading);
   const liveDataUnavailable = !!optionsError || !!signalError || !!options?.error || !!signal?.error;
+  const isFetching = allQueries.some((q) => q.isFetching);
+  const dataUpdatedAt = Math.max(...allQueries.map((q) => q.dataUpdatedAt));
+  const refetchAll = () => Promise.all(allQueries.map((q) => q.refetch()));
 
   const analyses = useMemo<TimeframeAnalysis[]>(() => {
     return TIMEFRAMES.map(({ tf, label }, i) => {
@@ -45,5 +51,15 @@ export function useTimeframeSuite(symbol: InstrumentSymbol, journalWinRate: numb
     });
   }, [c5.data, c10.data, c15.data, c30.data, c60.data, c240.data, c1D.data, options, liveDataUnavailable, journalWinRate]);
 
-  return { analyses, loading, liveDataUnavailable, options, signal, errorMessage: signal?.error || options?.error };
+  return {
+    analyses,
+    loading,
+    liveDataUnavailable,
+    options,
+    signal,
+    errorMessage: signal?.error || options?.error,
+    isFetching,
+    dataUpdatedAt,
+    refetchAll,
+  };
 }

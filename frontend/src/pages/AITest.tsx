@@ -6,6 +6,7 @@ import { useAppStore } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { formatTipCard } from "../utils/tipFormat";
+import { RefreshBar } from "../components/RefreshBar";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
@@ -145,6 +146,7 @@ export function AITest() {
     : null;
 
   const marketSummary = useMemo(() => buildMarketSummary(symbol, current.analyses), [symbol, current.analyses]);
+  const dashboardUpdatedAt = Math.max(crudeOil.dataUpdatedAt, naturalGas.dataUpdatedAt);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 bg-gradient-to-b from-[#07050C] via-[#0D0A17] to-[#0D0A17] text-white min-h-screen space-y-5">
@@ -164,7 +166,15 @@ export function AITest() {
           <MiniStat label="AI Confidence" value={avgConfidence !== null ? `${avgConfidence}%` : "—"} />
           <MiniStat label="Market Volatility" value={avgVolatility !== null ? `${avgVolatility}/100` : "—"} />
           <MiniStat label="Trading Session" value={market?.timeLabel ?? "—"} span />
-          <MiniStat label="Last Updated" value={new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} span />
+          <MiniStat
+            label="Last Updated"
+            value={
+              dashboardUpdatedAt > 0
+                ? new Date(dashboardUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+                : "—"
+            }
+            span
+          />
         </div>
       </section>
 
@@ -214,6 +224,8 @@ export function AITest() {
           </button>
         ))}
       </div>
+
+      <RefreshBar dataUpdatedAt={current.dataUpdatedAt} isFetching={current.isFetching} onRefresh={current.refetchAll} dark />
 
       {current.liveDataUnavailable && (
         <div className="rounded-2xl bg-white/5 border border-amber-400/30 p-4 text-center">

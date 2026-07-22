@@ -20,6 +20,7 @@ import { computeIndicatorSnapshot, centralPivotRange } from "../utils/indicators
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { ConfidenceRing } from "../components/ConfidenceRing";
+import { RefreshBar } from "../components/RefreshBar";
 import { TradingViewWidget } from "../components/TradingViewWidget";
 import type { Direction, PortfolioTrade } from "../types";
 
@@ -102,7 +103,7 @@ export function AI3V() {
   const naturalGas = useSymbolMasterAI("NATURALGAS");
   const board = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas } as const;
   const current = board[symbol];
-  const { result, loading, liveDataUnavailable, options, signal } = current;
+  const { result, loading, liveDataUnavailable, options, signal, isFetching, dataUpdatedAt, refetchAll } = current;
 
   // Raw per-timeframe candles for the honest timeframe-confluence readout
   // (separate fetch from useSymbolMasterAI, which only exposes the final
@@ -260,6 +261,8 @@ export function AI3V() {
           </span>
         </div>
       </section>
+
+      <RefreshBar dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetchAll} dark />
 
       {/* LIVE MARKET OVERVIEW */}
       <section className="grid grid-cols-2 gap-3">

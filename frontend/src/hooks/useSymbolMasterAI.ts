@@ -12,13 +12,20 @@ export function useSymbolMasterAI(symbol: InstrumentSymbol) {
   const c30 = useCandles(symbol, "30");
   const c15 = useCandles(symbol, "15");
   const c5 = useCandles(symbol, "5");
-  const { data: options, error: optionsError, dataUpdatedAt: optionsUpdatedAt } = useOptionsAnalytics(symbol);
-  const { data: signal, error: signalError } = useSignal(symbol);
+  const optionsQ = useOptionsAnalytics(symbol);
+  const signalQ = useSignal(symbol);
+  const { data: options, error: optionsError, dataUpdatedAt: optionsUpdatedAt } = optionsQ;
+  const { data: signal, error: signalError } = signalQ;
 
   const candlesReady = !!(c1D.data && c30.data && c15.data && c5.data);
   const loading = c1D.isLoading || c30.isLoading || c15.isLoading || c5.isLoading;
   const liveDataUnavailable = !!signalError || !!optionsError || !!signal?.error || !!options?.error;
   const errorMessage = signal?.error || options?.error;
+
+  const allQueries = [c1D, c30, c15, c5, optionsQ, signalQ];
+  const isFetching = allQueries.some((q) => q.isFetching);
+  const dataUpdatedAt = Math.max(...allQueries.map((q) => q.dataUpdatedAt));
+  const refetchAll = () => Promise.all(allQueries.map((q) => q.refetch()));
 
   const result = useMemo<MasterAIResult | null>(() => {
     if (!candlesReady || liveDataUnavailable) return null;
@@ -29,5 +36,5 @@ export function useSymbolMasterAI(symbol: InstrumentSymbol) {
     });
   }, [candlesReady, liveDataUnavailable, c1D.data, c30.data, c15.data, c5.data, options, signal]);
 
-  return { result, loading, liveDataUnavailable, errorMessage, options, signal, optionsUpdatedAt };
+  return { result, loading, liveDataUnavailable, errorMessage, options, signal, optionsUpdatedAt, isFetching, dataUpdatedAt, refetchAll };
 }
