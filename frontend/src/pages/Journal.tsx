@@ -35,10 +35,15 @@ function inRange(dateStr: string, range: RangeKey): boolean {
   return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
 }
 
+function csvCell(value: unknown): string {
+  const s = value === undefined || value === null ? "" : String(value);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
 function toCSV(trades: PortfolioTrade[]): string {
   const headers = ["symbol", "optSide", "strike", "entryPrice", "exitPrice", "quantity", "lotSize", "stopLoss", "target", "entryDate", "exitDate", "status", "pnl", "source", "notes"];
-  const rows = trades.map((t) => headers.map((h) => JSON.stringify((t as any)[h] ?? "")).join(","));
-  return [headers.join(","), ...rows].join("\n");
+  const rows = trades.map((t) => headers.map((h) => csvCell((t as any)[h])).join(","));
+  return [headers.map(csvCell).join(","), ...rows].join("\n");
 }
 
 function downloadCSV(trades: PortfolioTrade[]) {
