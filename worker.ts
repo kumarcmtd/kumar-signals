@@ -1181,6 +1181,53 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function safeJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { unparsableRawText: text.slice(0, 2000) };
+  }
+}
+
+// Temporary diagnostic route: bypasses all of this app's own error-wrapping
+// and returns Upstox's raw, verbatim response for both the option-contract
+// discovery call and the option-chain call, so a genuine "is MCX supported
+// by this endpoint at all" question can be answered by inspection rather
+// than by guessing at instrument_key/expiry formats blind.
+async function debugOptionChain(token: string, symbol: Symbol) {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: `No instrument found for ${symbol}` };
+
+  const contractUsp = new URLSearchParams({ instrument_key: fut.instrument_key });
+  const contractRes = await fetch(`https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  const contractBody = await contractRes.text();
+
+  const chainUsp = new URLSearchParams({ instrument_key: fut.instrument_key, expiry_date: fut.expiry });
+  const chainRes = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${chainUsp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  const chainBody = await chainRes.text();
+
+  return {
+    symbol,
+    futuresInstrumentKey: fut.instrument_key,
+    futuresTradingSymbol: fut.trading_symbol,
+    futuresExpiry: fut.expiry,
+    optionContractLookup: {
+      requestUrl: `https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`,
+      httpStatus: contractRes.status,
+      body: safeJsonParse(contractBody),
+    },
+    optionChainLookup: {
+      requestUrl: `${UPSTOX_OPTION_CHAIN_URL}?${chainUsp.toString()}`,
+      httpStatus: chainRes.status,
+      body: safeJsonParse(chainBody),
+    },
+  };
+}
+
 async function requireToken(env: Env): Promise<string | Response> {
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return json({ error: "No token found in KV. Log in via the main kumarcmtd worker's /login first." }, 400);
@@ -1199,6 +1246,14 @@ export default {
 
         if (url.pathname === "/api/global-markets") {
           return json(await computeGlobalMarkets());
+        }
+
+        if (url.pathname === "/api/debug/option-chain") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          const symbol = (url.searchParams.get("symbol") || "CRUDEOIL") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
+          return json(await debugOptionChain(token, symbol));
         }
 
         if (url.pathname === "/api/prices") {
