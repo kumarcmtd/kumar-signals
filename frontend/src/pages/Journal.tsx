@@ -87,7 +87,7 @@ export function Journal() {
         <div>
           <p className="text-sm font-bold">Journal</p>
           <p className="text-xs text-[var(--color-muted)] mt-1">
-            Signal history + trade journal — logged automatically from AI Trade calls or added manually. Stored in Cloudflare KV, so it
+            Signal history + trade journal — logged automatically from AI-Test V2 calls or added manually. Stored in Cloudflare KV, so it
             survives across devices.
           </p>
         </div>
@@ -179,7 +179,7 @@ export function Journal() {
                   </div>
                   <p className="text-[10px] text-[var(--color-muted)]">
                     Opened {new Date(t.entryDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
-                    {t.source && t.source !== "manual" ? ` · from ${t.source === "master-ai" ? "AI Trade" : "Signal"}` : ""}
+                    {t.source && t.source !== "manual" ? ` · from ${t.source === "master-ai" ? "AI-Test V2" : "Signal"}` : ""}
                   </p>
                   {closingId === t.id ? (
                     <div className="flex gap-2">

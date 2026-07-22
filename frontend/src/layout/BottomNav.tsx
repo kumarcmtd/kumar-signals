@@ -1,15 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { Zap, LineChart, Brain, ListTree, Calculator, NotebookText, Settings, Gem, FlaskConical } from "lucide-react";
+import { FlaskConical, LineChart, ListTree, Calculator, NotebookText, Settings } from "lucide-react";
 
 const items = [
-  { to: "/", label: "AI Trade", icon: Zap, end: true },
+  { to: "/", label: "AI-Test V2", icon: FlaskConical, end: true },
   { to: "/charts", label: "Charts", icon: LineChart },
-  { to: "/master-ai", label: "AI Analysis", icon: Brain },
   { to: "/options", label: "Options", icon: ListTree },
   { to: "/risk", label: "Risk", icon: Calculator },
   { to: "/journal", label: "Journal", icon: NotebookText },
-  { to: "/ai-3v", label: "AI 3V", icon: Gem },
-  { to: "/ai-test", label: "AI-Test", icon: FlaskConical },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
