@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Star, Radio, Copy } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade } from "../api/hooks";
-import { useAppStore, type SignalSnapshot } from "../store/appStore";
+import { useAppStore } from "../store/appStore";
+import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
-import { useSignalTracking, computeTradeStatus, type TradeStatus } from "../hooks/useSignalTracking";
+import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
@@ -33,6 +34,21 @@ const decisionBg: Record<Decision6, string> = {
   "STRONG SELL": "bg-[#f43f5e]",
 };
 
+const STATUS_LABEL: Record<TradeLogStatus, string> = {
+  running: "Running",
+  sl_hit: "SL Hit",
+  stopped_breakeven: "Closed at Breakeven (T1)",
+  stopped_after_t1: "Closed after T1 (T2 hit)",
+  target3_hit: "Target 3 Hit",
+};
+const STATUS_COLOR: Record<TradeLogStatus, string> = {
+  running: "text-white/60",
+  sl_hit: "text-[#f43f5e]",
+  stopped_breakeven: "text-[#a3e635]",
+  stopped_after_t1: "text-[#22c55e]",
+  target3_hit: "text-[#22c55e]",
+};
+
 interface PremiumProjection {
   strike: number;
   optSide: "CE" | "PE";
@@ -47,6 +63,9 @@ interface PremiumProjection {
 // projection this app's backend already uses for its single combined
 // signal -- applied per-timeframe here since each one has its own ATR-based
 // underlying move, layered onto the one live premium every timeframe shares.
+// This is only ever used to OPEN a new trade log entry -- once a trade line
+// exists, its own frozen numbers are what get displayed and tracked, not a
+// fresh call to this function (which always reflects "right now").
 function projectPremium(analysis: TimeframeAnalysis, options: OptionsAnalytics | undefined): PremiumProjection | null {
   if (!options || options.error || !analysis.optSide || analysis.underlyingEntry === null || analysis.underlyingStop === null || !analysis.underlyingTargets) {
     return null;
@@ -68,35 +87,6 @@ function projectPremium(analysis: TimeframeAnalysis, options: OptionsAnalytics |
   const stop = Number(Math.max(entry * 0.35, entry - DELTA * riskMove).toFixed(2));
   const rr = entry - stop !== 0 ? Number(((targets[0] - entry) / (entry - stop)).toFixed(2)) : null;
   return { strike: row.strike, optSide: analysis.optSide, entry, targets, stop, rr };
-}
-
-function liveLtpFor(options: OptionsAnalytics | undefined, strike: number, optSide: "CE" | "PE"): number | null {
-  if (!options || options.error) return null;
-  const row = options.rows.find((r) => r.strike === strike);
-  if (!row) return null;
-  const leg = optSide === "CE" ? row.call : row.put;
-  return leg.ltp;
-}
-
-// Once a timeframe's recommendation has fired, its Entry/Target/Stop should
-// stay fixed at what was actually recommended -- not re-derive to today's
-// live price on every refresh, which would make "hit" structurally
-// impossible to ever observe. Falls back to the live projection only for the
-// brief first paint before useSignalTracking's effect has captured it.
-function resolveDisplay(
-  snapshot: SignalSnapshot | undefined,
-  proj: PremiumProjection | null
-): { strike: number; optSide: "CE" | "PE"; entry: number; targets: [number, number, number]; stop: number } | null {
-  if (snapshot) return snapshot;
-  if (proj) return { strike: proj.strike, optSide: proj.optSide, entry: proj.entry, targets: proj.targets, stop: proj.stop };
-  return null;
-}
-
-function statusColor(status: TradeStatus): string {
-  if (status === "SL Hit") return "text-[#f43f5e]";
-  if (status === "Running") return "text-white/60";
-  if (status) return "text-[#22c55e]";
-  return "text-white/30";
 }
 
 function formatExpiryTip(expiry: string): string {
@@ -183,7 +173,7 @@ export function AITest() {
     () => current.analyses.map((a) => projectPremium(a, current.options)),
     [current.analyses, current.options]
   );
-  const signalSnapshots = useSignalTracking(symbol, current.analyses, projections);
+  const tradeLogs = useTradeLog(symbol, current.analyses, projections, current.options);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 bg-gradient-to-b from-[#07050C] via-[#0D0A17] to-[#0D0A17] text-white min-h-screen space-y-5">
@@ -282,7 +272,7 @@ export function AITest() {
       {/* TABLE VIEW */}
       <section className="rounded-2xl bg-white/[0.05] backdrop-blur-xl border border-white/10 p-4 overflow-x-auto">
         <p className="text-xs font-bold uppercase text-white/70 mb-3">Timeframe Overview — {DISPLAY_NAME[symbol]}</p>
-        <table className="w-full text-[11px] min-w-[560px]">
+        <table className="w-full text-[11px] min-w-[620px]">
           <thead>
             <tr className="text-white/40 text-left">
               <th className="font-semibold pb-2">Timeframe</th>
@@ -292,30 +282,27 @@ export function AITest() {
               <th className="font-semibold pb-2">Target</th>
               <th className="font-semibold pb-2">Stop Loss</th>
               <th className="font-semibold pb-2">Probability</th>
-              <th className="font-semibold pb-2">RR</th>
               <th className="font-semibold pb-2">Status</th>
             </tr>
           </thead>
           <tbody>
-            {current.analyses.map((a, i) => {
-              const proj = projections[i];
-              const snapshot = signalSnapshots[`${symbol}-${a.tf}`];
-              const display = resolveDisplay(snapshot, proj);
-              const liveLtp = display ? liveLtpFor(current.options, display.strike, display.optSide) : null;
-              const status = computeTradeStatus(snapshot, liveLtp);
+            {current.analyses.map((a) => {
+              const log = tradeLogs[`${symbol}-${a.tf}`] ?? [];
+              const latest = log[log.length - 1];
               return (
                 <tr key={a.tf} className="border-t border-white/10">
                   <td className="py-2 font-semibold">{a.label}</td>
                   <td className={`py-2 font-bold ${a.insufficient ? "text-white/30" : decisionColor[a.decision]}`}>
                     {a.insufficient ? "—" : a.decision}
                   </td>
-                  <td className="py-2">{display ? `${display.strike} ${display.optSide}` : "—"}</td>
-                  <td className="py-2">{display ? `₹${display.entry}` : "—"}</td>
-                  <td className="py-2">{display ? `₹${display.targets[0]}` : "—"}</td>
-                  <td className="py-2">{display ? `₹${display.stop}` : "—"}</td>
+                  <td className="py-2">{latest ? `${latest.strike} ${latest.optSide}` : "—"}</td>
+                  <td className="py-2">{latest ? `₹${latest.entry}` : "—"}</td>
+                  <td className="py-2">{latest ? `₹${latest.targets[0]}` : "—"}</td>
+                  <td className="py-2">{latest ? `₹${latest.stop}` : "—"}</td>
                   <td className="py-2">{a.hitProbability !== null ? `${a.hitProbability}%` : "—"}</td>
-                  <td className="py-2">{proj?.rr !== null && proj?.rr !== undefined ? `1:${proj.rr}` : "—"}</td>
-                  <td className={`py-2 font-bold ${statusColor(status)}`}>{status ?? "—"}</td>
+                  <td className={`py-2 font-bold ${latest ? STATUS_COLOR[latest.status] : "text-white/30"}`}>
+                    {latest ? STATUS_LABEL[latest.status] : "—"}
+                  </td>
                 </tr>
               );
             })}
@@ -325,13 +312,12 @@ export function AITest() {
 
       {/* PER-TIMEFRAME TRADE CARDS */}
       <div className="space-y-3">
-        {current.analyses.map((a, i) => {
-          const proj = projections[i];
-          const snapshot = signalSnapshots[`${symbol}-${a.tf}`];
-          const display = resolveDisplay(snapshot, proj);
-          const liveLtp = display ? liveLtpFor(current.options, display.strike, display.optSide) : null;
-          const status = computeTradeStatus(snapshot, liveLtp);
-          const key = `${symbol}-${a.tf}-${a.decision}-${a.optSide ?? ""}`;
+        {current.analyses.map((a) => {
+          const log = tradeLogs[`${symbol}-${a.tf}`] ?? [];
+          const latest = log[log.length - 1];
+          const openTrade = latest && !latest.closed ? latest : undefined;
+          const liveLtp = openTrade ? liveLtpFor(current.options, openTrade.strike, openTrade.optSide) : null;
+          const key = `${symbol}-${a.tf}-${latest?.id ?? "none"}`;
           return (
             <section key={a.tf} className="rounded-2xl bg-white/[0.05] backdrop-blur-xl border border-white/10 overflow-hidden">
               <div className="px-4 py-3 flex items-center justify-between border-b border-white/10">
@@ -341,7 +327,7 @@ export function AITest() {
                 ) : (
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full text-black ${decisionBg[a.decision]}`}>
                     {a.decision}
-                    {a.optSide ? ` ${display ? display.strike : ""} ${a.optSide}` : ""}
+                    {a.optSide ? ` ${latest ? latest.strike : ""} ${a.optSide}` : ""}
                   </span>
                 )}
               </div>
@@ -359,24 +345,15 @@ export function AITest() {
                     <TfField label="Holding Time" value={a.holdingTime} />
                   </div>
 
-                  {display ? (
-                    <div className="grid grid-cols-3 gap-2">
-                      <TfField label="Strike to Buy" value={`${display.strike} ${display.optSide}`} />
-                      <TfField label="Entry" value={`₹${display.entry}`} />
-                      <TfField label="Target 1" value={`₹${display.targets[0]}`} tone="up" />
-                      <TfField label="Target 2" value={`₹${display.targets[1]}`} tone="up" />
-                      <TfField label="Target 3" value={`₹${display.targets[2]}`} tone="up" />
-                      <TfField label="Stop Loss" value={`₹${display.stop}`} tone="down" />
-                      <TfField label="Risk Reward" value={proj?.rr !== null && proj?.rr !== undefined ? `1:${proj.rr}` : "—"} />
-                      <TfField
-                        label="Trade Status"
-                        value={status ?? (liveLtp === null ? "Live price unavailable" : "—")}
-                        tone={status === "SL Hit" ? "down" : status && status !== "Running" ? "up" : undefined}
-                      />
-                      {liveLtp !== null && <TfField label="Current Premium" value={`₹${liveLtp}`} />}
+                  {log.length > 0 ? (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-bold text-white/50 uppercase">Trade Log (newest first)</p>
+                      {[...log].reverse().map((entry) => (
+                        <TradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
+                      ))}
                     </div>
                   ) : (
-                    a.decision !== "WAIT" && <p className="text-[11px] text-white/40">No live premium available to project Entry/Target/Stop for this call.</p>
+                    a.decision !== "WAIT" && <p className="text-[11px] text-white/40">No live premium available to open a trade log for this call.</p>
                   )}
 
                   {a.vetoes.length > 0 && (
@@ -401,7 +378,7 @@ export function AITest() {
                     </div>
                   )}
 
-                  {a.decision !== "WAIT" && display && a.optSide && (
+                  {openTrade && (
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         disabled={loggedKey === key}
@@ -409,11 +386,11 @@ export function AITest() {
                           createTrade.mutate(
                             {
                               symbol,
-                              optSide: a.optSide!,
-                              strike: display.strike,
-                              entryPrice: display.entry,
-                              stopLoss: display.stop,
-                              target: display.targets[0],
+                              optSide: openTrade.optSide,
+                              strike: openTrade.strike,
+                              entryPrice: openTrade.entry,
+                              stopLoss: openTrade.stop,
+                              target: openTrade.targets[0],
                               quantity: 1,
                               lotSize: LOT_SIZE[symbol],
                               source: "master-ai",
@@ -430,12 +407,12 @@ export function AITest() {
                         onClick={() => {
                           copyTipToClipboard({
                             symbolLabel: DISPLAY_NAME[symbol],
-                            strike: display.strike,
-                            optSide: a.optSide,
+                            strike: openTrade.strike,
+                            optSide: openTrade.optSide,
                             expiry: current.signal?.expiry,
-                            buyEntry: display.entry,
-                            targets: display.targets,
-                            stop: display.stop,
+                            buyEntry: openTrade.entry,
+                            targets: openTrade.targets,
+                            stop: openTrade.stop,
                           });
                           setCopiedKey(key);
                           setTimeout(() => setCopiedKey(null), 2000);
@@ -495,5 +472,38 @@ function TfField({ label, value, tone }: { label: string; value: string; tone?: 
       <p className="text-[9px] text-white/40">{label}</p>
       <p className={`text-xs font-bold ${color}`}>{value}</p>
     </div>
+  );
+}
+
+// One line in a timeframe's trade history. Open (still-running) trades render
+// at full brightness with the live premium shown; closed trades -- whether
+// they ended in a hit target or a stopped-out loss -- are visually "dulled"
+// per how a real trade log reads: it's history now, not the live position.
+function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
+  const dulled = entry.closed;
+  return (
+    <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold">
+          {entry.strike} {entry.optSide} · Entry ₹{entry.entry}
+        </span>
+        <span className={`text-[10px] font-bold shrink-0 ${STATUS_COLOR[entry.status]}`}>{STATUS_LABEL[entry.status]}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px] text-white/50">
+        <TargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
+        <TargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
+        <TargetTick label="T3" price={entry.targets[2]} hit={entry.targetsHit[2]} />
+        <span>SL ₹{entry.stop}</span>
+      </div>
+      {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
+    </div>
+  );
+}
+
+function TargetTick({ label, price, hit }: { label: string; price: number; hit: boolean }) {
+  return (
+    <span className={hit ? "text-[#22c55e] font-semibold" : ""}>
+      {hit ? "✓" : "○"} {label} ₹{price}
+    </span>
   );
 }

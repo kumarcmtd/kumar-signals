@@ -9,19 +9,25 @@ interface RiskSettings {
   riskPercent: number;
 }
 
-// A frozen snapshot of a trade recommendation at the moment it first became
-// actionable (decision !== WAIT), keyed by "<symbol>-<timeframe>". Without
-// this, "Entry" would just be whatever the current live premium happens to
-// be on every refresh -- which is always true of itself and can never show
-// a target/stop as "hit". Freezing it here is what makes a real Target
-// Hit / SL Hit read possible.
-export interface SignalSnapshot {
+// One trade instance for a given "<symbol>-<timeframe>" line: entry/targets/
+// stop are frozen at the moment the signal first fired, targetsHit ticks off
+// each level as the live premium reaches it (permanently, even if price later
+// retraces), and once closed the line is done -- the next actionable signal
+// for that timeframe starts a brand-new entry rather than mutating this one.
+export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit";
+
+export interface TradeLogEntry {
+  id: string;
   strike: number;
   optSide: "CE" | "PE";
   entry: number;
   targets: [number, number, number];
   stop: number;
-  capturedAt: number;
+  targetsHit: [boolean, boolean, boolean];
+  status: TradeLogStatus;
+  closed: boolean;
+  openedAt: number;
+  closedAt: number | null;
 }
 
 interface AppState {
@@ -34,9 +40,8 @@ interface AppState {
   risk: RiskSettings;
   setRisk: (risk: Partial<RiskSettings>) => void;
 
-  signalSnapshots: Record<string, SignalSnapshot>;
-  setSignalSnapshot: (key: string, snapshot: SignalSnapshot) => void;
-  clearSignalSnapshot: (key: string) => void;
+  tradeLogs: Record<string, TradeLogEntry[]>;
+  setTradeLog: (key: string, entries: TradeLogEntry[]) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -51,14 +56,8 @@ export const useAppStore = create<AppState>()(
       risk: { capital: 200000, riskPercent: 3 },
       setRisk: (risk) => set((s) => ({ risk: { ...s.risk, ...risk } })),
 
-      signalSnapshots: {},
-      setSignalSnapshot: (key, snapshot) => set((s) => ({ signalSnapshots: { ...s.signalSnapshots, [key]: snapshot } })),
-      clearSignalSnapshot: (key) =>
-        set((s) => {
-          const next = { ...s.signalSnapshots };
-          delete next[key];
-          return { signalSnapshots: next };
-        }),
+      tradeLogs: {},
+      setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
     }),
     { name: "kumar-signals-pro-store" }
   )
