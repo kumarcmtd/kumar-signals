@@ -10,6 +10,7 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Copy,
 } from "lucide-react";
 import { useCandles, useOptionsAnalytics, usePortfolio, useCreateTrade, useUpdateTrade, useMarketStatus, usePrices } from "../api/hooks";
 import { useSymbolMasterAI } from "../hooks/useSymbolMasterAI";
@@ -17,6 +18,7 @@ import { useAppStore } from "../store/appStore";
 import { computeMasterAI } from "../utils/masterEngine";
 import { computeIndicatorSnapshot, centralPivotRange } from "../utils/indicators";
 import { computePortfolioSummary } from "../utils/portfolioStats";
+import { formatTipCard } from "../utils/tipFormat";
 import { ConfidenceRing } from "../components/ConfidenceRing";
 import { TradingViewWidget } from "../components/TradingViewWidget";
 import type { Direction, PortfolioTrade } from "../types";
@@ -141,6 +143,8 @@ export function AI3V() {
 
   const currentPremium = actionable ? result!.entry! : null;
   const recommendedBuyPrice = currentPremium !== null ? Number((currentPremium * 1.012).toFixed(2)) : null;
+  const buyZoneLow = currentPremium !== null ? Number((currentPremium * 0.985).toFixed(2)) : null;
+  const buyZoneHigh = currentPremium !== null ? Number((currentPremium * 1.02).toFixed(2)) : null;
   const lotSize = LOT_SIZE[symbol];
   const riskAmount = (risk.capital * risk.riskPercent) / 100;
   const perUnitRisk = actionable && result!.stop !== null ? Math.abs(result!.entry! - result!.stop) : null;
@@ -155,6 +159,23 @@ export function AI3V() {
 
   const optionRow = actionable ? options?.rows.find((r) => r.strike === result!.strike) : undefined;
   const optionLeg = optionRow ? (result!.optSide === "CE" ? optionRow.call : optionRow.put) : undefined;
+
+  const handleCopyTip = () => {
+    if (!actionable || !result || buyZoneLow === null || buyZoneHigh === null) return;
+    const tip = formatTipCard({
+      symbolLabel: DISPLAY_NAME[symbol],
+      strike: result.strike!,
+      optSide: result.optSide!,
+      expiryLabel: signal ? formatExpiryTip(signal.expiry) : "—",
+      buyZoneLow,
+      buyZoneHigh,
+      targets: [result.target1!, result.target2!, result.target3!],
+      stopLoss: result.stop!,
+    });
+    navigator.clipboard.writeText(tip);
+    setToast("Tip copied to clipboard");
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const priceCard = prices?.find((p) => p.symbol === symbol);
   const otherSymbol = symbol === "CRUDEOIL" ? "NATURALGAS" : "CRUDEOIL";
@@ -322,6 +343,18 @@ export function AI3V() {
                 <DarkField label="Signal Generated" value={generatedAt ? generatedAt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"} />
                 <DarkField label="Signal Expiry" value={remainingMs !== null ? fmtCountdown(remainingMs) : "—"} />
                 <DarkField label="Capital Required" value={capitalRequired !== null ? `₹${capitalRequired.toFixed(0)}` : "—"} span />
+              </div>
+            )}
+
+            {actionable && (
+              <div className="px-5 pb-5">
+                <button
+                  onClick={handleCopyTip}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 py-2.5 text-xs font-bold text-white/90 transition-colors"
+                >
+                  <Copy size={14} strokeWidth={2.5} />
+                  Copy Tip
+                </button>
               </div>
             )}
 
@@ -610,6 +643,14 @@ function computePerfBuckets(trades: PortfolioTrade[]) {
 function formatExpiry(expiry: string): string {
   try {
     return new Date(expiry).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }).toUpperCase();
+  } catch {
+    return expiry;
+  }
+}
+
+function formatExpiryTip(expiry: string): string {
+  try {
+    return new Date(expiry).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
   } catch {
     return expiry;
   }

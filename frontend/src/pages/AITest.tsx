@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, Star, Radio } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Star, Radio, Copy } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { computePortfolioSummary } from "../utils/portfolioStats";
+import { formatTipCard } from "../utils/tipFormat";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
@@ -65,6 +66,37 @@ function projectPremium(analysis: TimeframeAnalysis, options: OptionsAnalytics |
   return { entry, targets, stop, rr };
 }
 
+function formatExpiryTip(expiry: string): string {
+  try {
+    return new Date(expiry).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  } catch {
+    return expiry;
+  }
+}
+
+function copyTipToClipboard(params: {
+  symbolLabel: string;
+  strike: number | null | undefined;
+  optSide: "CE" | "PE" | null | undefined;
+  expiry: string | undefined;
+  buyEntry: number;
+  targets: [number, number, number];
+  stop: number;
+}) {
+  if (!params.strike || !params.optSide) return;
+  const tip = formatTipCard({
+    symbolLabel: params.symbolLabel,
+    strike: params.strike,
+    optSide: params.optSide,
+    expiryLabel: params.expiry ? formatExpiryTip(params.expiry) : "—",
+    buyZoneLow: params.buyEntry,
+    buyZoneHigh: Number((params.buyEntry * 1.02).toFixed(2)),
+    targets: params.targets,
+    stopLoss: params.stop,
+  });
+  navigator.clipboard.writeText(tip);
+}
+
 export function AITest() {
   const [symbol, setSymbol] = useState<TradableSymbol>("NATURALGAS");
   const { data: market } = useMarketStatus();
@@ -72,6 +104,7 @@ export function AITest() {
   const { risk } = useAppStore();
   const createTrade = useCreateTrade();
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
   const journalWinRate = journalSummary.winRate;
@@ -298,29 +331,50 @@ export function AITest() {
                   )}
 
                   {a.decision !== "WAIT" && proj && a.optSide && (
-                    <button
-                      disabled={loggedKey === key}
-                      onClick={() =>
-                        createTrade.mutate(
-                          {
-                            symbol,
-                            optSide: a.optSide!,
-                            strike: current.options?.atmStrike ?? undefined,
-                            entryPrice: proj.entry,
-                            stopLoss: proj.stop,
-                            target: proj.targets[0],
-                            quantity: 1,
-                            lotSize: LOT_SIZE[symbol],
-                            source: "master-ai",
-                            notes: `Logged from AI-Test (${a.label})`,
-                          },
-                          { onSuccess: () => setLoggedKey(key) }
-                        )
-                      }
-                      className="w-full py-2 rounded-xl text-xs font-bold bg-indigo-500 text-white disabled:opacity-50"
-                    >
-                      {loggedKey === key ? "Logged to Journal ✓" : `Log ${a.decision} ${a.optSide} to Journal`}
-                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        disabled={loggedKey === key}
+                        onClick={() =>
+                          createTrade.mutate(
+                            {
+                              symbol,
+                              optSide: a.optSide!,
+                              strike: current.options?.atmStrike ?? undefined,
+                              entryPrice: proj.entry,
+                              stopLoss: proj.stop,
+                              target: proj.targets[0],
+                              quantity: 1,
+                              lotSize: LOT_SIZE[symbol],
+                              source: "master-ai",
+                              notes: `Logged from AI-Test (${a.label})`,
+                            },
+                            { onSuccess: () => setLoggedKey(key) }
+                          )
+                        }
+                        className="py-2 rounded-xl text-xs font-bold bg-indigo-500 text-white disabled:opacity-50"
+                      >
+                        {loggedKey === key ? "Logged ✓" : `Log to Journal`}
+                      </button>
+                      <button
+                        onClick={() => {
+                          copyTipToClipboard({
+                            symbolLabel: DISPLAY_NAME[symbol],
+                            strike: current.options?.atmStrike,
+                            optSide: a.optSide,
+                            expiry: current.signal?.expiry,
+                            buyEntry: proj.entry,
+                            targets: proj.targets,
+                            stop: proj.stop,
+                          });
+                          setCopiedKey(key);
+                          setTimeout(() => setCopiedKey(null), 2000);
+                        }}
+                        className="flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold bg-white/10 border border-white/15 text-white/90"
+                      >
+                        <Copy size={13} strokeWidth={2.5} />
+                        {copiedKey === key ? "Copied ✓" : "Copy Tip"}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
