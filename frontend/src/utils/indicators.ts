@@ -116,6 +116,20 @@ export function vwap(candles: Candle[]): number | null {
   return cumPV / cumV;
 }
 
+const IST_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
+
+// VWAP is conventionally anchored to a single trading session, resetting
+// each day -- but candle arrays can now span many days (fetched history
+// stitched onto today's live feed for the higher timeframes). Restrict to
+// just the most recent session's bars before computing it, regardless of
+// how far back the rest of the array goes.
+function latestSessionOnly(candles: Candle[]): Candle[] {
+  if (!candles.length) return candles;
+  const lastDay = IST_DATE_FORMATTER.format(new Date(candles[candles.length - 1].date));
+  const idx = candles.findIndex((c) => IST_DATE_FORMATTER.format(new Date(c.date)) === lastDay);
+  return idx === -1 ? candles : candles.slice(idx);
+}
+
 function trueRanges(candles: Candle[]): number[] {
   const out: number[] = [];
   for (let i = 0; i < candles.length; i++) {
@@ -266,7 +280,7 @@ export function computeIndicatorSnapshot(candles: Candle[]): IndicatorSnapshot {
     ema200: emaLast(closes, 200),
     rsi14: rsiValue,
     macd: macdResult,
-    vwap: vwap(candles),
+    vwap: vwap(latestSessionOnly(candles)),
     atr14: atr(candles),
     adx14: adxValue,
     superTrend: st,

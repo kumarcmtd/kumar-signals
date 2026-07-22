@@ -443,6 +443,55 @@ async function getIntradayCandles(token: string, instrumentKey: string): Promise
   return candles;
 }
 
+const HIST_INTRADAY_CACHE_TTL_SECONDS = 4 * 60 * 60;
+
+// 1-minute candles for the days BEFORE today, fetched from the historical
+// (not intraday) endpoint and cached in KV -- this data is frozen the
+// moment the trading day ends, so there is no reason to re-fetch it from
+// Upstox on every poll. Only today's slice (getIntradayCandles) needs to
+// stay live. A cache miss or an Upstox error here degrades gracefully to an
+// empty array rather than failing the whole request, so the caller falls
+// back to today-only behavior instead of breaking.
+async function getHistoricalIntradayCandles(env: Env, token: string, instrumentKey: string, days: number): Promise<Candle[]> {
+  const to = new Date();
+  to.setDate(to.getDate() - 1);
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const toStr = fmt(to);
+  const cacheKey = `hist1m:${instrumentKey}:${toStr}`;
+
+  const cached = await env.COMMODITY_KV.get(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as Candle[];
+    } catch {
+      // fall through and refetch on a corrupt cache entry
+    }
+  }
+
+  try {
+    const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/1minute/${toStr}/${fmt(from)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+    const json: any = await res.json();
+    if (json.status !== "success" || !json.data || !json.data.candles) return [];
+    const candles: Candle[] = json.data.candles.map((c: any[]) => ({
+      date: c[0],
+      open: c[1],
+      high: c[2],
+      low: c[3],
+      close: c[4],
+      volume: c[5] ?? 0,
+      oi: c[6] ?? 0,
+    }));
+    candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(candles), { expirationTtl: HIST_INTRADAY_CACHE_TTL_SECONDS });
+    return candles;
+  } catch {
+    return [];
+  }
+}
+
 // Upstox's intraday endpoint only serves 1-minute (or 30-minute) candles, so
 // 5m/15m/30m scans are built by bucketing 1-minute candles ourselves.
 function resampleCandles(candles: Candle[], minutesPerBucket: number): Candle[] {
@@ -885,33 +934,50 @@ async function computeSignals(token: string): Promise<SignalCard[]> {
 // Shared by /api/scan and /api/candles: tf is "1D" (daily candles) or a
 // minute count (5/15/30) resampled from 1-minute intraday candles, which
 // only exist for the current session.
-async function getCandlesForTF(token: string, fut: FutureInfo, tf: string): Promise<Candle[] | { error: string }> {
+// Days of prior 1-minute history to stitch onto today's live feed. 30 bars
+// at 4 hours each needs 5 trading days' worth; 20 calendar days comfortably
+// covers that even accounting for weekends/holidays.
+const PRIOR_HISTORY_DAYS = 20;
+
+async function getCandlesForTF(env: Env, token: string, fut: FutureInfo, tf: string): Promise<Candle[] | { error: string }> {
   if (tf === "1D") {
     const candles = await getHistoricalCandles(token, fut.instrument_key);
     if (!candles || candles.length < 40) return { error: "Not enough historical data yet" };
     return candles;
   }
   const tfMinutes = parseInt(tf, 10);
-  const oneMin = await getIntradayCandles(token, fut.instrument_key);
-  if (!oneMin || oneMin.length < 20) return { error: "Not enough intraday data yet — market may be closed" };
-  const candles = tfMinutes === 1 ? oneMin : resampleCandles(oneMin, tfMinutes);
+  const oneMinToday = await getIntradayCandles(token, fut.instrument_key);
+  if (!oneMinToday || oneMinToday.length < 20) return { error: "Not enough intraday data yet — market may be closed" };
+
+  // Higher timeframes (30m/60m/240m especially) can't accumulate 30 bars
+  // from a single session alone -- 30 bars of 4-hour candles would need 5
+  // trading days. Stitch recent 1-minute history from prior days onto
+  // today's live feed so every timeframe has real multi-day context, the
+  // way an actual chart works, instead of restarting from zero every
+  // morning. A failure here just falls back to today-only data, same as
+  // the previous behavior, rather than breaking the request.
+  const priorDays = await getHistoricalIntradayCandles(env, token, fut.instrument_key, PRIOR_HISTORY_DAYS);
+  const todayStart = oneMinToday.length ? +new Date(oneMinToday[0].date) : Infinity;
+  const combined = [...priorDays.filter((c) => +new Date(c.date) < todayStart), ...oneMinToday];
+
+  const candles = tfMinutes === 1 ? combined : resampleCandles(combined, tfMinutes);
   if (candles.length < 15) return { error: "Not enough bars yet at this timeframe — try again later in the session" };
   return candles;
 }
 
-async function computeScan(token: string, symbol: Symbol, tf: string): Promise<(SignalCard & { timeframe: string }) | { error: string }> {
+async function computeScan(env: Env, token: string, symbol: Symbol, tf: string): Promise<(SignalCard & { timeframe: string }) | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
-  const candles = await getCandlesForTF(token, fut, tf);
+  const candles = await getCandlesForTF(env, token, fut, tf);
   if ("error" in candles) return candles;
   const signal = await buildSignalCard(token, symbol, fut, candles);
   return { ...signal, timeframe: tf };
 }
 
-async function computeCandles(token: string, symbol: Symbol, tf: string): Promise<{ tradingSymbol: string; timeframe: string; candles: Candle[] } | { error: string }> {
+async function computeCandles(env: Env, token: string, symbol: Symbol, tf: string): Promise<{ tradingSymbol: string; timeframe: string; candles: Candle[] } | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
-  const candles = await getCandlesForTF(token, fut, tf);
+  const candles = await getCandlesForTF(env, token, fut, tf);
   if ("error" in candles) return candles;
   return { tradingSymbol: fut.trading_symbol, timeframe: tf, candles };
 }
@@ -1317,7 +1383,7 @@ export default {
           const symbol = url.searchParams.get("symbol") as Symbol;
           const tf = url.searchParams.get("tf") || "15";
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
-          return json(await computeScan(token, symbol, tf));
+          return json(await computeScan(env, token, symbol, tf));
         }
 
         if (url.pathname === "/api/candles") {
@@ -1326,7 +1392,7 @@ export default {
           const symbol = url.searchParams.get("symbol") as Symbol;
           const tf = url.searchParams.get("tf") || "1D";
           if (!ALL_SYMBOLS.includes(symbol)) return json({ error: "invalid symbol" }, 400);
-          return json(await computeCandles(token, symbol, tf));
+          return json(await computeCandles(env, token, symbol, tf));
         }
 
         const optionsMatch = url.pathname.match(/^\/api\/options\/([A-Z]+)$/);
