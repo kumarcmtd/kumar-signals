@@ -475,10 +475,25 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
   const res = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  const json: any = await res.json();
-  if (json.status !== "success" || !json.data || !json.data.length) {
-    const msg = json.errors ? json.errors.map((e: any) => e.message).join("; ") : "No strikes returned";
-    return { error: msg };
+
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    return { error: `Option chain request failed (HTTP ${res.status} ${res.statusText}): response was not valid JSON -- likely an upstream/gateway error` };
+  }
+
+  if (json.errors && json.errors.length) {
+    const msg = json.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
+    return { error: `Upstox rejected the request (HTTP ${res.status}): ${msg} -- if this mentions auth/token, the Upstox access token likely needs a fresh login` };
+  }
+  if (json.status !== "success") {
+    return { error: `Option chain request failed (HTTP ${res.status}, status "${json.status ?? "unknown"}")` };
+  }
+  if (!json.data || !json.data.length) {
+    return {
+      error: `Upstox returned zero strikes for expiry ${expiryDate} (HTTP ${res.status}) -- the contract may not have listed options yet, or check the Upstox token is fresh`,
+    };
   }
   return { chain: json.data };
 }
