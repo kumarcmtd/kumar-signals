@@ -468,8 +468,41 @@ function resampleCandles(candles: Candle[], minutesPerBucket: number): Candle[] 
   return out;
 }
 
-// MCX commodity options are options on the futures contract, so the option
-// chain is queried with the same instrument_key/expiry as the nearest future.
+// MCX commodity options commonly expire a few trading days *before* the
+// underlying futures contract they're written on, so the futures contract's
+// own expiry date is not a safe stand-in for the options series' expiry --
+// querying with the wrong date returns a valid response with zero strikes.
+// This discovers the real listed option expiry dates for an underlying via
+// Upstox's option/contract endpoint.
+async function getOptionExpiries(token: string, instrumentKey: string): Promise<string[] | null> {
+  const usp = new URLSearchParams({ instrument_key: instrumentKey });
+  const res = await fetch(`https://api.upstox.com/v2/option/contract?${usp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    return null;
+  }
+  if (json.status !== "success" || !Array.isArray(json.data) || !json.data.length) return null;
+  const expiries = Array.from(new Set<string>(json.data.map((c: any) => c.expiry).filter(Boolean))).sort(
+    (a, b) => +new Date(a) - +new Date(b)
+  );
+  return expiries.length ? expiries : null;
+}
+
+// Picks the nearest upcoming real option expiry for a future; falls back to
+// the future's own expiry if the contract-discovery lookup fails or returns
+// nothing, so an unexpected response shape doesn't regress prior behavior.
+async function resolveOptionExpiry(token: string, fut: FutureInfo): Promise<string> {
+  const expiries = await getOptionExpiries(token, fut.instrument_key);
+  if (!expiries) return fut.expiry;
+  const now = Date.now();
+  const upcoming = expiries.find((e) => +new Date(e) >= now);
+  return upcoming ?? expiries[expiries.length - 1];
+}
+
 async function getOptionChain(token: string, instrumentKey: string, expiryDate: string): Promise<{ chain?: any[]; error?: string }> {
   const usp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
   const res = await fetch(`${UPSTOX_OPTION_CHAIN_URL}?${usp.toString()}`, {
@@ -721,8 +754,9 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
   const pattern = analyzeCommodity(candles);
   const spot = candles[candles.length - 1].close;
 
+  const optionExpiry = await resolveOptionExpiry(token, fut);
   let trade: TradeSignal = { action: "NO TRADE", note: "Option chain unavailable." };
-  const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
+  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry);
   if (!chainRes.error && chainRes.chain) {
     const chainAnalysis = analyzeChain(chainRes.chain);
     const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
@@ -736,7 +770,7 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
   return {
     symbol,
     tradingSymbol: fut.trading_symbol,
-    expiry: fut.expiry,
+    expiry: optionExpiry,
     currentPrice: spot,
     lastDate: candles[candles.length - 1].date,
     pattern,
@@ -986,14 +1020,15 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const chainRes = await getOptionChain(token, fut.instrument_key, fut.expiry);
+  const optionExpiry = await resolveOptionExpiry(token, fut);
+  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry);
   if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
 
   const refSpot = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
   const { rows, atmStrike } = nearestStrikes(chainRes.chain, refSpot, 8);
   const analysis = analyzeChain(chainRes.chain);
   const maxPain = computeMaxPain(chainRes.chain);
-  const T = yearsToExpiry(fut.expiry);
+  const T = yearsToExpiry(optionExpiry);
 
   const analyticsRows: OptionRowAnalytics[] = rows.map((r: any) => {
     const callLtp = r.call_options?.market_data?.ltp || null;
@@ -1030,7 +1065,7 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   return {
     symbol,
     tradingSymbol: fut.trading_symbol,
-    expiry: fut.expiry,
+    expiry: optionExpiry,
     spot: refSpot,
     atmStrike,
     pcr: analysis.pcr,
