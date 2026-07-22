@@ -1210,6 +1210,27 @@ async function debugOptionChain(token: string, symbol: Symbol) {
   });
   const chainBody = await chainRes.text();
 
+  // If contract discovery found real option instrument_keys, test the
+  // market-quote endpoint live against a couple of them -- this determines
+  // the actual response shape (which fields exist, how it's keyed) instead
+  // of guessing from documentation before writing any real code against it.
+  let quoteCheck: unknown = null;
+  const contractJson = safeJsonParse(contractBody) as any;
+  const sampleKeys: string[] = Array.isArray(contractJson?.data) ? contractJson.data.slice(0, 2).map((c: any) => c.instrument_key).filter(Boolean) : [];
+  if (sampleKeys.length) {
+    const quoteUsp = new URLSearchParams({ instrument_key: sampleKeys.join(",") });
+    const quoteRes = await fetch(`https://api.upstox.com/v2/market-quote/quotes?${quoteUsp.toString()}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    const quoteBody = await quoteRes.text();
+    quoteCheck = {
+      requestUrl: `https://api.upstox.com/v2/market-quote/quotes?${quoteUsp.toString()}`,
+      sampleKeysUsed: sampleKeys,
+      httpStatus: quoteRes.status,
+      body: safeJsonParse(quoteBody),
+    };
+  }
+
   return {
     symbol,
     futuresInstrumentKey: fut.instrument_key,
@@ -1218,13 +1239,14 @@ async function debugOptionChain(token: string, symbol: Symbol) {
     optionContractLookup: {
       requestUrl: `https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`,
       httpStatus: contractRes.status,
-      body: safeJsonParse(contractBody),
+      body: contractJson,
     },
     optionChainLookup: {
       requestUrl: `${UPSTOX_OPTION_CHAIN_URL}?${chainUsp.toString()}`,
       httpStatus: chainRes.status,
       body: safeJsonParse(chainBody),
     },
+    marketQuoteCheck: quoteCheck,
   };
 }
 
