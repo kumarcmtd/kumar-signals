@@ -170,18 +170,24 @@ export function AI3V() {
       ["Session (Daily)", c1D],
     ];
     for (const [label, q] of defs) {
-      if (!q.data || q.data.candles.length < 30) continue;
+      if (!q.data || !q.data.candles || q.data.candles.length < 30) continue;
       const snap = computeIndicatorSnapshot(q.data.candles);
       rows.push({ label, score: horizonScore(snap, result.bias), direction: snap.trendDirection });
     }
     return rows;
   }, [result, c5.data, c15.data, c30.data, c1D.data]);
 
-  const cpr = c1D.data && c1D.data.candles.length >= 2 ? centralPivotRange(c1D.data.candles[c1D.data.candles.length - 2]) : null;
+  // `.data` can be a truthy object with no `candles` field -- the backend
+  // returns HTTP 200 with just `{ error }` when there isn't enough data yet
+  // for a timeframe (e.g. "market may be closed"), so every access below
+  // guards `.candles` itself, not just `.data`.
+  const c15Candles = c15.data?.candles;
+  const c15Snap = c15Candles && c15Candles.length > 0 ? computeIndicatorSnapshot(c15Candles) : null;
+  const c1DCandles = c1D.data?.candles;
+
+  const cpr = c1DCandles && c1DCandles.length >= 2 ? centralPivotRange(c1DCandles[c1DCandles.length - 2]) : null;
   const oiChange =
-    c15.data && c15.data.candles.length >= 2
-      ? (c15.data.candles[c15.data.candles.length - 1].oi ?? 0) - (c15.data.candles[c15.data.candles.length - 2].oi ?? 0)
-      : null;
+    c15Candles && c15Candles.length >= 2 ? (c15Candles[c15Candles.length - 1].oi ?? 0) - (c15Candles[c15Candles.length - 2].oi ?? 0) : null;
 
   const openTradeForSymbol = (trades ?? []).find((t) => t.symbol === symbol && t.status === "OPEN");
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
@@ -499,13 +505,13 @@ export function AI3V() {
               <DarkField label="PCR" value={options?.pcr !== null && options?.pcr !== undefined ? options.pcr.toFixed(2) : "—"} />
               <DarkField label="OI Change" value={oiChange !== null ? oiChange.toLocaleString("en-IN") : "—"} />
               <DarkField label="Volume" value={optionLeg?.volume != null ? optionLeg.volume.toLocaleString("en-IN") : "—"} />
-              <DarkField label="VWAP" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).vwap?.toFixed(2) ?? "—" : "—"} />
-              <DarkField label="EMA 20" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).ema20?.toFixed(2) ?? "—" : "—"} />
-              <DarkField label="EMA 50" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).ema50?.toFixed(2) ?? "—" : "—"} />
-              <DarkField label="RSI" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).rsi14?.toFixed(1) ?? "—" : "—"} />
-              <DarkField label="MACD" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).macd?.histogram.toFixed(2) ?? "—" : "—"} />
-              <DarkField label="ADX" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).adx14?.toFixed(1) ?? "—" : "—"} />
-              <DarkField label="ATR" value={c15.data ? computeIndicatorSnapshot(c15.data.candles).atr14?.toFixed(2) ?? "—" : "—"} />
+              <DarkField label="VWAP" value={c15Snap?.vwap != null ? c15Snap.vwap.toFixed(2) : "—"} />
+              <DarkField label="EMA 20" value={c15Snap?.ema20 != null ? c15Snap.ema20.toFixed(2) : "—"} />
+              <DarkField label="EMA 50" value={c15Snap?.ema50 != null ? c15Snap.ema50.toFixed(2) : "—"} />
+              <DarkField label="RSI" value={c15Snap?.rsi14 != null ? c15Snap.rsi14.toFixed(1) : "—"} />
+              <DarkField label="MACD" value={c15Snap?.macd != null ? c15Snap.macd.histogram.toFixed(2) : "—"} />
+              <DarkField label="ADX" value={c15Snap?.adx14 != null ? c15Snap.adx14.toFixed(1) : "—"} />
+              <DarkField label="ATR" value={c15Snap?.atr14 != null ? c15Snap.atr14.toFixed(2) : "—"} />
               <DarkField label="CPR (BC-TC)" value={cpr ? `${cpr.bc.toFixed(1)}-${cpr.tc.toFixed(1)}` : "—"} span />
               <DarkField label="Trend Strength" value={`${result.meters.trend.score}/100`} />
             </div>
