@@ -16,11 +16,11 @@ export function emaLast(values: number[], period: number): number | null {
   return series[series.length - 1];
 }
 
-export function rsi(values: number[], period = 14): number | null {
-  if (values.length < period + 1) return null;
+function rsiEndingAt(values: number[], endIdx: number, period: number): number | null {
+  if (endIdx < period) return null;
   let gains = 0;
   let losses = 0;
-  for (let i = values.length - period; i < values.length; i++) {
+  for (let i = endIdx - period + 1; i <= endIdx; i++) {
     const diff = values[i] - values[i - 1];
     if (diff >= 0) gains += diff;
     else losses -= diff;
@@ -30,6 +30,60 @@ export function rsi(values: number[], period = 14): number | null {
   if (avgLoss === 0) return 100;
   const rs = avgGain / avgLoss;
   return 100 - 100 / (1 + rs);
+}
+
+export function rsi(values: number[], period = 14): number | null {
+  if (values.length < period + 1) return null;
+  return rsiEndingAt(values, values.length - 1, period);
+}
+
+// Stochastic RSI: applies the stochastic %K formula over a rolling window of
+// RSI values themselves (not price), so it reads overbought/oversold on the
+// momentum oscillator rather than on price. Reuses the same RSI formula as
+// rsi() above, just evaluated at each bar to build the series.
+export function stochasticRsi(values: number[], rsiPeriod = 14, stochPeriod = 14): number | null {
+  if (values.length < rsiPeriod + stochPeriod + 1) return null;
+  const rsiSeries: number[] = [];
+  for (let i = rsiPeriod; i < values.length; i++) {
+    const r = rsiEndingAt(values, i, rsiPeriod);
+    if (r !== null) rsiSeries.push(r);
+  }
+  if (rsiSeries.length < stochPeriod) return null;
+  const window = rsiSeries.slice(rsiSeries.length - stochPeriod);
+  const minR = Math.min(...window);
+  const maxR = Math.max(...window);
+  if (maxR === minR) return 50; // flat RSI window carries no directional info
+  return ((window[window.length - 1] - minR) / (maxR - minR)) * 100;
+}
+
+// On-Balance Volume: a running total of volume, added on up-closes and
+// subtracted on down-closes. Rising OBV alongside rising price confirms the
+// move is backed by volume; a flattening/falling OBV during a price rise is
+// a classic volume-non-confirmation warning.
+export function onBalanceVolume(candles: Candle[]): number[] {
+  if (!candles.length) return [];
+  const out: number[] = [0];
+  for (let i = 1; i < candles.length; i++) {
+    const vol = candles[i].volume ?? 0;
+    if (candles[i].close > candles[i - 1].close) out.push(out[i - 1] + vol);
+    else if (candles[i].close < candles[i - 1].close) out.push(out[i - 1] - vol);
+    else out.push(out[i - 1]);
+  }
+  return out;
+}
+
+// Simple OBV trend read: compares the latest OBV to its value `lookback` bars
+// ago, normalized against the OBV range over that window so the result is a
+// unitless direction+strength rather than a raw (unbounded) volume number.
+export function obvTrend(candles: Candle[], lookback = 20): { direction: Direction; strength: number } | null {
+  const series = onBalanceVolume(candles);
+  if (series.length < lookback + 1) return null;
+  const window = series.slice(series.length - lookback - 1);
+  const change = window[window.length - 1] - window[0];
+  const range = Math.max(...window) - Math.min(...window);
+  const strength = range > 0 ? Math.min(Math.abs(change) / range, 1) * 100 : 0;
+  const direction: Direction = change > 0 ? "bullish" : change < 0 ? "bearish" : "neutral";
+  return { direction, strength: Math.round(strength) };
 }
 
 export function macd(
