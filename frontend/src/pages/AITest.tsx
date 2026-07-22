@@ -32,6 +32,7 @@ const decisionBg: Record<Decision6, string> = {
 };
 
 interface PremiumProjection {
+  strike: number;
   entry: number;
   targets: [number, number, number];
   stop: number;
@@ -63,7 +64,7 @@ function projectPremium(analysis: TimeframeAnalysis, options: OptionsAnalytics |
   ];
   const stop = Number(Math.max(entry * 0.35, entry - DELTA * riskMove).toFixed(2));
   const rr = entry - stop !== 0 ? Number(((targets[0] - entry) / (entry - stop)).toFixed(2)) : null;
-  return { entry, targets, stop, rr };
+  return { strike: row.strike, entry, targets, stop, rr };
 }
 
 function formatExpiryTip(expiry: string): string {
@@ -127,6 +128,7 @@ export function AITest() {
   const bestTrade = actionableEntries.length
     ? actionableEntries.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best))
     : null;
+  const bestTradeProj = bestTrade ? projectPremium(bestTrade.analysis, bestTrade.options) : null;
 
   const validEntries = allEntries.filter((e) => e.analysis.overallScore !== null);
   const bullishCount = validEntries.filter((e) => e.analysis.bias === "bullish").length;
@@ -177,7 +179,8 @@ export function AITest() {
             <Star size={13} className="text-amber-300 fill-amber-300" /> BEST TRADE OF THE DAY
           </p>
           <p className="text-lg font-black">
-            {DISPLAY_NAME[bestTrade.symbol]} · {bestTrade.analysis.label} · {bestTrade.analysis.decision} {bestTrade.analysis.optSide ?? ""}
+            {DISPLAY_NAME[bestTrade.symbol]} · {bestTrade.analysis.label} · {bestTrade.analysis.decision} {bestTradeProj ? `${bestTradeProj.strike} ` : ""}
+            {bestTrade.analysis.optSide ?? ""}
           </p>
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div>
@@ -235,6 +238,7 @@ export function AITest() {
             <tr className="text-white/40 text-left">
               <th className="font-semibold pb-2">Timeframe</th>
               <th className="font-semibold pb-2">Signal</th>
+              <th className="font-semibold pb-2">Strike</th>
               <th className="font-semibold pb-2">Entry</th>
               <th className="font-semibold pb-2">Target</th>
               <th className="font-semibold pb-2">Stop Loss</th>
@@ -251,6 +255,7 @@ export function AITest() {
                   <td className={`py-2 font-bold ${a.insufficient ? "text-white/30" : decisionColor[a.decision]}`}>
                     {a.insufficient ? "—" : a.decision}
                   </td>
+                  <td className="py-2">{proj ? `${proj.strike} ${a.optSide}` : "—"}</td>
                   <td className="py-2">{proj ? `₹${proj.entry}` : "—"}</td>
                   <td className="py-2">{proj ? `₹${proj.targets[0]}` : "—"}</td>
                   <td className="py-2">{proj ? `₹${proj.stop}` : "—"}</td>
@@ -277,7 +282,7 @@ export function AITest() {
                 ) : (
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full text-black ${decisionBg[a.decision]}`}>
                     {a.decision}
-                    {a.optSide ? ` ${a.optSide}` : ""}
+                    {a.optSide ? ` ${proj ? proj.strike : ""} ${a.optSide}` : ""}
                   </span>
                 )}
               </div>
@@ -297,6 +302,7 @@ export function AITest() {
 
                   {proj ? (
                     <div className="grid grid-cols-3 gap-2">
+                      <TfField label="Strike to Buy" value={`${proj.strike} ${a.optSide}`} />
                       <TfField label="Entry" value={`₹${proj.entry}`} />
                       <TfField label="Target 1" value={`₹${proj.targets[0]}`} tone="up" />
                       <TfField label="Target 2" value={`₹${proj.targets[1]}`} tone="up" />
@@ -339,7 +345,7 @@ export function AITest() {
                             {
                               symbol,
                               optSide: a.optSide!,
-                              strike: current.options?.atmStrike ?? undefined,
+                              strike: proj.strike,
                               entryPrice: proj.entry,
                               stopLoss: proj.stop,
                               target: proj.targets[0],
@@ -359,7 +365,7 @@ export function AITest() {
                         onClick={() => {
                           copyTipToClipboard({
                             symbolLabel: DISPLAY_NAME[symbol],
-                            strike: current.options?.atmStrike,
+                            strike: proj.strike,
                             optSide: a.optSide,
                             expiry: current.signal?.expiry,
                             buyEntry: proj.entry,
