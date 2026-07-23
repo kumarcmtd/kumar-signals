@@ -25,7 +25,7 @@ function makeId(proj: ProjLike, now: number): string {
   return `${proj.strike}-${proj.optSide}-${now}`;
 }
 
-function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["meta"]): TradeLogEntry {
+export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["meta"]): TradeLogEntry {
   return {
     id: makeId(proj, now),
     strike: proj.strike,

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingUp, TrendingDown } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingUp, TrendingDown, ClipboardList } from "lucide-react";
 import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
+import { useKimiTradeLog } from "../hooks/useKimiTradeLog";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import type { OptionsAnalytics } from "../types";
 import {
@@ -86,6 +87,9 @@ export function KimiAITrade() {
     return scanAllSetups(commodity, timeframes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commodity, c5.data, c10.data, c15.data, c30.data, c60.data, c240.data]);
+
+  const projectPremiumFor = useCallback((r: TimedScanResult) => projectScanPremium(r, options), [options]);
+  const ledger = useKimiTradeLog(symbol, liveSuggestions, projectPremiumFor, options);
 
   const probabilityResult = useMemo(() => {
     if (!calcSetup) return null;
@@ -173,6 +177,8 @@ export function KimiAITrade() {
             {liveSuggestions.map((r, i) => {
               const premium = projectScanPremium(r, options);
               const bullish = r.direction === "bullish";
+              const probResult = calculateHitProbability(r.setupName, commodity, []);
+              const baseProb = "error" in probResult ? null : probResult.baseProbability;
               return (
                 <div key={`${r.setupName}-${r.tf}-${i}`} className="rounded-xl border border-slate-100 p-3" style={{ background: bullish ? "#F0FDF4" : "#FEF2F2" }}>
                   <div className="flex items-center justify-between">
@@ -182,6 +188,11 @@ export function KimiAITrade() {
                     </p>
                     <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500">{r.tfLabel}</span>
                   </div>
+                  {baseProb !== null && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Base Hit Probability (reference stats, no confluence factors applied): <span className="font-bold text-slate-700">{baseProb}%</span>
+                    </p>
+                  )}
                   <div className="grid grid-cols-3 gap-1.5 mt-2 text-[10px]">
                     <StatBox label="Entry (underlying)" value={r.entry.toFixed(2)} />
                     <StatBox label="Stop" value={r.stop.toFixed(2)} />
@@ -206,6 +217,25 @@ export function KimiAITrade() {
             })}
           </div>
         )}
+      </section>
+
+      {/* TRADE LEDGER */}
+      <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
+        <p className="text-xs font-bold uppercase text-slate-400 mb-1 flex items-center gap-1.5">
+          <ClipboardList size={14} /> Trade Ledger — {DISPLAY_NAME[symbol]}
+        </p>
+        <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
+          Every live suggestion above is tracked as its own line the moment it fires, using the option premium entry/stop/target shown. Win Rate % below is this ledger's own real, running track
+          record — not a playbook reference stat.
+        </p>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <StatBox label="Win Rate (real track record)" value={ledger.winRatePct !== null ? `${ledger.winRatePct}%` : "— (no closed trades yet)"} bold color={ledger.winRatePct !== null ? (ledger.winRatePct >= 50 ? "#16A34A" : "#DC2626") : undefined} />
+          <StatBox label="Currently Running" value={String(ledger.running)} color="#D97706" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <StatBox label="Target Hit" value={String(ledger.targetHit)} color="#16A34A" />
+          <StatBox label="SL Hit" value={String(ledger.slHit)} color="#DC2626" />
+        </div>
       </section>
 
       {/* SETUP CATALOG */}
@@ -387,11 +417,13 @@ function FactorChip({ label, value, active, onClick, positive }: { label: string
   );
 }
 
-function StatBox({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function StatBox({ label, value, bold, color }: { label: string; value: string; bold?: boolean; color?: string }) {
   return (
     <div className="rounded-lg bg-white/60 px-2.5 py-2 border border-slate-100">
       <p className="text-[9px] text-slate-400">{label}</p>
-      <p className={`text-slate-800 ${bold ? "text-base font-black" : "text-xs font-bold"}`}>{value}</p>
+      <p className={`${bold ? "text-base font-black" : "text-xs font-bold"}`} style={{ color: color ?? "#1e293b" }}>
+        {value}
+      </p>
     </div>
   );
 }
