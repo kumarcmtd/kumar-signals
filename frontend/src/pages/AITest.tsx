@@ -282,13 +282,14 @@ export function AITest() {
       {/* TABLE VIEW */}
       <section className="rounded-2xl bg-white/[0.05] backdrop-blur-xl border border-white/10 p-4 overflow-x-auto">
         <p className="text-xs font-bold uppercase text-white/70 mb-3">Timeframe Overview — {DISPLAY_NAME[symbol]}</p>
-        <table className="w-full text-[11px] min-w-[620px]">
+        <table className="w-full text-[11px] min-w-[720px]">
           <thead>
             <tr className="text-white/40 text-left">
               <th className="font-semibold pb-2">Timeframe</th>
               <th className="font-semibold pb-2">Signal</th>
               <th className="font-semibold pb-2">Strike</th>
               <th className="font-semibold pb-2">Entry</th>
+              <th className="font-semibold pb-2">Live Price</th>
               <th className="font-semibold pb-2">Target</th>
               <th className="font-semibold pb-2">Stop Loss</th>
               <th className="font-semibold pb-2">Probability</th>
@@ -299,6 +300,8 @@ export function AITest() {
             {current.analyses.map((a) => {
               const log = tradeLogs[`${symbol}-${a.tf}`] ?? [];
               const latest = log[log.length - 1];
+              const liveLtp = latest && !latest.closed ? liveLtpFor(current.options, latest.strike, latest.optSide) : null;
+              const pctChange = latest && liveLtp !== null ? (((liveLtp - latest.entry) / latest.entry) * 100).toFixed(1) : null;
               return (
                 <tr key={a.tf} className="border-t border-white/10">
                   <td className="py-2 font-semibold">{a.label}</td>
@@ -307,6 +310,16 @@ export function AITest() {
                   </td>
                   <td className="py-2">{latest ? `${latest.strike} ${latest.optSide}` : "—"}</td>
                   <td className="py-2">{latest ? `₹${latest.entry}` : "—"}</td>
+                  <td className="py-2 font-bold">
+                    {liveLtp !== null ? (
+                      <span className={Number(pctChange) >= 0 ? "text-[#22c55e]" : "text-[#f43f5e]"}>
+                        ₹{liveLtp} ({Number(pctChange) >= 0 ? "+" : ""}
+                        {pctChange}%)
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="py-2">{latest ? `₹${latest.targets[0]}` : "—"}</td>
                   <td className="py-2">{latest ? `₹${latest.stop}` : "—"}</td>
                   <td className="py-2">{a.hitProbability !== null ? `${a.hitProbability}%` : "—"}</td>
