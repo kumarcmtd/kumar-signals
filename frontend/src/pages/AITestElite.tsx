@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { Copy, ShieldCheck, Info } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Copy, ShieldCheck, Info, Bot, ChevronDown } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade, useSignal } from "../api/hooks";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
@@ -66,6 +66,12 @@ function fmtCountdown(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function riskLabel(volatilityScore: number): { label: string; color: string } {
+  if (volatilityScore >= 65) return { label: "High", color: "#FF4D4F" };
+  if (volatilityScore >= 35) return { label: "Medium", color: "#FFC107" };
+  return { label: "Low", color: "#00E676" };
+}
+
 export function AITestElite() {
   const [now, setNow] = useState(Date.now());
   const { data: market } = useMarketStatus();
@@ -73,6 +79,7 @@ export function AITestElite() {
   const createTrade = useCreateTrade();
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [chatKey, setChatKey] = useState<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -156,6 +163,8 @@ export function AITestElite() {
               setLoggedKey={setLoggedKey}
               copiedKey={copiedKey}
               setCopiedKey={setCopiedKey}
+              chatKey={chatKey}
+              setChatKey={setChatKey}
               createTrade={createTrade}
             />
           </motion.div>
@@ -223,6 +232,8 @@ function EliteCard({
   setLoggedKey,
   copiedKey,
   setCopiedKey,
+  chatKey,
+  setChatKey,
   createTrade,
 }: {
   trackingKey: string;
@@ -236,6 +247,8 @@ function EliteCard({
   setLoggedKey: (k: string | null) => void;
   copiedKey: string | null;
   setCopiedKey: (k: string | null) => void;
+  chatKey: string | null;
+  setChatKey: (k: string | null) => void;
   createTrade: ReturnType<typeof useCreateTrade>;
 }) {
   const log = tradeLogs[trackingKey] ?? [];
@@ -244,6 +257,9 @@ function EliteCard({
   const liveLtp = !latest.closed ? liveLtpFor(elite.options, latest.strike, latest.optSide) : null;
   const validUntil = latest.openedAt + SIGNAL_VALIDITY_MS;
   const remainingMs = validUntil - now;
+  const chatOpen = chatKey === trackingKey;
+  const rl = riskLabel(elite.analysis.categories?.volatility.score ?? 50);
+  const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
 
   return (
     <GlassCard glow={elite.analysis.bias === "bullish" ? "#00E676" : "#FF4D4F"}>
@@ -333,8 +349,49 @@ function EliteCard({
           {liveLtp !== null && (
             <p className="text-[10px] text-[#9AA4B2] mt-2">Current premium: ₹{liveLtp}</p>
           )}
+          <button
+            onClick={() => setChatKey(chatOpen ? null : trackingKey)}
+            className="w-full flex items-center justify-center gap-1.5 mt-3 py-2.5 rounded-xl text-xs font-bold border"
+            style={{ background: "#181A24", borderColor: "rgba(0,194,255,.3)", color: "#00C2FF" }}
+          >
+            <Bot size={14} />
+            Chat: Explain this trade
+            <ChevronDown size={14} className={`transition-transform ${chatOpen ? "rotate-180" : ""}`} />
+          </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {chatOpen && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="mt-3 rounded-xl p-3 space-y-3" style={{ background: "#0D0E16", border: "1px solid rgba(0,194,255,.15)" }}>
+              <p className="text-[9px] text-[#9AA4B2]">Answers below are built from this trade's own real numbers — not a free-text chat model.</p>
+              <ChatBubble q="Why did this qualify as Elite?" a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It also cleared the strict bar: ${elite.analysis.decision}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}.`} />
+              <ChatBubble
+                q="What if the target fails?"
+                a={`Stop loss is ₹${latest.stop}. ${
+                  latest.targetsHit[0]
+                    ? `Target 1 was already reached, so the trailing stop has moved up to ${latest.targetsHit[1] ? `₹${latest.targets[0]} (locking the Target 1–2 gain)` : `₹${latest.entry} (breakeven)`}.`
+                    : "It hasn't reached Target 1 yet, so the original stop still applies."
+                }`}
+              />
+              <ChatBubble
+                q="Can I enter now?"
+                a={
+                  liveLtp !== null
+                    ? `Current premium is ₹${liveLtp} vs a recommended entry of ₹${latest.entry} (${(((liveLtp - latest.entry) / latest.entry) * 100).toFixed(1)}% away). Within ~2% is generally still a reasonable entry.`
+                    : latest.closed
+                    ? "This trade has already closed — wait for the next Elite pick."
+                    : "Live premium isn't available right now to compare against the recommended entry."
+                }
+              />
+              <ChatBubble q="What's the risk level?" a={`${rl.label}, based on a volatility score of ${elite.analysis.categories?.volatility.score ?? "—"}/100 on this timeframe.`} />
+              <ChatBubble q="What's the best exit?" a={`Next target is ₹${nextTarget}. Signal validity window: ${remainingMs > 0 ? fmtCountdown(remainingMs) : "expired"}.`} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {elite.analysis.reasons.length > 0 && (
         <div className="mt-3 pt-3 border-t space-y-1" style={{ borderColor: "rgba(255,255,255,.08)" }}>
           <p className="text-[9px] font-bold text-[#00E676] uppercase">Why this qualifies</p>
@@ -358,6 +415,15 @@ function GlassCard({ children, title, glow }: { children: React.ReactNode; title
       {title && <p className="text-xs font-bold uppercase text-[#9AA4B2] mb-3">{title}</p>}
       {children}
     </section>
+  );
+}
+
+function ChatBubble({ q, a }: { q: string; a: string }) {
+  return (
+    <div>
+      <p className="text-xs font-bold text-[#00C2FF]">{q}</p>
+      <p className="text-[11px] text-[#9AA4B2] mt-0.5">{a}</p>
+    </div>
   );
 }
 
