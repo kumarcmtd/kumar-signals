@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LayoutGrid, Globe2, ChevronRight } from "lucide-react";
+import { LayoutGrid, Globe2, Bell, ChevronRight } from "lucide-react";
+import { useAppStore } from "../store/appStore";
+import { notificationPermission } from "../utils/notify";
 
 export function Settings() {
+  const alertSettings = useAppStore((s) => s.alertSettings);
+  const permission = notificationPermission();
+
   return (
     <div className="space-y-4">
       <SettingsGroup title="More pages">
@@ -30,7 +35,15 @@ export function Settings() {
       </SettingsGroup>
 
       <SettingsGroup title="Notifications">
-        <SettingsRow label="Push Notifications" value="Not configured" note="Coming soon" />
+        <Link to="/alerts" className="flex items-center justify-between px-4 py-3">
+          <span className="flex items-center gap-2 text-sm">
+            <Bell size={16} className="text-[var(--color-muted)]" /> In-App &amp; Browser Alerts
+          </span>
+          <span className="text-sm text-[var(--color-muted)] flex items-center gap-2">
+            {alertSettings.enabled ? (permission === "granted" && alertSettings.browserNotifications ? "On (browser + in-app)" : "On (in-app)") : "Off"}
+            <ChevronRight size={16} />
+          </span>
+        </Link>
         <SettingsRow label="Telegram Alerts" value="Planned" note="Future" />
         <SettingsRow label="WhatsApp Alerts" value="Planned" note="Future" />
         <SettingsRow label="Voice Alerts" value="Planned" note="Future" />

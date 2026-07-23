@@ -36,6 +36,36 @@ export interface TradeLogEntry {
   meta?: { label: string; reasons: string[]; confirmingTimeframes: string[] };
 }
 
+// One line per fired alert, newest first. The engine that produces these
+// (useAlertEngine) never invents a signal -- every entry mirrors a decision
+// the corresponding page (AI-Test V2/Pro, AI Elite, or Kimi AI) is already
+// showing live, just surfaced app-wide instead of only on that one page.
+export type AlertSource = "Timeframe" | "Elite" | "Kimi";
+
+export interface AlertEntry {
+  id: string;
+  createdAt: number;
+  source: AlertSource;
+  symbol: InstrumentSymbol;
+  tfLabel: string;
+  title: string;
+  detail: string;
+  read: boolean;
+}
+
+export interface AlertSettings {
+  enabled: boolean;
+  browserNotifications: boolean;
+  soundEnabled: boolean;
+  // "strong" only fires on STRONG BUY/STRONG SELL (Timeframe/Elite) or a
+  // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
+  // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.
+  minTier: "strong" | "all";
+  sources: { timeframe: boolean; elite: boolean; kimi: boolean };
+}
+
+const MAX_ALERTS = 200;
+
 interface AppState {
   selectedInstrument: InstrumentSymbol;
   setSelectedInstrument: (symbol: InstrumentSymbol) => void;
@@ -48,6 +78,16 @@ interface AppState {
 
   tradeLogs: Record<string, TradeLogEntry[]>;
   setTradeLog: (key: string, entries: TradeLogEntry[]) => void;
+
+  alerts: AlertEntry[];
+  addAlerts: (entries: AlertEntry[]) => void;
+  markAlertRead: (id: string) => void;
+  markAllAlertsRead: () => void;
+  clearAlerts: () => void;
+
+  alertSettings: AlertSettings;
+  setAlertSettings: (patch: Partial<AlertSettings>) => void;
+  setAlertSources: (patch: Partial<AlertSettings["sources"]>) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -64,6 +104,23 @@ export const useAppStore = create<AppState>()(
 
       tradeLogs: {},
       setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
+
+      alerts: [],
+      addAlerts: (entries) =>
+        set((s) => ({ alerts: [...entries, ...s.alerts].slice(0, MAX_ALERTS) })),
+      markAlertRead: (id) => set((s) => ({ alerts: s.alerts.map((a) => (a.id === id ? { ...a, read: true } : a)) })),
+      markAllAlertsRead: () => set((s) => ({ alerts: s.alerts.map((a) => (a.read ? a : { ...a, read: true })) })),
+      clearAlerts: () => set({ alerts: [] }),
+
+      alertSettings: {
+        enabled: true,
+        browserNotifications: false,
+        soundEnabled: true,
+        minTier: "strong",
+        sources: { timeframe: true, elite: true, kimi: true },
+      },
+      setAlertSettings: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, ...patch } })),
+      setAlertSources: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, sources: { ...s.alertSettings.sources, ...patch } } })),
     }),
     { name: "kumar-signals-pro-store" }
   )

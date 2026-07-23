@@ -12,6 +12,7 @@ import { Options } from "./pages/Options";
 import { Risk } from "./pages/Risk";
 import { Global } from "./pages/Global";
 import { Journal } from "./pages/Journal";
+import { Alerts } from "./pages/Alerts";
 import { Settings } from "./pages/Settings";
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
           <Route path="/risk" element={<Risk />} />
           <Route path="/global" element={<Global />} />
           <Route path="/journal" element={<Journal />} />
+          <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </ErrorBoundary>
