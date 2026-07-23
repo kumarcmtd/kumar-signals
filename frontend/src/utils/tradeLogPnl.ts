@@ -16,7 +16,7 @@ export interface RealizedTrade {
 // the full Target 3 level for target3_hit. This is an honest approximation
 // of the real exit, not an invented number: it is exactly the level our own
 // close logic acted on.
-function exitPriceFor(e: TradeLogEntry): number {
+export function exitPriceFor(e: TradeLogEntry): number {
   switch (e.status) {
     case "target3_hit":
       return e.targets[2];

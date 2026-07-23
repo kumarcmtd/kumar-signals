@@ -25,7 +25,7 @@ function makeId(proj: ProjLike, now: number): string {
   return `${proj.strike}-${proj.optSide}-${now}`;
 }
 
-function openNewEntry(proj: ProjLike, now: number): TradeLogEntry {
+function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["meta"]): TradeLogEntry {
   return {
     id: makeId(proj, now),
     strike: proj.strike,
@@ -38,6 +38,7 @@ function openNewEntry(proj: ProjLike, now: number): TradeLogEntry {
     closed: false,
     openedAt: now,
     closedAt: null,
+    meta,
   };
 }
 
@@ -80,7 +81,14 @@ export function advanceOpenEntry(entry: TradeLogEntry, liveLtp: number | null, n
 // store write (and avoid re-render loops).
 export function advanceTradeLog(
   history: TradeLogEntry[],
-  ctx: { decision: Decision6; insufficient: string | null | undefined; optSide: "CE" | "PE" | null | undefined; proj: ProjLike | null; liveLtpForOpen: number | null },
+  ctx: {
+    decision: Decision6;
+    insufficient: string | null | undefined;
+    optSide: "CE" | "PE" | null | undefined;
+    proj: ProjLike | null;
+    liveLtpForOpen: number | null;
+    meta?: TradeLogEntry["meta"];
+  },
   now: number,
   maxHistory = MAX_HISTORY
 ): TradeLogEntry[] {
@@ -95,7 +103,7 @@ export function advanceTradeLog(
   }
 
   if (!ctx.insufficient && ctx.decision !== "WAIT" && ctx.optSide && ctx.proj) {
-    const created = openNewEntry({ strike: ctx.proj.strike, optSide: ctx.optSide, entry: ctx.proj.entry, targets: ctx.proj.targets, stop: ctx.proj.stop }, now);
+    const created = openNewEntry({ strike: ctx.proj.strike, optSide: ctx.optSide, entry: ctx.proj.entry, targets: ctx.proj.targets, stop: ctx.proj.stop }, now, ctx.meta);
     const next = [...history, created];
     return next.length > maxHistory ? next.slice(next.length - maxHistory) : next;
   }
@@ -135,7 +143,8 @@ export function useEliteTradeLog(
   decision: Decision6 | null,
   optSide: "CE" | "PE" | null,
   proj: ProjLike | null,
-  options: OptionsAnalytics | undefined
+  options: OptionsAnalytics | undefined,
+  meta?: TradeLogEntry["meta"]
 ) {
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const setTradeLog = useAppStore((s) => s.setTradeLog);
@@ -147,10 +156,10 @@ export function useEliteTradeLog(
     const last = history[history.length - 1];
     const open = last && !last.closed ? last : undefined;
     const liveLtpForOpen = open ? liveLtpFor(options, open.strike, open.optSide) : null;
-    const next = advanceTradeLog(history, { decision: decision ?? "WAIT", insufficient: null, optSide, proj, liveLtpForOpen }, now);
+    const next = advanceTradeLog(history, { decision: decision ?? "WAIT", insufficient: null, optSide, proj, liveLtpForOpen, meta }, now);
     if (next !== history) setTradeLog(trackingKey, next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackingKey, decision, optSide, proj, options]);
+  }, [trackingKey, decision, optSide, proj, options, meta]);
 
   return trackingKey ? tradeLogs[trackingKey] ?? [] : [];
 }

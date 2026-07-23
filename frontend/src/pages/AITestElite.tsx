@@ -7,7 +7,7 @@ import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { findEliteSignal } from "../utils/eliteSignal";
-import { flattenClosedTrades, computePerformanceStats } from "../utils/tradeLogPnl";
+import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { CircularGauge } from "../components/CircularGauge";
@@ -98,11 +98,24 @@ export function AITestElite() {
   const crudeOilProj = crudeOilElite ? projectPremium(crudeOilElite.analysis, crudeOilElite.options) : null;
   const naturalGasProj = naturalGasElite ? projectPremium(naturalGasElite.analysis, naturalGasElite.options) : null;
 
+  // Captured at the moment a call opens, so its "why" stays reviewable in
+  // history later -- today's live analysis has nothing to do with a call
+  // that already closed. Memoized on the underlying primitives so it isn't
+  // a fresh object reference on every render.
+  const crudeOilMeta = useMemo(
+    () => (crudeOilElite ? { label: crudeOilElite.analysis.label, reasons: crudeOilElite.analysis.reasons, confirmingTimeframes: crudeOilElite.confirmingTimeframes } : undefined),
+    [crudeOilElite]
+  );
+  const naturalGasMeta = useMemo(
+    () => (naturalGasElite ? { label: naturalGasElite.analysis.label, reasons: naturalGasElite.analysis.reasons, confirmingTimeframes: naturalGasElite.confirmingTimeframes } : undefined),
+    [naturalGasElite]
+  );
+
   // Both symbols must keep ticking regardless of which one (if any)
   // currently qualifies, so an already-open Elite trade never silently
   // stops being tracked the moment the OTHER symbol becomes the pick.
-  useEliteTradeLog("ELITE-CRUDEOIL", crudeOilElite?.analysis.decision ?? null, crudeOilElite?.analysis.optSide ?? null, crudeOilProj, crudeOil.options);
-  useEliteTradeLog("ELITE-NATURALGAS", naturalGasElite?.analysis.decision ?? null, naturalGasElite?.analysis.optSide ?? null, naturalGasProj, naturalGas.options);
+  useEliteTradeLog("ELITE-CRUDEOIL", crudeOilElite?.analysis.decision ?? null, crudeOilElite?.analysis.optSide ?? null, crudeOilProj, crudeOil.options, crudeOilMeta);
+  useEliteTradeLog("ELITE-NATURALGAS", naturalGasElite?.analysis.decision ?? null, naturalGasElite?.analysis.optSide ?? null, naturalGasProj, naturalGas.options, naturalGasMeta);
   const tradeLogs = useAppStore((s) => s.tradeLogs);
 
   const picks = [
@@ -122,6 +135,18 @@ export function AITestElite() {
   const realized = useMemo(() => flattenClosedTrades(eliteTradeLogsOnly), [eliteTradeLogsOnly]);
   const perf = useMemo(() => computePerformanceStats(realized), [realized]);
   const dayStats = useMemo(() => summarizeTradeLogsByDay(eliteTradeLogsOnly), [eliteTradeLogsOnly]);
+
+  // Every call this filter has ever made, open or closed, newest first --
+  // this is what makes past calls reviewable/chattable, not just the
+  // currently live one.
+  const allCalls = useMemo(() => {
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry }[] = [];
+    for (const [k, v] of Object.entries(eliteTradeLogsOnly)) {
+      const symbol = k.replace("ELITE-", "") as TradableSymbol;
+      for (const entry of v) out.push({ symbol, entry });
+    }
+    return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
+  }, [eliteTradeLogsOnly]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 min-h-screen text-white space-y-4" style={{ background: "linear-gradient(180deg,#09090F,#0D0E16 40%,#09090F)" }}>
@@ -209,6 +234,16 @@ export function AITestElite() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </GlassCard>
+      )}
+
+      {allCalls.length > 0 && (
+        <GlassCard title="Elite Calls (History) — chat any past call">
+          <div className="space-y-2">
+            {allCalls.map(({ symbol, entry }) => (
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} chatKey={chatKey} setChatKey={setChatKey} />
+            ))}
           </div>
         </GlassCard>
       )}
@@ -423,6 +458,76 @@ function ChatBubble({ q, a }: { q: string; a: string }) {
     <div>
       <p className="text-xs font-bold text-[#00C2FF]">{q}</p>
       <p className="text-[11px] text-[#9AA4B2] mt-0.5">{a}</p>
+    </div>
+  );
+}
+
+// One row per Elite call ever made (open or closed), each independently
+// chattable -- reuses the real reasons/confirming-timeframes captured at
+// the moment that specific call opened (entry.meta), not today's live
+// analysis, which has nothing to do with a call from earlier or from a
+// previous day.
+function CallHistoryRow({
+  symbol,
+  entry,
+  chatKey,
+  setChatKey,
+}: {
+  symbol: TradableSymbol;
+  entry: TradeLogEntry;
+  chatKey: string | null;
+  setChatKey: (k: string | null) => void;
+}) {
+  const chatOpen = chatKey === entry.id;
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  const durationMin = entry.closedAt !== null ? Math.round((entry.closedAt - entry.openedAt) / 60000) : null;
+
+  return (
+    <div className="rounded-xl px-3 py-2.5" style={{ background: "#12131C", border: "1px solid rgba(255,255,255,.06)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold">
+            {DISPLAY_NAME[symbol]} · {entry.strike} {entry.optSide}
+            {entry.meta?.label ? ` · ${entry.meta.label}` : ""}
+          </p>
+          <p className="text-[10px] text-[#9AA4B2]">{new Date(entry.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-xs font-bold" style={{ color: !entry.closed ? "#FF4D4F" : pnl !== null && pnl > 0 ? "#00E676" : pnl !== null && pnl < 0 ? "#FF4D4F" : "#a3e635" }}>
+            {!entry.closed ? "LIVE" : entry.status.replace(/_/g, " ")}
+          </p>
+          {pnl !== null && <p className="text-[10px] text-[#9AA4B2]">{pnl >= 0 ? "+" : ""}{pnl} pts</p>}
+        </div>
+      </div>
+      <button onClick={() => setChatKey(chatOpen ? null : entry.id)} className="w-full flex items-center justify-center gap-1 mt-2 py-1.5 rounded-lg text-[10px] font-bold" style={{ background: "#181A24", color: "#00C2FF" }}>
+        <Bot size={11} /> Chat about this call
+        <ChevronDown size={11} className={`transition-transform ${chatOpen ? "rotate-180" : ""}`} />
+      </button>
+      <AnimatePresence>
+        {chatOpen && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="mt-2 space-y-2 pt-2 border-t" style={{ borderColor: "rgba(255,255,255,.06)" }}>
+              {entry.meta ? (
+                <ChatBubble
+                  q="Why did this qualify as Elite?"
+                  a={`${entry.meta.reasons[0] ?? "Multiple scored categories agreed on this direction."} Confirmed by: ${entry.meta.confirmingTimeframes.join(", ") || "—"}.`}
+                />
+              ) : (
+                <ChatBubble q="Why did this qualify as Elite?" a="This call was opened before detailed reasoning capture shipped, so the original notes weren't saved for it — only the numbers below are available." />
+              )}
+              <ChatBubble
+                q="What happened?"
+                a={
+                  !entry.closed
+                    ? `Still running. Entry ₹${entry.entry}, targets ₹${entry.targets.join(" / ₹")}, stop ₹${entry.stop}.`
+                    : `Closed as "${entry.status.replace(/_/g, " ")}" at ₹${exit}, ${pnl! >= 0 ? "a gain" : "a loss"} of ${Math.abs(pnl!)} points from the ₹${entry.entry} entry${durationMin !== null ? ` after ${durationMin} minute(s)` : ""}.`
+                }
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

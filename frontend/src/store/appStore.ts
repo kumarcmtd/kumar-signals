@@ -28,6 +28,12 @@ export interface TradeLogEntry {
   closed: boolean;
   openedAt: number;
   closedAt: number | null;
+  // Captured at the moment the entry opened, so a later "explain this call"
+  // view can show the REAL reasoning from back then instead of substituting
+  // today's live analysis (which has nothing to do with an already-closed
+  // trade) or inventing something. Optional so existing entries and callers
+  // that don't track this (AI-Test V2/Pro) are unaffected.
+  meta?: { label: string; reasons: string[]; confirmingTimeframes: string[] };
 }
 
 interface AppState {
