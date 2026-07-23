@@ -4,6 +4,7 @@ import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
 import { useKimiTradeLog } from "../hooks/useKimiTradeLog";
 import { liveLtpFor } from "../hooks/useTradeLog";
+import { useAppStore } from "../store/appStore";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import type { OptionsAnalytics } from "../types";
 import {
@@ -12,6 +13,8 @@ import {
   ALL_CONFLUENCE_FACTORS,
   calculateHitProbability,
   calculatePotentialLeft,
+  calculatePositionSize,
+  findPlaybookSetup,
   type PlaybookSetup,
   type Commodity,
   type ConfluenceFactor,
@@ -21,6 +24,7 @@ import {
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOL_TO_COMMODITY: Record<TradableSymbol, Commodity> = { CRUDEOIL: "CL", NATURALGAS: "NG" };
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 
 // The 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News
 // Gap Fill) can't be honestly detected without a real economic-calendar feed --
@@ -79,12 +83,14 @@ export function KimiAITrade() {
 
   const [entry, setEntry] = useState("");
   const [stopLoss, setStopLoss] = useState("");
+  const [atr, setAtr] = useState("");
   const [target, setTarget] = useState("");
   const [ltp, setLtp] = useState("");
 
   const commodity = SYMBOL_TO_COMMODITY[symbol];
   const setups = symbol === "NATURALGAS" ? NATURAL_GAS_SETUPS : CRUDE_OIL_SETUPS;
   const { data: options } = useOptionsAnalytics(symbol);
+  const { risk } = useAppStore();
 
   const c15 = useCandles(symbol, "15");
   const c30 = useCandles(symbol, "30");
@@ -104,9 +110,20 @@ export function KimiAITrade() {
 
   const probabilityResult = useMemo(() => {
     if (!calcSetup) return null;
-    const result = calculateHitProbability(calcSetup.setupName, commodity, Array.from(selectedFactors));
+    const e = Number(entry),
+      s = Number(stopLoss),
+      a = Number(atr);
+    const actualSlDistance = e && s ? Math.abs(e - s) : undefined;
+    const result = calculateHitProbability(calcSetup.setupName, commodity, Array.from(selectedFactors), a > 0 ? a : undefined, actualSlDistance);
     return "error" in result ? null : result;
-  }, [calcSetup, commodity, selectedFactors]);
+  }, [calcSetup, commodity, selectedFactors, entry, stopLoss, atr]);
+
+  const positionSizeResult = useMemo(() => {
+    const e = Number(entry),
+      s = Number(stopLoss);
+    if (!e || !s) return null;
+    return calculatePositionSize(risk.capital, risk.riskPercent, e, s, LOT_SIZE[symbol]);
+  }, [entry, stopLoss, risk.capital, risk.riskPercent, symbol]);
 
   const potentialResult = useMemo(() => {
     const e = Number(entry),
@@ -147,8 +164,13 @@ export function KimiAITrade() {
         </p>
         <p className="text-[11px] text-amber-700 mt-1.5 leading-relaxed">
           The win-rate, profit-factor, and expectancy numbers shown for each setup below came from the AI-generated document you provided — they are <b>not</b> real backtests run against MCX
-          historical data by this app. Treat them as illustrative reference points, not proven results. The two calculators (Hit Probability and Potential Left) are real, deterministic math —
-          those work correctly regardless of which numbers you feed them.
+          historical data by this app. Treat them as illustrative reference points, not proven results. The calculators (Hit Probability, Potential Left, Position Size) are real, deterministic
+          math — those work correctly regardless of which numbers you feed them.
+        </p>
+        <p className="text-[11px] text-amber-700 mt-1.5 leading-relaxed">
+          <b>v2.1 update:</b> live testing showed stops far tighter than each setup's own volatility caused near-total stop-loss hits. Every live suggestion's stop/target is now floored to that
+          setup's minimum ATR(14) multiple automatically, and the Hit Probability Calculator now blocks a trade outright — regardless of edge score — if its required confluence isn't present or
+          its stop is still too tight.
         </p>
       </section>
 
@@ -189,8 +211,17 @@ export function KimiAITrade() {
             {liveSuggestions.map((r, i) => {
               const premium = projectScanPremium(r, options);
               const bullish = r.direction === "bullish";
-              const probResult = calculateHitProbability(r.setupName, commodity, []);
-              const baseProb = "error" in probResult ? null : probResult.baseProbability;
+              // The scanner already verified this setup's own required
+              // confluence factors before firing (e.g. the volume/trend
+              // checks inside the scanner ARE "volume_spike_1_5x" /
+              // "trend_aligned") -- and its stop/target are already floored
+              // to the ATR minimum -- so neither check can legitimately fail
+              // here. Passing the matched setup's requiredConfluence (rather
+              // than an empty list) reflects that honestly instead of always
+              // showing "missing confluence".
+              const matchedSetup = findPlaybookSetup(r.setupName, commodity);
+              const probResult = calculateHitProbability(r.setupName, commodity, matchedSetup?.requiredConfluence ?? []);
+              const finalProb = "error" in probResult ? null : probResult.finalProbability;
               const callTime = formatCallTime(ledger.openedAtFor(r.setupName, r.tf));
               const ledgerEntry = ledger.entryFor(r.setupName, r.tf);
               const liveNow = ledgerEntry ? liveLtpFor(options, ledgerEntry.strike, ledgerEntry.optSide) : (premium?.entry ?? null);
@@ -209,18 +240,18 @@ export function KimiAITrade() {
                       <Clock size={10} /> Call given: {callTime} IST
                     </p>
                   )}
-                  {baseProb !== null && (
-                    <div className="rounded-lg mt-2 px-2.5 py-1.5" style={{ background: probabilityStyle(baseProb).bg }}>
+                  {finalProb !== null && (
+                    <div className="rounded-lg mt-2 px-2.5 py-1.5" style={{ background: probabilityStyle(finalProb).bg }}>
                       <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-bold uppercase" style={{ color: probabilityStyle(baseProb).text }}>
+                        <span className="text-[9px] font-bold uppercase" style={{ color: probabilityStyle(finalProb).text }}>
                           Hit Probability
                         </span>
-                        <span className="text-2xl font-black" style={{ color: probabilityStyle(baseProb).text }}>
-                          {baseProb}%
+                        <span className="text-2xl font-black" style={{ color: probabilityStyle(finalProb).text }}>
+                          {finalProb}%
                         </span>
                       </div>
-                      <p className="text-[8px] mt-0.5" style={{ color: probabilityStyle(baseProb).text, opacity: 0.75 }}>
-                        Base reference stat, no confluence factors applied
+                      <p className="text-[8px] mt-0.5" style={{ color: probabilityStyle(finalProb).text, opacity: 0.75 }}>
+                        Includes this setup's own required confluence — already verified by the scan
                       </p>
                     </div>
                   )}
@@ -361,7 +392,7 @@ export function KimiAITrade() {
                     <button
                       onClick={() => {
                         setCalcSetup(s);
-                        setSelectedFactors(new Set());
+                        setSelectedFactors(new Set(s.requiredConfluence));
                       }}
                       className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold text-white"
                       style={{ background: "linear-gradient(135deg,#F59E0B,#EF4444)" }}
@@ -380,7 +411,17 @@ export function KimiAITrade() {
       {calcSetup && (
         <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
           <p className="text-xs font-bold uppercase text-slate-400 mb-1">Hit Probability Calculator</p>
-          <p className="text-sm font-bold text-slate-800 mb-3">{calcSetup.setupName}</p>
+          <p className="text-sm font-bold text-slate-800 mb-1">{calcSetup.setupName}</p>
+          <p className="text-[10px] text-slate-400 mb-3">
+            Min stop = {calcSetup.minAtrSl}x ATR(14) · Required confluence: {calcSetup.requiredConfluence.map((f) => f.replace(/_/g, " ")).join(", ")}
+          </p>
+
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            <NumInput label="Entry" value={entry} onChange={setEntry} />
+            <NumInput label="Stop Loss" value={stopLoss} onChange={setStopLoss} />
+            <NumInput label="ATR (14)" value={atr} onChange={setAtr} />
+          </div>
+          <p className="text-[9px] text-slate-400 -mt-2 mb-3">Entry &amp; Stop Loss are shared with the Potential Left Calculator below.</p>
 
           <p className="text-[10px] font-bold text-emerald-600 uppercase mb-1.5">Positive Factors</p>
           <div className="flex flex-wrap gap-1.5 mb-3">
@@ -396,7 +437,19 @@ export function KimiAITrade() {
           </div>
 
           {probabilityResult && (
-            <div className="rounded-xl p-3" style={{ background: RECOMMENDATION_STYLE[probabilityResult.recommendation].bg }}>
+            <div className="rounded-xl p-3" style={{ background: probabilityResult.blocked ? "#FEE2E2" : RECOMMENDATION_STYLE[probabilityResult.recommendation].bg }}>
+              {probabilityResult.blocked && (
+                <div className="mb-2.5 pb-2.5 border-b border-rose-200">
+                  <p className="text-xs font-black text-rose-700 flex items-center gap-1.5">
+                    <AlertTriangle size={13} /> BLOCKED — not tradeable
+                  </p>
+                  {probabilityResult.errors.map((e, i) => (
+                    <p key={i} className="text-[10px] text-rose-600 mt-1">
+                      • {e}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-2 mb-2">
                 <StatBox label="Base" value={`${probabilityResult.baseProbability}%`} />
                 <StatBox label="Adjustment" value={`${probabilityResult.totalAdjustment >= 0 ? "+" : ""}${probabilityResult.totalAdjustment}`} />
@@ -406,9 +459,26 @@ export function KimiAITrade() {
                 <StatBox label="Edge Score" value={String(probabilityResult.edgeScore)} />
                 <StatBox label="RR Ratio" value={`1:${probabilityResult.rrRatio}`} />
               </div>
-              <p className="text-sm font-black text-center mt-1" style={{ color: RECOMMENDATION_STYLE[probabilityResult.recommendation].text }}>
-                {probabilityResult.recommendation}
+              <p className="text-sm font-black text-center mt-1" style={{ color: probabilityResult.blocked ? "#B91C1C" : RECOMMENDATION_STYLE[probabilityResult.recommendation].text }}>
+                {probabilityResult.recommendation} {probabilityResult.tradeable ? "✓ Tradeable" : "— Not tradeable"}
               </p>
+            </div>
+          )}
+
+          {positionSizeResult && (
+            <div className="rounded-xl p-3 mt-2 bg-slate-50 border border-slate-100">
+              <p className="text-[9px] font-bold uppercase text-slate-400 mb-1.5">
+                Position Size (Risk page settings: ₹{risk.capital.toLocaleString("en-IN")} @ {risk.riskPercent}%)
+              </p>
+              {positionSizeResult.error ? (
+                <p className="text-xs text-rose-600 font-bold">{positionSizeResult.error}</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+                  <StatBox label="Risk Amount" value={`₹${positionSizeResult.riskAmount.toLocaleString("en-IN")}`} />
+                  <StatBox label="Risk / Lot" value={`₹${positionSizeResult.riskPerLot.toLocaleString("en-IN")}`} />
+                  <StatBox label="Recommended Lots" value={String(positionSizeResult.recommendedLots)} bold color={positionSizeResult.recommendedLots > 0 ? "#16A34A" : "#DC2626"} />
+                </div>
+              )}
             </div>
           )}
         </section>

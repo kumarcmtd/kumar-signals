@@ -2,6 +2,7 @@ import type { Candle, Direction, IndicatorSnapshot } from "../types";
 import { rsi, computeIndicatorSnapshot, macd } from "./indicators";
 import { detectCandlePattern, findSwingPoints, analyzeStructure, type SwingPoint, type StructureAnalysis } from "./priceAction";
 import { sessionDayKey } from "./tradeLogStats";
+import { findPlaybookSetup } from "./kimiPlaybook";
 
 // Real rule-based scanners for the 13 Kimi AI playbook setups that are
 // purely technical (price/indicator based). The other 3 setups in the
@@ -243,13 +244,13 @@ function scanFlagBreakout(ctx: ScanContext): ScanResult | null {
     const entry = last.close;
     const stop = consolLow * 0.997;
     const target = Number((entry + poleMove).toFixed(2));
-    return { setupName: "Flag Breakout (15-min)", direction: "bullish", entry, stop: Number(stop.toFixed(2)), target, notes: ["Broke above flag consolidation", "Target = pole height projected from breakout"] };
+    return { setupName: "Flag Breakout (30-min)", direction: "bullish", entry, stop: Number(stop.toFixed(2)), target, notes: ["Broke above flag consolidation", "Target = pole height projected from breakout"] };
   }
   if (last.close < consolLow) {
     const entry = last.close;
     const stop = consolHigh * 1.003;
     const target = Number((entry - poleMove).toFixed(2));
-    return { setupName: "Flag Breakout (15-min)", direction: "bearish", entry, stop: Number(stop.toFixed(2)), target, notes: ["Broke below flag consolidation", "Target = pole height projected from breakout"] };
+    return { setupName: "Flag Breakout (30-min)", direction: "bearish", entry, stop: Number(stop.toFixed(2)), target, notes: ["Broke below flag consolidation", "Target = pole height projected from breakout"] };
   }
   return null;
 }
@@ -394,19 +395,62 @@ function scanMacdBullishCrossoverBelowZero(ctx: ScanContext): ScanResult | null 
 const NG_SCANNERS = [scanBullishEngulfingEmaBounce, scanDoubleBottomVolumeSpike, scanRsiDivergenceAtSupport, scanBearishPinBarAtResistance, scan200EmaRejection, scanFlagBreakout];
 const CL_SCANNERS = [scanTrendlineBreakRetest, scanVwapRejection, scanHeadAndShoulders, scanHammerAt200Ema, scanShootingStarAtSupply, scanMacdBullishCrossoverBelowZero];
 
+// v2.1 CRITICAL FIX from the playbook: live testing of the raw scanner
+// output showed a 0% win rate traced to stops far tighter than the setup's
+// own natural volatility (a 3.1pt stop on 4.5 ATR = 0.69x, when the setup
+// needed 1.5x = 6.75pts). Every scanner result is now floored to each
+// setup's own minAtrSl/minAtrTarget (from the playbook catalog) using the
+// SAME ATR(14) already computed for this timeframe -- widening the stop
+// and target outward from entry if the setup's natural rule would leave
+// them narrower than that minimum, in whichever direction the trade runs.
+function applyAtrFloor(r: ScanResult, atr14: number | null, commodity: "NG" | "CL"): ScanResult {
+  if (!atr14 || atr14 <= 0) return r;
+  const setup = findPlaybookSetup(r.setupName, commodity);
+  if (!setup) return r;
+  const minStopDist = atr14 * setup.minAtrSl;
+  const minTargetDist = atr14 * setup.minAtrTarget;
+  const bullish = r.direction === "bullish";
+  let stop = r.stop;
+  let target = r.target;
+  let widened = false;
+  if (bullish) {
+    if (r.entry - r.stop < minStopDist) {
+      stop = Number((r.entry - minStopDist).toFixed(2));
+      widened = true;
+    }
+    if (r.target - r.entry < minTargetDist) {
+      target = Number((r.entry + minTargetDist).toFixed(2));
+      widened = true;
+    }
+  } else {
+    if (r.stop - r.entry < minStopDist) {
+      stop = Number((r.entry + minStopDist).toFixed(2));
+      widened = true;
+    }
+    if (r.entry - r.target < minTargetDist) {
+      target = Number((r.entry - minTargetDist).toFixed(2));
+      widened = true;
+    }
+  }
+  if (!widened) return r;
+  return { ...r, stop, target, notes: [...r.notes, `Stop/target widened to ${setup.minAtrSl}x/${setup.minAtrTarget}x ATR minimum (was too tight)`] };
+}
+
 export function scanNaturalGasSetups(candles: Candle[], todaysCandles: Candle[]): ScanResult[] {
   const ctx = buildContext(candles);
   if (!ctx) return [];
   const results = NG_SCANNERS.map((fn) => fn(ctx)).filter((r): r is ScanResult => r !== null);
   const orb = scanOpeningRangeBreakout(ctx, todaysCandles);
   if (orb) results.push(orb);
-  return results;
+  return results.map((r) => applyAtrFloor(r, ctx.snap.atr14, "NG"));
 }
 
 export function scanCrudeOilSetups(candles: Candle[]): ScanResult[] {
   const ctx = buildContext(candles);
   if (!ctx) return [];
-  return CL_SCANNERS.map((fn) => fn(ctx)).filter((r): r is ScanResult => r !== null);
+  return CL_SCANNERS.map((fn) => fn(ctx))
+    .filter((r): r is ScanResult => r !== null)
+    .map((r) => applyAtrFloor(r, ctx.snap.atr14, "CL"));
 }
 
 // Candles belonging to the same MCX session day as the most recent candle --
