@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingU
 import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
 import { useKimiTradeLog } from "../hooks/useKimiTradeLog";
+import { liveLtpFor } from "../hooks/useTradeLog";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import type { OptionsAnalytics } from "../types";
 import {
@@ -192,6 +193,9 @@ export function KimiAITrade() {
               const probResult = calculateHitProbability(r.setupName, commodity, []);
               const baseProb = "error" in probResult ? null : probResult.baseProbability;
               const callTime = formatCallTime(ledger.openedAtFor(r.setupName, r.tf));
+              const ledgerEntry = ledger.entryFor(r.setupName, r.tf);
+              const liveNow = ledgerEntry ? liveLtpFor(options, ledgerEntry.strike, ledgerEntry.optSide) : (premium?.entry ?? null);
+              const pctChange = ledgerEntry && liveNow !== null ? Number((((liveNow - ledgerEntry.entry) / ledgerEntry.entry) * 100).toFixed(1)) : null;
               return (
                 <div key={`${r.setupName}-${r.tf}-${i}`} className="rounded-xl border border-slate-100 p-3" style={{ background: bullish ? "#F0FDF4" : "#FEF2F2" }}>
                   <div className="flex items-center justify-between">
@@ -226,13 +230,27 @@ export function KimiAITrade() {
                     <StatBox label="Stop" value={r.stop.toFixed(2)} />
                     <StatBox label="Target" value={r.target.toFixed(2)} />
                   </div>
-                  {premium && (
-                    <div className="grid grid-cols-3 gap-1.5 mt-1.5 text-[10px]">
-                      <StatBox label={`${premium.strike} ${premium.optSide} Entry`} value={String(premium.entry)} />
-                      <StatBox label="Premium Stop" value={String(premium.stop)} />
-                      <StatBox label="Premium Target" value={String(premium.target)} />
+                  {(premium || ledgerEntry) && liveNow !== null && (
+                    <div className="rounded-lg mt-1.5 px-2.5 py-1.5 bg-white border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase text-slate-400">
+                          Live Price Now ({ledgerEntry ? ledgerEntry.strike : premium!.strike} {ledgerEntry ? ledgerEntry.optSide : premium!.optSide})
+                        </span>
+                        <span className="text-lg font-black text-slate-800">₹{liveNow}</span>
+                      </div>
+                      {ledgerEntry && pctChange !== null && (
+                        <p className="text-[10px] mt-0.5 font-semibold" style={{ color: pctChange >= 0 ? "#16A34A" : "#DC2626" }}>
+                          Called at ₹{ledgerEntry.entry} · {pctChange >= 0 ? "+" : ""}
+                          {pctChange}% since the call
+                        </p>
+                      )}
                     </div>
                   )}
+                  <div className="grid grid-cols-3 gap-1.5 mt-1.5 text-[10px]">
+                    <StatBox label={ledgerEntry ? "Called Entry" : premium ? `${premium.strike} ${premium.optSide} Entry (est.)` : "Premium Entry"} value={ledgerEntry ? String(ledgerEntry.entry) : premium ? String(premium.entry) : "—"} />
+                    <StatBox label="Premium Stop" value={ledgerEntry ? String(ledgerEntry.stop) : premium ? String(premium.stop) : "—"} />
+                    <StatBox label="Premium Target" value={ledgerEntry ? String(ledgerEntry.targets[0]) : premium ? String(premium.target) : "—"} />
+                  </div>
                   <div className="mt-1.5 space-y-0.5">
                     {r.notes.map((n, ni) => (
                       <p key={ni} className="text-[10px] text-slate-500">

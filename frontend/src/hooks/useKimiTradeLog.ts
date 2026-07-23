@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from "react";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { liveLtpFor, openNewEntry, advanceOpenEntry } from "./useTradeLog";
 import type { TimedScanResult } from "../utils/kimiScanner";
 import type { OptionsAnalytics } from "../types";
@@ -87,5 +87,17 @@ export function useKimiTradeLog(
     [tradeLogs, prefix]
   );
 
-  return { ...stats, openedAtFor };
+  // The FROZEN entry/stop/target this call was actually opened at, so the UI
+  // can show that fixed number next to the live premium ticking now, instead
+  // of only ever showing "right now" (which would silently drift away from
+  // what the call originally said as the market moves).
+  const entryFor = useCallback(
+    (setupName: string, tf: string): TradeLogEntry | null => {
+      const history = tradeLogs[`${prefix}${setupName}-${tf}`];
+      return history?.[history.length - 1] ?? null;
+    },
+    [tradeLogs, prefix]
+  );
+
+  return { ...stats, openedAtFor, entryFor };
 }
