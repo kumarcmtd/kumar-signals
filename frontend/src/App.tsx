@@ -4,6 +4,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AITest } from "./pages/AITest";
 import { AITestPro } from "./pages/AITestPro";
 import { AITestElite } from "./pages/AITestElite";
+import { TradeReport } from "./pages/TradeReport";
 import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
@@ -20,6 +21,7 @@ function App() {
           <Route path="/" element={<AITest />} />
           <Route path="/ai-test-pro" element={<AITestPro />} />
           <Route path="/ai-elite" element={<AITestElite />} />
+          <Route path="/trade-report" element={<TradeReport />} />
           <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
