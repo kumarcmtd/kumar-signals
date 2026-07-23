@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAppStore } from "../store/appStore";
 import { liveLtpFor, openNewEntry, advanceOpenEntry } from "./useTradeLog";
 import type { TimedScanResult } from "../utils/kimiScanner";
@@ -63,7 +63,7 @@ export function useKimiTradeLog(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, liveSuggestions, options]);
 
-  return useMemo(() => {
+  const stats = useMemo(() => {
     const entries = Object.keys(tradeLogs)
       .filter((k) => k.startsWith(prefix))
       .flatMap((k) => tradeLogs[k]);
@@ -75,4 +75,17 @@ export function useKimiTradeLog(
     return { entries, targetHit, slHit, running, closed, winRatePct };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeLogs, symbol]);
+
+  // The time the CURRENT (most recent) line for this exact setup+timeframe
+  // was first opened -- i.e. when this call was given, not when it last ticked.
+  const openedAtFor = useCallback(
+    (setupName: string, tf: string) => {
+      const history = tradeLogs[`${prefix}${setupName}-${tf}`];
+      const last = history?.[history.length - 1];
+      return last?.openedAt ?? null;
+    },
+    [tradeLogs, prefix]
+  );
+
+  return { ...stats, openedAtFor };
 }

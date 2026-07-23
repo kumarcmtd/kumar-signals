@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingUp, TrendingDown, ClipboardList } from "lucide-react";
+import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingUp, TrendingDown, ClipboardList, Clock } from "lucide-react";
 import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
 import { useKimiTradeLog } from "../hooks/useKimiTradeLog";
@@ -57,6 +57,11 @@ const RECOMMENDATION_STYLE: Record<Recommendation, { bg: string; text: string }>
   MARGINAL: { bg: "#FEF3C7", text: "#B45309" },
   SKIP: { bg: "#FEE2E2", text: "#B91C1C" },
 };
+
+function formatCallTime(ts: number | null): string | null {
+  if (ts === null) return null;
+  return new Date(ts).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true });
+}
 
 function probabilityStyle(pct: number): { bg: string; text: string } {
   if (pct >= 75) return { bg: "#DCFCE7", text: "#15803D" };
@@ -186,6 +191,7 @@ export function KimiAITrade() {
               const bullish = r.direction === "bullish";
               const probResult = calculateHitProbability(r.setupName, commodity, []);
               const baseProb = "error" in probResult ? null : probResult.baseProbability;
+              const callTime = formatCallTime(ledger.openedAtFor(r.setupName, r.tf));
               return (
                 <div key={`${r.setupName}-${r.tf}-${i}`} className="rounded-xl border border-slate-100 p-3" style={{ background: bullish ? "#F0FDF4" : "#FEF2F2" }}>
                   <div className="flex items-center justify-between">
@@ -195,6 +201,11 @@ export function KimiAITrade() {
                     </p>
                     <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500">{r.tfLabel}</span>
                   </div>
+                  {callTime && (
+                    <p className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                      <Clock size={10} /> Call given: {callTime} IST
+                    </p>
+                  )}
                   {baseProb !== null && (
                     <div className="rounded-lg mt-2 px-2.5 py-1.5" style={{ background: probabilityStyle(baseProb).bg }}>
                       <div className="flex items-center justify-between">
