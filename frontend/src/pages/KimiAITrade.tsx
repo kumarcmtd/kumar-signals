@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap } from "lucide-react";
-import { useOptionsAnalytics } from "../api/hooks";
+import { AlertTriangle, ChevronDown, Calculator, BookOpen, Zap, Radar, TrendingUp, TrendingDown } from "lucide-react";
+import { useCandles, useOptionsAnalytics } from "../api/hooks";
+import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
+import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
+import type { OptionsAnalytics } from "../types";
 import {
   NATURAL_GAS_SETUPS,
   CRUDE_OIL_SETUPS,
@@ -16,6 +19,36 @@ import {
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOL_TO_COMMODITY: Record<TradableSymbol, Commodity> = { CRUDEOIL: "CL", NATURALGAS: "NG" };
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+
+// The 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News
+// Gap Fill) can't be honestly detected without a real economic-calendar feed --
+// this app has none, so they're excluded from live scanning and stay
+// catalog-only above, with that limitation stated in the UI.
+const NEWS_DRIVEN_SETUPS = new Set(["EIA Storage Reversal (Post-Data)", "EIA Inventory Reversal", "OPEC News Gap Fill"]);
+
+interface ScanPremium {
+  strike: number;
+  optSide: "CE" | "PE";
+  entry: number;
+  target: number;
+  stop: number;
+}
+
+function projectScanPremium(result: TimedScanResult, options: OptionsAnalytics | undefined): ScanPremium | null {
+  if (!options || options.error || options.atmStrike === null) return null;
+  const row = options.rows.find((r) => r.strike === options.atmStrike) ?? options.rows[Math.floor(options.rows.length / 2)];
+  if (!row) return null;
+  const optSide: "CE" | "PE" = result.direction === "bullish" ? "CE" : "PE";
+  const leg = optSide === "CE" ? row.call : row.put;
+  if (leg.ltp === null || leg.ltp <= 0) return null;
+  const DELTA = 0.5;
+  const favMove = Math.abs(result.target - result.entry);
+  const riskMove = Math.abs(result.entry - result.stop);
+  const entry = leg.ltp;
+  const target = Number((entry + DELTA * favMove).toFixed(2));
+  const stop = Number(Math.max(entry * 0.35, entry - DELTA * riskMove).toFixed(2));
+  return { strike: row.strike, optSide, entry, target, stop };
+}
 
 const RECOMMENDATION_STYLE: Record<Recommendation, { bg: string; text: string }> = {
   "STRONG BUY": { bg: "#DCFCE7", text: "#15803D" },
@@ -38,6 +71,21 @@ export function KimiAITrade() {
   const commodity = SYMBOL_TO_COMMODITY[symbol];
   const setups = symbol === "NATURALGAS" ? NATURAL_GAS_SETUPS : CRUDE_OIL_SETUPS;
   const { data: options } = useOptionsAnalytics(symbol);
+
+  const c5 = useCandles(symbol, "5");
+  const c10 = useCandles(symbol, "10");
+  const c15 = useCandles(symbol, "15");
+  const c30 = useCandles(symbol, "30");
+  const c60 = useCandles(symbol, "60");
+  const c240 = useCandles(symbol, "240");
+  const tfQueries = [c5, c10, c15, c30, c60, c240];
+  const scanLoading = tfQueries.some((q) => q.isLoading);
+
+  const liveSuggestions = useMemo(() => {
+    const timeframes = TIMEFRAMES.map(({ tf, label }, i) => ({ tf, label, candles: tfQueries[i].data?.candles ?? [] }));
+    return scanAllSetups(commodity, timeframes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commodity, c5.data, c10.data, c15.data, c30.data, c60.data, c240.data]);
 
   const probabilityResult = useMemo(() => {
     if (!calcSetup) return null;
@@ -107,6 +155,59 @@ export function KimiAITrade() {
         ))}
       </div>
 
+      {/* LIVE TRADE SUGGESTIONS */}
+      <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
+        <p className="text-xs font-bold uppercase text-slate-400 mb-1 flex items-center gap-1.5">
+          <Radar size={14} /> Live Trade Suggestions — {DISPLAY_NAME[symbol]}
+        </p>
+        <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
+          Scans live candles (5m–4H) against each setup's own entry rules below. 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News Gap Fill) are excluded — this app has no
+          economic-calendar feed to confirm those honestly, so they stay catalog-only above.
+        </p>
+        {scanLoading ? (
+          <p className="text-xs text-slate-400 text-center py-4">Loading live candles…</p>
+        ) : liveSuggestions.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-4">No setup is currently triggering on {DISPLAY_NAME[symbol]}. Check back after the next few candles.</p>
+        ) : (
+          <div className="space-y-2">
+            {liveSuggestions.map((r, i) => {
+              const premium = projectScanPremium(r, options);
+              const bullish = r.direction === "bullish";
+              return (
+                <div key={`${r.setupName}-${r.tf}-${i}`} className="rounded-xl border border-slate-100 p-3" style={{ background: bullish ? "#F0FDF4" : "#FEF2F2" }}>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                      {bullish ? <TrendingUp size={14} className="text-emerald-600" /> : <TrendingDown size={14} className="text-rose-600" />}
+                      {r.setupName}
+                    </p>
+                    <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500">{r.tfLabel}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 mt-2 text-[10px]">
+                    <StatBox label="Entry (underlying)" value={r.entry.toFixed(2)} />
+                    <StatBox label="Stop" value={r.stop.toFixed(2)} />
+                    <StatBox label="Target" value={r.target.toFixed(2)} />
+                  </div>
+                  {premium && (
+                    <div className="grid grid-cols-3 gap-1.5 mt-1.5 text-[10px]">
+                      <StatBox label={`${premium.strike} ${premium.optSide} Entry`} value={String(premium.entry)} />
+                      <StatBox label="Premium Stop" value={String(premium.stop)} />
+                      <StatBox label="Premium Target" value={String(premium.target)} />
+                    </div>
+                  )}
+                  <div className="mt-1.5 space-y-0.5">
+                    {r.notes.map((n, ni) => (
+                      <p key={ni} className="text-[10px] text-slate-500">
+                        • {n}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       {/* SETUP CATALOG */}
       <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
         <p className="text-xs font-bold uppercase text-slate-400 mb-3 flex items-center gap-1.5">
@@ -119,7 +220,12 @@ export function KimiAITrade() {
               <div key={s.setupName} className="rounded-xl border border-slate-100 overflow-hidden">
                 <button onClick={() => setExpandedSetup(open ? null : s.setupName)} className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50">
                   <div className="text-left">
-                    <p className="text-sm font-bold text-slate-800">{s.setupName}</p>
+                    <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                      {s.setupName}
+                      {NEWS_DRIVEN_SETUPS.has(s.setupName) && (
+                        <span className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-500">Catalog only — no news feed</span>
+                      )}
+                    </p>
                     <p className="text-[10px] text-slate-400">
                       {s.direction} · {s.bestTimeframe}
                     </p>
