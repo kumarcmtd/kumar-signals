@@ -86,20 +86,18 @@ export function KimiAITrade() {
   const setups = symbol === "NATURALGAS" ? NATURAL_GAS_SETUPS : CRUDE_OIL_SETUPS;
   const { data: options } = useOptionsAnalytics(symbol);
 
-  const c5 = useCandles(symbol, "5");
-  const c10 = useCandles(symbol, "10");
   const c15 = useCandles(symbol, "15");
   const c30 = useCandles(symbol, "30");
   const c60 = useCandles(symbol, "60");
   const c240 = useCandles(symbol, "240");
-  const tfQueries = [c5, c10, c15, c30, c60, c240];
+  const tfQueries = [c15, c30, c60, c240];
   const scanLoading = tfQueries.some((q) => q.isLoading);
 
   const liveSuggestions = useMemo(() => {
     const timeframes = TIMEFRAMES.map(({ tf, label }, i) => ({ tf, label, candles: tfQueries[i].data?.candles ?? [] }));
     return scanAllSetups(commodity, timeframes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commodity, c5.data, c10.data, c15.data, c30.data, c60.data, c240.data]);
+  }, [commodity, c15.data, c30.data, c60.data, c240.data]);
 
   const projectPremiumFor = useCallback((r: TimedScanResult) => projectScanPremium(r, options), [options]);
   const ledger = useKimiTradeLog(symbol, liveSuggestions, projectPremiumFor, options);
@@ -178,8 +176,9 @@ export function KimiAITrade() {
           <Radar size={14} /> Live Trade Suggestions — {DISPLAY_NAME[symbol]}
         </p>
         <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
-          Scans live candles (5m–4H) against each setup's own entry rules below. 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News Gap Fill) are excluded — this app has no
-          economic-calendar feed to confirm those honestly, so they stay catalog-only above.
+          Scans live candles (15m–4H) against each setup's own entry rules below. 5m and 10m were removed from every call/signal engine in this app — too much noise from short-term price wiggles
+          made for confusing, frequently-reversing calls with a high loss rate. 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News Gap Fill) are also excluded — this app has
+          no economic-calendar feed to confirm those honestly, so they stay catalog-only above.
         </p>
         {scanLoading ? (
           <p className="text-xs text-slate-400 text-center py-4">Loading live candles…</p>
