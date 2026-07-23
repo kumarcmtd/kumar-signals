@@ -75,6 +75,79 @@ function probabilityStyle(pct: number): { bg: string; text: string } {
   return { bg: "#FEE2E2", text: "#B91C1C" };
 }
 
+// Fetches candles + live suggestions for ONE symbol, unconditionally --
+// called once per symbol so the Daily Watchlist can show both commodities
+// together regardless of which one the page's own symbol toggle has
+// selected (which still governs the rest of the page below).
+function useSymbolScan(symbol: TradableSymbol, commodity: Commodity) {
+  const c15 = useCandles(symbol, "15");
+  const c30 = useCandles(symbol, "30");
+  const c60 = useCandles(symbol, "60");
+  const c240 = useCandles(symbol, "240");
+  const { data: options } = useOptionsAnalytics(symbol);
+  const tfQueries = [c15, c30, c60, c240];
+  const loading = tfQueries.some((q) => q.isLoading);
+  const suggestions = useMemo(() => {
+    const timeframes = TIMEFRAMES.map(({ tf, label }, i) => ({ tf, label, candles: tfQueries[i].data?.candles ?? [] }));
+    return scanAllSetups(commodity, timeframes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commodity, c15.data, c30.data, c60.data, c240.data]);
+  return { options, suggestions, loading };
+}
+
+interface WatchlistRow {
+  key: string;
+  setupName: string;
+  tfLabel: string;
+  strike: number | null;
+  optSide: "CE" | "PE" | null;
+  premiumEntry: number | null;
+  finalProbability: number | null;
+  edgeScore: number | null;
+  recommendation: Recommendation | null;
+  tradeable: boolean;
+  blocked: boolean;
+  recommendedLots: number | null;
+}
+
+// Builds one ranked row per live suggestion, reusing the exact same
+// probability/position-size math shown elsewhere on this page -- the
+// watchlist is just a consolidated view across both commodities, not a
+// separate calculation path.
+function buildWatchlistRows(
+  suggestions: TimedScanResult[],
+  options: OptionsAnalytics | undefined,
+  commodity: Commodity,
+  symbol: TradableSymbol,
+  capital: number,
+  riskPercent: number
+): WatchlistRow[] {
+  return suggestions
+    .map((r) => {
+      const premium = projectScanPremium(r, options);
+      const matchedSetup = findPlaybookSetup(r.setupName, commodity);
+      const probResult = calculateHitProbability(r.setupName, commodity, matchedSetup?.requiredConfluence ?? []);
+      const prob = "error" in probResult ? null : probResult;
+      const sizing = premium ? calculatePositionSize(capital, riskPercent, premium.entry, premium.stop, LOT_SIZE[symbol]) : null;
+      const row: WatchlistRow = {
+        key: `${r.setupName}-${r.tf}`,
+        setupName: r.setupName,
+        tfLabel: r.tfLabel,
+        strike: premium?.strike ?? null,
+        optSide: premium?.optSide ?? null,
+        premiumEntry: premium?.entry ?? null,
+        finalProbability: prob?.finalProbability ?? null,
+        edgeScore: prob?.edgeScore ?? null,
+        recommendation: prob?.recommendation ?? null,
+        tradeable: prob?.tradeable ?? false,
+        blocked: prob?.blocked ?? false,
+        recommendedLots: sizing && !sizing.error ? sizing.recommendedLots : null,
+      };
+      return row;
+    })
+    .sort((a, b) => (b.edgeScore ?? 0) - (a.edgeScore ?? 0));
+}
+
 export function KimiAITrade() {
   const [symbol, setSymbol] = useState<TradableSymbol>("NATURALGAS");
   const [expandedSetup, setExpandedSetup] = useState<string | null>(null);
@@ -89,21 +162,17 @@ export function KimiAITrade() {
 
   const commodity = SYMBOL_TO_COMMODITY[symbol];
   const setups = symbol === "NATURALGAS" ? NATURAL_GAS_SETUPS : CRUDE_OIL_SETUPS;
-  const { data: options } = useOptionsAnalytics(symbol);
   const { risk } = useAppStore();
 
-  const c15 = useCandles(symbol, "15");
-  const c30 = useCandles(symbol, "30");
-  const c60 = useCandles(symbol, "60");
-  const c240 = useCandles(symbol, "240");
-  const tfQueries = [c15, c30, c60, c240];
-  const scanLoading = tfQueries.some((q) => q.isLoading);
-
-  const liveSuggestions = useMemo(() => {
-    const timeframes = TIMEFRAMES.map(({ tf, label }, i) => ({ tf, label, candles: tfQueries[i].data?.candles ?? [] }));
-    return scanAllSetups(commodity, timeframes);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commodity, c15.data, c30.data, c60.data, c240.data]);
+  // Both commodities are always scanned (needed for the Daily Watchlist,
+  // which shows both together) -- the symbol toggle below just picks which
+  // one drives the rest of the page.
+  const ngScan = useSymbolScan("NATURALGAS", "NG");
+  const clScan = useSymbolScan("CRUDEOIL", "CL");
+  const currentScan = symbol === "NATURALGAS" ? ngScan : clScan;
+  const options = currentScan.options;
+  const liveSuggestions = currentScan.suggestions;
+  const scanLoading = currentScan.loading;
 
   const projectPremiumFor = useCallback((r: TimedScanResult) => projectScanPremium(r, options), [options]);
   const ledger = useKimiTradeLog(symbol, liveSuggestions, projectPremiumFor, options);
@@ -172,6 +241,63 @@ export function KimiAITrade() {
           setup's minimum ATR(14) multiple automatically, and the Hit Probability Calculator now blocks a trade outright — regardless of edge score — if its required confluence isn't present or
           its stop is still too tight.
         </p>
+      </section>
+
+      {/* DAILY WATCHLIST — both commodities together, regardless of the symbol toggle below */}
+      <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-bold uppercase text-slate-400 flex items-center gap-1.5">
+            <ClipboardList size={14} /> Daily Watchlist — Both Symbols
+          </p>
+          <span className="text-[10px] text-slate-400">{new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+        </div>
+        <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
+          Every currently-firing setup across Natural Gas and Crude Oil, ranked by edge score (Win% × RR). Rule to survive: edge score must be ≥ 1.0 — anything below is marked not tradeable, no
+          exceptions, no FOMO.
+        </p>
+        {([
+          { sym: "NATURALGAS" as TradableSymbol, scan: ngScan },
+          { sym: "CRUDEOIL" as TradableSymbol, scan: clScan },
+        ]).map(({ sym, scan }) => {
+          const rows = buildWatchlistRows(scan.suggestions, scan.options, SYMBOL_TO_COMMODITY[sym], sym, risk.capital, risk.riskPercent);
+          const spot = scan.options && !scan.options.error ? scan.options.spot : null;
+          return (
+            <div key={sym} className="mb-3 last:mb-0">
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 mb-1.5">
+                <p className="text-sm font-bold text-slate-800">{DISPLAY_NAME[sym]}</p>
+                <p className="text-xs font-bold text-slate-500">{spot !== null ? `Spot: ₹${spot}` : "Spot unavailable"}</p>
+              </div>
+              {scan.loading ? (
+                <p className="text-xs text-slate-400 text-center py-3">Loading…</p>
+              ) : rows.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-3">No setup triggering right now.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {rows.map((row) => (
+                    <div key={row.key} className="rounded-lg border border-slate-100 px-3 py-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate">{row.setupName}</p>
+                        <p className="text-[9px] text-slate-400">
+                          {row.tfLabel} · {row.strike ? `${row.strike} ${row.optSide}` : "no live premium"}
+                          {row.premiumEntry !== null ? ` @ ₹${row.premiumEntry}` : ""}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-black" style={{ color: row.recommendation ? RECOMMENDATION_STYLE[row.recommendation].text : "#64748B" }}>
+                          {row.finalProbability !== null ? `${row.finalProbability}%` : "—"}
+                        </p>
+                        <p className="text-[9px] font-bold" style={{ color: row.tradeable ? "#16A34A" : "#DC2626" }}>
+                          {row.blocked ? "BLOCKED" : (row.recommendation ?? "—")}
+                          {row.recommendedLots !== null ? ` · ${row.recommendedLots} lot${row.recommendedLots === 1 ? "" : "s"}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </section>
 
       {/* SYMBOL SELECTOR */}
