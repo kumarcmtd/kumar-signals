@@ -58,6 +58,13 @@ const RECOMMENDATION_STYLE: Record<Recommendation, { bg: string; text: string }>
   SKIP: { bg: "#FEE2E2", text: "#B91C1C" },
 };
 
+function probabilityStyle(pct: number): { bg: string; text: string } {
+  if (pct >= 75) return { bg: "#DCFCE7", text: "#15803D" };
+  if (pct >= 60) return { bg: "#DBEAFE", text: "#1D4ED8" };
+  if (pct >= 45) return { bg: "#FEF3C7", text: "#B45309" };
+  return { bg: "#FEE2E2", text: "#B91C1C" };
+}
+
 export function KimiAITrade() {
   const [symbol, setSymbol] = useState<TradableSymbol>("NATURALGAS");
   const [expandedSetup, setExpandedSetup] = useState<string | null>(null);
@@ -189,9 +196,19 @@ export function KimiAITrade() {
                     <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500">{r.tfLabel}</span>
                   </div>
                   {baseProb !== null && (
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Base Hit Probability (reference stats, no confluence factors applied): <span className="font-bold text-slate-700">{baseProb}%</span>
-                    </p>
+                    <div className="rounded-lg mt-2 px-2.5 py-1.5" style={{ background: probabilityStyle(baseProb).bg }}>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase" style={{ color: probabilityStyle(baseProb).text }}>
+                          Hit Probability
+                        </span>
+                        <span className="text-2xl font-black" style={{ color: probabilityStyle(baseProb).text }}>
+                          {baseProb}%
+                        </span>
+                      </div>
+                      <p className="text-[8px] mt-0.5" style={{ color: probabilityStyle(baseProb).text, opacity: 0.75 }}>
+                        Base reference stat, no confluence factors applied
+                      </p>
+                    </div>
                   )}
                   <div className="grid grid-cols-3 gap-1.5 mt-2 text-[10px]">
                     <StatBox label="Entry (underlying)" value={r.entry.toFixed(2)} />
