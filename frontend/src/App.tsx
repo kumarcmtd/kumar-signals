@@ -6,6 +6,7 @@ import { AITestPro } from "./pages/AITestPro";
 import { AITestElite } from "./pages/AITestElite";
 import { TradeReport } from "./pages/TradeReport";
 import { KimiAITrade } from "./pages/KimiAITrade";
+import { MarketAnalysis } from "./pages/MarketAnalysis";
 import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
@@ -25,6 +26,7 @@ function App() {
           <Route path="/ai-elite" element={<AITestElite />} />
           <Route path="/trade-report" element={<TradeReport />} />
           <Route path="/kimi-ai-trade" element={<KimiAITrade />} />
+          <Route path="/market-analysis" element={<MarketAnalysis />} />
           <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
