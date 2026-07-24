@@ -819,15 +819,28 @@ function buildTradeSignal(pattern: PatternResult, spot: number, chainAnalysis: R
     return { action: "NO TRADE", note: "No live premium quote for the ATM strike right now." };
   }
 
+  // A pattern match with the option chain's own OI/PCR bias actively
+  // pointing the OTHER way is a real contradiction, not just "no extra
+  // confirmation" -- previously this only downgraded a caption ("Low
+  // confidence") while still returning the exact same clickable BUY action
+  // as a fully-agreeing signal. Block it outright instead, matching how
+  // AI Elite treats a contradicting veto: no trade shown at all rather than
+  // a weak one with full-strength UI.
+  if (chainAnalysis.bias !== "neutral" && chainAnalysis.bias !== pattern.direction) {
+    return {
+      action: "NO TRADE",
+      pcr: chainAnalysis.pcr,
+      note: `${pattern.pattern} suggests ${pattern.direction}, but the option chain's OI/PCR bias points ${chainAnalysis.bias} instead -- pattern and positioning disagree, so no trade is issued until they align.`,
+    };
+  }
+
   const favMove = isBullish ? pattern.target - spot : spot - pattern.target;
   const riskMove = isBullish ? spot - pattern.stop : pattern.stop - spot;
   const DELTA = 0.5;
   const premiumTarget = r2(premium + DELTA * favMove);
   const premiumStop = r2(Math.max(premium * 0.35, premium - DELTA * riskMove));
 
-  let confidence = "Medium (pattern only, OI neutral)";
-  if (chainAnalysis.bias === pattern.direction) confidence = "High (pattern + OI agree)";
-  else if (chainAnalysis.bias !== "neutral" && chainAnalysis.bias !== pattern.direction) confidence = "Low (OI data conflicts with pattern)";
+  const confidence = chainAnalysis.bias === pattern.direction ? "High (pattern + OI agree)" : "Medium (pattern only, OI neutral)";
 
   return {
     action: `BUY ${atmRow.strike_price} ${optSide}`,
