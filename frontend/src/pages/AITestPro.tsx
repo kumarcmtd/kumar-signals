@@ -33,6 +33,13 @@ const DECISION_COLOR: Record<Decision6, string> = {
   "STRONG SELL": "#FF4D4F",
 };
 
+// WATCH BUY (65-79) and SELL (25-44) sit only a few points off WAIT's 45-64
+// neutral band -- a real signal, but a much weaker one than STRONG BUY/BUY/
+// STRONG SELL. This page shows every non-WAIT tier (unlike AI Elite's
+// stricter gate), so instead of hiding these it flags them visually
+// wherever they'd otherwise look identically confident to a strong tier.
+const MARGINAL_DECISIONS = new Set<Decision6>(["WATCH BUY", "SELL"]);
+
 interface PremiumProjection {
   strike: number;
   optSide: "CE" | "PE";
@@ -140,7 +147,15 @@ export function AITestPro() {
     [crudeOil.analyses, naturalGas.analyses, crudeOilProjections, naturalGasProjections]
   );
   const actionable = allEntries.filter((e) => e.analysis.decision !== "WAIT" && e.analysis.hitProbability !== null);
-  const hero = actionable.length ? actionable.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best)) : null;
+  // Prefer a genuinely strong tier for the single flagship "hero" spotlight
+  // over a marginal one, even if the marginal tier's hitProbability happens
+  // to score higher -- a WATCH BUY/SELL shouldn't get the same "this is
+  // today's best pick" spotlight as a STRONG BUY/BUY/STRONG SELL when a
+  // stronger tier is available. Only falls back to a marginal pick when
+  // nothing stronger currently qualifies.
+  const strongActionable = actionable.filter((e) => !MARGINAL_DECISIONS.has(e.analysis.decision));
+  const heroPool = strongActionable.length ? strongActionable : actionable;
+  const hero = heroPool.length ? heroPool.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best)) : null;
   const heroKey = hero ? `${hero.symbol}-${hero.analysis.tf}` : null;
   const heroLog = heroKey ? tradeLogs[heroKey] ?? [] : [];
   const heroEntry = heroLog[heroLog.length - 1];
@@ -230,8 +245,13 @@ export function AITestPro() {
               <p className="text-2xl font-black mt-0.5">
                 {heroEntry.strike} {heroEntry.optSide}
               </p>
-              <p className="text-sm font-bold mt-1" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
+              <p className="text-sm font-bold mt-1 flex items-center gap-1.5" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
                 {hero.analysis.decision} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
+                {MARGINAL_DECISIONS.has(hero.analysis.decision) && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold border" style={{ color: "#FFC107", borderColor: "#FFC10766" }}>
+                    MARGINAL
+                  </span>
+                )}
               </p>
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <StatChip label="Entry" value={`₹${heroEntry.entry}`} />
@@ -523,6 +543,14 @@ export function AITestPro() {
                 <p className="text-sm font-bold">{a.label}</p>
                 {a.insufficient ? (
                   <span className="text-[10px] font-bold text-[#9AA4B2]">NO DATA</span>
+                ) : MARGINAL_DECISIONS.has(a.decision) ? (
+                  <span
+                    className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1"
+                    style={{ color: DECISION_COLOR[a.decision], borderColor: `${DECISION_COLOR[a.decision]}66`, background: `${DECISION_COLOR[a.decision]}14` }}
+                  >
+                    {a.decision} {latest ? `${latest.strike} ${latest.optSide}` : ""}
+                    <span className="text-[8px] opacity-80">MARGINAL</span>
+                  </span>
                 ) : (
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full text-black" style={{ background: DECISION_COLOR[a.decision] }}>
                     {a.decision} {latest ? `${latest.strike} ${latest.optSide}` : ""}

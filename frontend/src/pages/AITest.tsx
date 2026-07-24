@@ -35,6 +35,13 @@ const decisionBg: Record<Decision6, string> = {
   "STRONG SELL": "bg-[#f43f5e]",
 };
 
+// WATCH BUY (65-79) and SELL (25-44) sit only a few points off WAIT's 45-64
+// neutral band -- a real signal, but a much weaker one than STRONG BUY/BUY/
+// STRONG SELL. This page shows every non-WAIT tier (unlike AI Elite's
+// stricter gate), so instead of hiding these it flags them visually
+// wherever they'd otherwise look identically confident to a strong tier.
+const MARGINAL_DECISIONS = new Set<Decision6>(["WATCH BUY", "SELL"]);
+
 const STATUS_LABEL: Record<TradeLogStatus, string> = {
   running: "Running",
   sl_hit: "SL Hit",
@@ -148,8 +155,14 @@ export function AITest() {
   );
 
   const actionableEntries = allEntries.filter((e) => e.analysis.decision !== "WAIT" && e.analysis.hitProbability !== null);
-  const bestTrade = actionableEntries.length
-    ? actionableEntries.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best))
+  // Prefer a genuinely strong tier for "Best Trade of the Day" over a
+  // marginal one (WATCH BUY/SELL, only a few points off WAIT), even if the
+  // marginal tier's hitProbability happens to score higher -- only falls
+  // back to a marginal pick when nothing stronger currently qualifies.
+  const strongActionableEntries = actionableEntries.filter((e) => !MARGINAL_DECISIONS.has(e.analysis.decision));
+  const bestTradePool = strongActionableEntries.length ? strongActionableEntries : actionableEntries;
+  const bestTrade = bestTradePool.length
+    ? bestTradePool.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best))
     : null;
   const bestTradeProj = bestTrade ? projectPremium(bestTrade.analysis, bestTrade.options) : null;
 
@@ -225,9 +238,12 @@ export function AITest() {
           <p className="text-[11px] font-bold text-indigo-200 flex items-center gap-1.5 mb-2">
             <Star size={13} className="text-amber-300 fill-amber-300" /> BEST TRADE OF THE DAY
           </p>
-          <p className="text-lg font-black">
+          <p className="text-lg font-black flex items-center gap-1.5 flex-wrap">
             {DISPLAY_NAME[bestTrade.symbol]} · {bestTrade.analysis.label} · {bestTrade.analysis.decision} {bestTradeProj ? `${bestTradeProj.strike} ` : ""}
             {bestTrade.analysis.optSide ?? ""}
+            {MARGINAL_DECISIONS.has(bestTrade.analysis.decision) && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold border border-amber-400/50 text-amber-300">MARGINAL</span>
+            )}
           </p>
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div>
@@ -307,6 +323,7 @@ export function AITest() {
                   <td className="py-2 font-semibold">{a.label}</td>
                   <td className={`py-2 font-bold ${a.insufficient ? "text-white/30" : decisionColor[a.decision]}`}>
                     {a.insufficient ? "—" : a.decision}
+                    {!a.insufficient && MARGINAL_DECISIONS.has(a.decision) && <span className="text-[8px] opacity-70"> (marginal)</span>}
                   </td>
                   <td className="py-2">{latest ? `${latest.strike} ${latest.optSide}` : "—"}</td>
                   <td className="py-2">{latest ? `₹${latest.entry}` : "—"}</td>
@@ -379,6 +396,12 @@ export function AITest() {
                 <p className="text-sm font-bold">{a.label}</p>
                 {a.insufficient ? (
                   <span className="text-[10px] font-bold text-white/40">NO DATA</span>
+                ) : MARGINAL_DECISIONS.has(a.decision) ? (
+                  <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1 ${decisionColor[a.decision]} border-current/40`}>
+                    {a.decision}
+                    {a.optSide ? ` ${latest ? latest.strike : ""} ${a.optSide}` : ""}
+                    <span className="text-[8px] opacity-80">MARGINAL</span>
+                  </span>
                 ) : (
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full text-black ${decisionBg[a.decision]}`}>
                     {a.decision}
