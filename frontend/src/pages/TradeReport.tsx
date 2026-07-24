@@ -141,29 +141,21 @@ export function TradeReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeLogs, capital, riskPercent]);
 
-  // Combines both symbols per timeframe (a 1-hour signal on Crude Oil and a
-  // 1-hour signal on Natural Gas are both "the 1-hour timeframe") and ranks
-  // by net rupee P&L -- the same real, already-computed numbers shown in the
-  // per-symbol tables below, just aggregated to answer "which timeframe
-  // should I actually trade" at a glance.
-  const timeframeRanking = useMemo<TimeframeRank[]>(() => {
-    return TIMEFRAMES.map(({ tf, label }) => {
-      const cRow = rowsBySymbol.CRUDEOIL.find((r) => r.tf === tf);
-      const nRow = rowsBySymbol.NATURALGAS.find((r) => r.tf === tf);
-      const suggested = (cRow?.suggested ?? 0) + (nRow?.suggested ?? 0);
-      const targetHit = (cRow?.targetHit ?? 0) + (nRow?.targetHit ?? 0);
-      const breakeven = (cRow?.breakeven ?? 0) + (nRow?.breakeven ?? 0);
-      const slHit = (cRow?.slHit ?? 0) + (nRow?.slHit ?? 0);
-      const running = (cRow?.running ?? 0) + (nRow?.running ?? 0);
-      const netPoints = Number(((cRow?.netPoints ?? 0) + (nRow?.netPoints ?? 0)).toFixed(2));
-      const amount = (cRow?.amount ?? 0) + (nRow?.amount ?? 0);
-      const closed = targetHit + breakeven + slHit;
-      const winRatePct = closed > 0 ? Math.round((targetHit / closed) * 100) : null;
-      return { tf, label, suggested, targetHit, breakeven, slHit, running, netPoints, amount, closed, winRatePct };
-    }).sort((a, b) => b.amount - a.amount);
+  // Ranked separately PER SYMBOL -- Crude Oil and Natural Gas are different
+  // instruments with different volatility/behavior, so "best timeframe"
+  // needs its own answer for each rather than one blended number that
+  // hides which instrument is actually driving it.
+  const rankingBySymbol = useMemo<Record<TradableSymbol, TimeframeRank[]>>(() => {
+    const rank = (rows: RowStats[]): TimeframeRank[] =>
+      rows
+        .map((r) => {
+          const closed = r.targetHit + r.breakeven + r.slHit;
+          const winRatePct = closed > 0 ? Math.round((r.targetHit / closed) * 100) : null;
+          return { ...r, closed, winRatePct };
+        })
+        .sort((a, b) => b.amount - a.amount);
+    return { CRUDEOIL: rank(rowsBySymbol.CRUDEOIL), NATURALGAS: rank(rowsBySymbol.NATURALGAS) };
   }, [rowsBySymbol]);
-
-  const maxRankAmount = Math.max(1, ...timeframeRanking.map((r) => Math.abs(r.amount)));
 
   const grandTotal = useMemo(() => {
     const all = [...rowsBySymbol.CRUDEOIL, ...rowsBySymbol.NATURALGAS];
@@ -221,59 +213,18 @@ export function TradeReport() {
         <p className="text-[10px] text-slate-400 mt-2">Same settings as the Risk page — quantity per trade is sized so its own stop-loss distance risks this % of capital, not a flat lot count.</p>
       </section>
 
-      {/* TIMEFRAME RANKING */}
+      {/* TIMEFRAME RANKING -- PER INSTRUMENT */}
       <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
         <p className="text-xs font-bold uppercase text-slate-400 mb-1 flex items-center gap-1.5">
-          <Trophy size={14} className="text-amber-500" /> Timeframe Ranking — Overall Net
+          <Trophy size={14} className="text-amber-500" /> Timeframe Ranking — By Instrument
         </p>
-        <p className="text-[10px] text-slate-400 mb-3">Ranked by combined net ₹ P&amp;L across Crude Oil + Natural Gas — use this to decide which timeframe to actually trade.</p>
+        <p className="text-[10px] text-slate-400 mb-3">Crude Oil and Natural Gas ranked separately by net ₹ P&amp;L — each instrument behaves differently, so its best timeframe can differ too.</p>
 
-        {grandTotal.suggested === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-4">No signals yet — rankings will appear once calls start firing and closing.</p>
-        ) : (
-          <div className="space-y-2.5">
-            {timeframeRanking.map((r, i) => {
-              const style = RANK_STYLE[i] ?? RANK_STYLE[RANK_STYLE.length - 1];
-              const barPct = Math.max(4, (Math.abs(r.amount) / maxRankAmount) * 100);
-              return (
-                <div
-                  key={r.tf}
-                  className="rounded-xl p-3 border"
-                  style={{ borderColor: `${style.ring}55`, background: i === 0 ? "linear-gradient(135deg,#FFFBEB,#FFFFFF)" : "#FAFAFA" }}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <span
-                        className="w-8 h-8 rounded-full flex items-center justify-center font-black text-[11px] shrink-0"
-                        style={{ background: style.badgeBg, color: style.badgeText }}
-                      >
-                        {i === 0 ? <Trophy size={15} /> : style.label}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-black text-slate-800 truncate">{r.label}</p>
-                        <p className="text-[10px] text-slate-400">
-                          {r.suggested} signals · {r.closed} closed{r.running ? ` · ${r.running} running` : ""}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-sm font-black" style={{ color: r.amount >= 0 ? "#16A34A" : "#DC2626" }}>
-                        {r.amount >= 0 ? "+" : ""}₹{r.amount.toLocaleString("en-IN")}
-                      </p>
-                      {r.winRatePct !== null && <p className="text-[10px] font-semibold text-slate-400">{r.winRatePct}% win rate</p>}
-                    </div>
-                  </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${barPct}%`, background: r.amount >= 0 ? "linear-gradient(90deg,#4ADE80,#16A34A)" : "linear-gradient(90deg,#F87171,#DC2626)" }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div className="space-y-4">
+          {SYMBOLS.map((symbol) => (
+            <TimeframeRankList key={symbol} symbol={symbol} ranking={rankingBySymbol[symbol]} />
+          ))}
+        </div>
 
         <p className="text-[10px] text-slate-400 mt-3 flex items-start gap-1.5">
           <Sparkles size={11} className="mt-0.5 shrink-0" /> Based on actual closed-trade history so far, not a prediction — rankings will shift as more trades close.
@@ -360,6 +311,66 @@ export function TradeReport() {
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2 flex items-center justify-center gap-1">
         <Target size={11} /> Amounts only cover CLOSED trades (target hit, stopped, or SL hit) — still-running ones aren't counted until they finish. Educational reference only, not financial advice.
       </p>
+    </div>
+  );
+}
+
+function TimeframeRankList({ symbol, ranking }: { symbol: TradableSymbol; ranking: TimeframeRank[] }) {
+  const colors = SYMBOL_COLOR[symbol];
+  const suggestedTotal = ranking.reduce((s, r) => s + r.suggested, 0);
+  const maxAmount = Math.max(1, ...ranking.map((r) => Math.abs(r.amount)));
+
+  return (
+    <div>
+      <p className="text-[11px] font-black uppercase mb-2" style={{ color: colors.text }}>
+        {DISPLAY_NAME[symbol]}
+      </p>
+      {suggestedTotal === 0 ? (
+        <p className="text-xs text-slate-400 text-center py-3 rounded-xl bg-slate-50">No {DISPLAY_NAME[symbol]} signals yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {ranking.map((r, i) => {
+            const style = RANK_STYLE[i] ?? RANK_STYLE[RANK_STYLE.length - 1];
+            const barPct = Math.max(4, (Math.abs(r.amount) / maxAmount) * 100);
+            return (
+              <div
+                key={r.tf}
+                className="rounded-xl p-2.5 border"
+                style={{ borderColor: `${style.ring}55`, background: i === 0 ? "linear-gradient(135deg,#FFFBEB,#FFFFFF)" : "#FAFAFA" }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-7 h-7 rounded-full flex items-center justify-center font-black text-[10px] shrink-0"
+                      style={{ background: style.badgeBg, color: style.badgeText }}
+                    >
+                      {i === 0 ? <Trophy size={13} /> : style.label}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-800 truncate">{r.label}</p>
+                      <p className="text-[9px] text-slate-400">
+                        {r.suggested} signals · {r.closed} closed{r.running ? ` · ${r.running} running` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-black" style={{ color: r.amount >= 0 ? "#16A34A" : "#DC2626" }}>
+                      {r.amount >= 0 ? "+" : ""}₹{r.amount.toLocaleString("en-IN")}
+                    </p>
+                    {r.winRatePct !== null && <p className="text-[9px] font-semibold text-slate-400">{r.winRatePct}% win rate</p>}
+                  </div>
+                </div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${barPct}%`, background: r.amount >= 0 ? "linear-gradient(90deg,#4ADE80,#16A34A)" : "linear-gradient(90deg,#F87171,#DC2626)" }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
