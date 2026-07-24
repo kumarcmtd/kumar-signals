@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Copy, ShieldCheck, Info, Bot, ChevronDown } from "lucide-react";
+import { Copy, ShieldCheck, Info, Bot, ChevronDown, CheckCircle2 } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade, useSignal } from "../api/hooks";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
@@ -155,7 +155,10 @@ export function AITestElite() {
           <ShieldCheck size={22} className="text-[#00E676]" />
           <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-[#00E676] via-[#00C2FF] to-[#00E676] bg-clip-text text-transparent">AI Elite</h1>
         </div>
-        <p className="text-[11px] text-[#9AA4B2] px-4">Only STRONG BUY / STRONG SELL, confirmed by a second timeframe, with zero trading-rule vetoes. No middle-tier signals shown here.</p>
+        <p className="text-[11px] text-[#9AA4B2] px-4">
+          Only STRONG BUY / STRONG SELL, confirmed by a second timeframe, zero trading-rule vetoes, genuine price-action + support/resistance value-zone + volume confirmation, and at least a
+          1:1.5 reward-to-risk. No middle-tier signals shown here.
+        </p>
         <p className="text-[10px] text-[#9AA4B2] flex items-center justify-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full ${market?.isOpen ? "bg-[#00E676]" : "bg-[#FF4D4F]"}`} />
           {market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"}
@@ -168,8 +171,8 @@ export function AITestElite() {
             <Info size={28} className="mx-auto text-[#9AA4B2]" />
             <p className="text-sm font-bold text-white">No Elite-grade setup right now</p>
             <p className="text-xs text-[#9AA4B2] px-4">
-              Neither Crude Oil nor Natural Gas currently has a STRONG BUY/SELL confirmed by another timeframe with zero vetoes. That's expected most of the time — this page is built to stay
-              quiet rather than show a weaker signal just to have something on screen.
+              Neither Crude Oil nor Natural Gas currently clears every bar: STRONG BUY/SELL confirmed by another timeframe, zero vetoes, real price-action + value-zone + volume confirmation, and
+              at least 1:1.5 reward-to-risk. That's expected most of the time — this page is built to stay quiet rather than show a weaker signal just to have something on screen.
             </p>
           </div>
         </GlassCard>
@@ -208,6 +211,10 @@ export function AITestElite() {
         <p className="text-[9px] text-[#9AA4B2] mt-2">
           Tracked separately from AI-Test V2/Pro's own trade log — this is only the strict Elite filter's own record, so you can honestly see whether the stricter bar actually performs better
           over time. Starts from zero the day this page shipped.
+        </p>
+        <p className="text-[9px] text-[#00C2FF] mt-1.5">
+          Criteria strengthened on 24 Jul — added mandatory price-action, support/resistance value-zone, and volume confirmation plus a minimum 1:1.5 reward-to-risk on top of the original
+          filter. Calls above from before that date used the looser bar and are kept as-is, not erased.
         </p>
       </GlassCard>
 
@@ -320,6 +327,12 @@ function EliteCard({
           <p className="text-[10px] text-[#9AA4B2] mt-1">
             Confirmed by: {elite.confirmingTimeframes.join(", ")}
           </p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <ConfluenceChip label="Price Action" ok={elite.confluence.priceAction} />
+            <ConfluenceChip label="Value Zone" ok={elite.confluence.valueZone} />
+            <ConfluenceChip label="Volume" ok={elite.confluence.volume} />
+            <ConfluenceChip label={`R:R 1:${elite.rr ?? "—"}`} ok={elite.rr !== null && elite.rr >= 1.5} />
+          </div>
           <div className="grid grid-cols-3 gap-2 mt-3">
             <StatChip label="Entry" value={`₹${latest.entry}`} />
             <StatChip label="Stop Loss" value={`₹${latest.stop}`} color="#FF4D4F" />
@@ -401,7 +414,10 @@ function EliteCard({
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
             <div className="mt-3 rounded-xl p-3 space-y-3" style={{ background: "#0D0E16", border: "1px solid rgba(0,194,255,.15)" }}>
               <p className="text-[9px] text-[#9AA4B2]">Answers below are built from this trade's own real numbers — not a free-text chat model.</p>
-              <ChatBubble q="Why did this qualify as Elite?" a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It also cleared the strict bar: ${elite.analysis.decision}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}.`} />
+              <ChatBubble
+                q="Why did this qualify as Elite?"
+                a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It cleared every gate: ${elite.analysis.decision}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}, genuine price-action + support/resistance value-zone + volume confirmation, and a 1:${elite.rr} reward-to-risk.`}
+              />
               <ChatBubble
                 q="What if the target fails?"
                 a={`Stop loss is ₹${latest.stop}. ${
@@ -529,6 +545,23 @@ function CallHistoryRow({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+// Every card that renders has already cleared these gates (findEliteSignal
+// filters out anything that doesn't) -- this checklist exists to make that
+// visible/trustable at a glance rather than a claim the user has to take on
+// faith, not to flag failures (a failing chip would mean the card shouldn't
+// have rendered at all).
+function ConfluenceChip({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-bold"
+      style={{ background: ok ? "#00E67622" : "#FF4D4F22", color: ok ? "#00E676" : "#FF4D4F" }}
+    >
+      <CheckCircle2 size={10} />
+      {label}
+    </span>
   );
 }
 
