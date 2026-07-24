@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LayoutGrid, Globe2, Bell, ChevronRight } from "lucide-react";
+import { LayoutGrid, Globe2, ListTree, Bell, ChevronRight } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 import { notificationPermission } from "../utils/notify";
 
@@ -20,6 +20,12 @@ export function Settings() {
         <Link to="/global" className="flex items-center justify-between px-4 py-3">
           <span className="flex items-center gap-2 text-sm">
             <Globe2 size={16} className="text-[var(--color-muted)]" /> Global Markets (WTI/Brent/Henry Hub)
+          </span>
+          <ChevronRight size={16} className="text-[var(--color-muted)]" />
+        </Link>
+        <Link to="/options" className="flex items-center justify-between px-4 py-3">
+          <span className="flex items-center gap-2 text-sm">
+            <ListTree size={16} className="text-[var(--color-muted)]" /> Options Analytics
           </span>
           <ChevronRight size={16} className="text-[var(--color-muted)]" />
         </Link>
