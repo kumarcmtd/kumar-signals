@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { FlaskConical, Crown, ShieldCheck, BarChart3, BookOpen, BrainCircuit, LineChart, Calculator, NotebookText, Bell, Settings } from "lucide-react";
+import { FlaskConical, Crown, ShieldCheck, BarChart3, BookOpen, BrainCircuit, Cpu, LineChart, Calculator, NotebookText, Bell, Settings } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 
 const items = [
@@ -9,6 +9,7 @@ const items = [
   { to: "/trade-report", label: "Trade Report", icon: BarChart3 },
   { to: "/kimi-ai-trade", label: "Kimi AI", icon: BookOpen },
   { to: "/market-analysis", label: "Market Analysis", icon: BrainCircuit },
+  { to: "/kumar-ai", label: "Kumar AI", icon: Cpu },
   { to: "/charts", label: "Charts", icon: LineChart },
   { to: "/risk", label: "Risk", icon: Calculator },
   { to: "/journal", label: "Journal", icon: NotebookText },

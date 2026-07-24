@@ -1,4 +1,4 @@
-import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, GlobalQuote, PortfolioTrade } from "../types";
+import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult } from "../types";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);
@@ -37,4 +37,5 @@ export const api = {
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),
   deleteTrade: (id: string) => sendJSON<{ ok: true }>(`/portfolio/${id}`, "DELETE"),
+  kumarAiAnalyze: (payload: KumarAiAnalyzeRequest) => sendJSON<KumarAiAnalyzeResult>("/kumar-ai/analyze", "POST", payload),
 };

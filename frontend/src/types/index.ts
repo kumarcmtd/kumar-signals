@@ -154,3 +154,52 @@ export interface GlobalQuote {
   asOf: string | null;
   error?: string;
 }
+
+// Kumar AI page: the entry/stop/target/decision/confidence numbers below are
+// ALWAYS computed by this app's own deterministic rule-based engine before
+// being sent to the backend -- the Workers AI model is only asked to explain
+// them (reasoning/bullish-bearish factors/risk factors), never to invent or
+// change them.
+export interface KumarAiIndicatorSnapshot {
+  ema9: number | null;
+  ema20: number | null;
+  ema50: number | null;
+  ema200: number | null;
+  rsi14: number | null;
+  macd: { line: number; signal: number; histogram: number } | null;
+  vwap: number | null;
+  atr14: number | null;
+  adx14: number | null;
+  bollinger: { upper: number; middle: number; lower: number } | null;
+  superTrend: { value: number; direction: string } | null;
+  volumeRatio: number | null;
+}
+
+export interface KumarAiAnalyzeRequest {
+  symbol: string;
+  timeframeLabel: string;
+  decision: string;
+  bias: string;
+  optSide: string | null;
+  entry: number;
+  stop: number;
+  targets: [number, number, number];
+  rr: number | null;
+  confidencePct: number | null;
+  indicators: KumarAiIndicatorSnapshot;
+  structureLabel: string | null;
+  patternLabel: string | null;
+  supportResistanceNote: string | null;
+  reasons: string[];
+}
+
+export interface KumarAiAnalyzeResult {
+  reasoning: string;
+  bullishReasons: string[];
+  bearishReasons: string[];
+  riskFactors: string[];
+  expectedMovement: string;
+  holdingDuration: string;
+  bestTimeframeNote: string;
+  error?: string;
+}

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { InstrumentSymbol, PortfolioTrade } from "../types";
+import type { InstrumentSymbol, PortfolioTrade, KumarAiAnalyzeRequest } from "../types";
 
 export function useMarketStatus() {
   return useQuery({
@@ -97,5 +97,14 @@ export function useDeleteTrade() {
   return useMutation({
     mutationFn: (id: string) => api.deleteTrade(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["portfolio"] }),
+  });
+}
+
+// On-demand (button-driven), not a polling query -- the Kumar AI page calls
+// this once per signal card when the user asks for AI reasoning, not
+// automatically on every render.
+export function useKumarAiAnalyze() {
+  return useMutation({
+    mutationFn: (payload: KumarAiAnalyzeRequest) => api.kumarAiAnalyze(payload),
   });
 }

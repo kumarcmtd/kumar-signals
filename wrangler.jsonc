@@ -7,6 +7,7 @@
   "kv_namespaces": [
     { "binding": "COMMODITY_KV", "id": "ee2c93e58b91477d8950796f0e51697f" }
   ],
+  "ai": { "binding": "AI" },
   "assets": {
     "directory": "./frontend/dist",
     "binding": "ASSETS"
