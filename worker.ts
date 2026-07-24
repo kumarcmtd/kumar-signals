@@ -1405,29 +1405,54 @@ Do NOT invent, change, or second-guess the entry/stop/target/decision numbers ab
 }`;
 }
 
-function parseKumarAiResponse(raw: string): KumarAiAnalyzeResult {
+// Accepts `unknown`, not `string` -- with response_format:"json_object", the
+// Workers AI binding sometimes hands back an already-parsed object under
+// `.response` instead of a JSON string (shape varies by model/binding
+// version), and calling .trim() on that used to throw "raw.trim is not a
+// function", surfacing as a broken AI-reasoning panel instead of a graceful
+// fallback.
+function parseKumarAiResponse(raw: unknown): KumarAiAnalyzeResult {
+  const strArray = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const fromObj = (obj: Record<string, unknown>): KumarAiAnalyzeResult => ({
+    reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
+    bullishReasons: strArray(obj.bullishReasons),
+    bearishReasons: strArray(obj.bearishReasons),
+    riskFactors: strArray(obj.riskFactors),
+    expectedMovement: typeof obj.expectedMovement === "string" ? obj.expectedMovement : "",
+    holdingDuration: typeof obj.holdingDuration === "string" ? obj.holdingDuration : "",
+    bestTimeframeNote: typeof obj.bestTimeframeNote === "string" ? obj.bestTimeframeNote : "",
+  });
+
+  if (raw && typeof raw === "object") {
+    return fromObj(raw as Record<string, unknown>);
+  }
+
+  const text = typeof raw === "string" ? raw : "";
+  if (!text.trim()) {
+    return {
+      reasoning: "",
+      bullishReasons: [],
+      bearishReasons: [],
+      riskFactors: [],
+      expectedMovement: "",
+      holdingDuration: "",
+      bestTimeframeNote: "",
+      error: "AI returned an empty response",
+    };
+  }
+
   try {
-    const cleaned = raw
+    const cleaned = text
       .trim()
       .replace(/^```(json)?/i, "")
       .replace(/```$/, "")
       .trim();
-    const obj = JSON.parse(cleaned);
-    const strArray = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
-    return {
-      reasoning: typeof obj.reasoning === "string" ? obj.reasoning : "",
-      bullishReasons: strArray(obj.bullishReasons),
-      bearishReasons: strArray(obj.bearishReasons),
-      riskFactors: strArray(obj.riskFactors),
-      expectedMovement: typeof obj.expectedMovement === "string" ? obj.expectedMovement : "",
-      holdingDuration: typeof obj.holdingDuration === "string" ? obj.holdingDuration : "",
-      bestTimeframeNote: typeof obj.bestTimeframeNote === "string" ? obj.bestTimeframeNote : "",
-    };
+    return fromObj(JSON.parse(cleaned));
   } catch {
     // Model didn't return valid JSON -- surface the raw text as the
     // reasoning rather than silently dropping it or fabricating structure.
     return {
-      reasoning: raw.trim().slice(0, 800),
+      reasoning: text.trim().slice(0, 800),
       bullishReasons: [],
       bearishReasons: [],
       riskFactors: [],
@@ -1452,7 +1477,7 @@ async function computeKumarAiAnalysis(env: Env, body: KumarAiAnalyzeRequest): Pr
       response_format: { type: "json_object" },
       max_tokens: 700,
     });
-    return parseKumarAiResponse((result as { response: string }).response ?? "");
+    return parseKumarAiResponse((result as { response?: unknown }).response);
   } catch (err: unknown) {
     return {
       reasoning: "",
