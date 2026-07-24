@@ -11,7 +11,7 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { CircularGauge } from "../components/CircularGauge";
-import { DECISION_LABEL } from "../utils/timeframeEngine";
+import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
@@ -323,7 +323,7 @@ function EliteCard({
             {latest.strike} {latest.optSide}
           </p>
           <p className="text-sm font-bold mt-1" style={{ color: elite.analysis.bias === "bullish" ? "#00E676" : "#FF4D4F" }}>
-            {DECISION_LABEL[elite.analysis.decision]}
+            {decisionLabelWithScore(elite.analysis.decision)}
           </p>
           <p className="text-[10px] text-[#9AA4B2] mt-1">
             Confirmed by: {elite.confirmingTimeframes.join(", ")}
@@ -417,7 +417,7 @@ function EliteCard({
               <p className="text-[9px] text-[#9AA4B2]">Answers below are built from this trade's own real numbers — not a free-text chat model.</p>
               <ChatBubble
                 q="Why did this qualify as Elite?"
-                a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It cleared every gate: ${DECISION_LABEL[elite.analysis.decision]}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}, genuine price-action + support/resistance value-zone + volume confirmation, and a 1:${elite.rr} reward-to-risk.`}
+                a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It cleared every gate: ${decisionLabelWithScore(elite.analysis.decision)}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}, genuine price-action + support/resistance value-zone + volume confirmation, and a 1:${elite.rr} reward-to-risk.`}
               />
               <ChatBubble
                 q="What if the target fails?"

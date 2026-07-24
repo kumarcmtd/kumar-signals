@@ -20,6 +20,22 @@ export const DECISION_LABEL: Record<Decision6, string> = {
   "STRONG SELL": "Very Strong Sell",
 };
 
+// The 0-100 overallScore band each tier maps to -- must stay in sync with
+// decisionFor() below. Shown in brackets next to the label wherever it's
+// displayed so the label's meaning is self-explanatory at a glance.
+export const DECISION_SCORE_RANGE: Record<Decision6, string> = {
+  "STRONG BUY": "90-100",
+  BUY: "80-89",
+  "WATCH BUY": "65-79",
+  WAIT: "45-64",
+  SELL: "25-44",
+  "STRONG SELL": "0-24",
+};
+
+export function decisionLabelWithScore(decision: Decision6): string {
+  return `${DECISION_LABEL[decision]} (${DECISION_SCORE_RANGE[decision]})`;
+}
+
 export interface CategoryResult {
   score: number; // 0-100
   notes: string[];

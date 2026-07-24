@@ -15,7 +15,7 @@ import { CircularGauge } from "../components/CircularGauge";
 import { TradeChart } from "../components/TradeChart";
 import { TradingViewWidget } from "../components/TradingViewWidget";
 import { Link } from "react-router-dom";
-import { DECISION_LABEL } from "../utils/timeframeEngine";
+import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -254,7 +254,7 @@ export function AITestPro() {
                 {heroEntry.strike} {heroEntry.optSide}
               </p>
               <p className="text-sm font-bold mt-1" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
-                {DECISION_LABEL[hero.analysis.decision]} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
+                {decisionLabelWithScore(hero.analysis.decision)} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
               </p>
               <p className="text-[10px] text-[#9AA4B2] mt-0.5">Confirmed by: {eliteHero?.confirmingTimeframes.join(", ")}</p>
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -558,11 +558,11 @@ export function AITestPro() {
                     className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1"
                     style={{ color: DECISION_COLOR[a.decision], borderColor: `${DECISION_COLOR[a.decision]}66`, background: `${DECISION_COLOR[a.decision]}14` }}
                   >
-                    {DECISION_LABEL[a.decision]} {latest ? `${latest.strike} ${latest.optSide}` : ""}
+                    {decisionLabelWithScore(a.decision)} {latest ? `${latest.strike} ${latest.optSide}` : ""}
                   </span>
                 ) : (
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full text-black" style={{ background: DECISION_COLOR[a.decision] }}>
-                    {DECISION_LABEL[a.decision]} {latest ? `${latest.strike} ${latest.optSide}` : ""}
+                    {decisionLabelWithScore(a.decision)} {latest ? `${latest.strike} ${latest.optSide}` : ""}
                   </span>
                 )}
               </div>
@@ -851,7 +851,7 @@ export function AITestPro() {
             <div className="space-y-3">
               <Faq
                 q="Why this signal?"
-                a={`${hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} It cleared the same strict bar as AI Elite: ${DECISION_LABEL[hero.analysis.decision]}, zero vetoes, confirmed by ${eliteHero?.confirmingTimeframes.join(", ") ?? "another timeframe"}, genuine price-action + value-zone + volume confirmation, and a 1:${eliteHero?.rr} reward-to-risk.`}
+                a={`${hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} It cleared the same strict bar as AI Elite: ${decisionLabelWithScore(hero.analysis.decision)}, zero vetoes, confirmed by ${eliteHero?.confirmingTimeframes.join(", ") ?? "another timeframe"}, genuine price-action + value-zone + volume confirmation, and a 1:${eliteHero?.rr} reward-to-risk.`}
               />
               <Faq
                 q="What if the target fails?"

@@ -4,7 +4,7 @@ import { useTimeframeSuite, TIMEFRAMES } from "./useTimeframeSuite";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import { findPlaybookSetup, calculateHitProbability } from "../utils/kimiPlaybook";
 import { findEliteSignal } from "../utils/eliteSignal";
-import { DECISION_LABEL } from "../utils/timeframeEngine";
+import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import { useAppStore, type AlertEntry } from "../store/appStore";
 import { fireBrowserNotification, playAlertSound } from "../utils/notify";
 
@@ -75,7 +75,7 @@ export function useAlertEngine(): void {
             source: "Timeframe",
             symbol,
             tfLabel: a.label,
-            title: `${DECISION_LABEL[a.decision]} — ${DISPLAY_NAME[symbol]} (${a.label})`,
+            title: `${decisionLabelWithScore(a.decision)} — ${DISPLAY_NAME[symbol]} (${a.label})`,
             detail: a.reasons.slice(0, 2).join("; ") || "Confluence signal fired",
             read: false,
           });
@@ -103,7 +103,7 @@ export function useAlertEngine(): void {
           source: "Elite",
           symbol,
           tfLabel: elite.analysis.label,
-          title: `AI Elite ${DECISION_LABEL[elite.analysis.decision]} — ${DISPLAY_NAME[symbol]} (${elite.analysis.label})`,
+          title: `AI Elite ${decisionLabelWithScore(elite.analysis.decision)} — ${DISPLAY_NAME[symbol]} (${elite.analysis.label})`,
           detail: `Confirmed by ${elite.confirmingTimeframes.join(", ") || "no other timeframes"}`,
           read: false,
         });
