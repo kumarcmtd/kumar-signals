@@ -7,7 +7,7 @@ import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
 import { computePortfolioSummary } from "../utils/portfolioStats";
-import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
@@ -198,6 +198,15 @@ export function AITest() {
   useTradeLog("CRUDEOIL", crudeOil.analyses, crudeOilProjections, crudeOil.options);
   const tradeLogs = useTradeLog("NATURALGAS", naturalGas.analyses, naturalGasProjections, naturalGas.options);
   const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
+  const signalRanking = useMemo(
+    () =>
+      rankSignalsByWinRate(
+        Object.entries(tradeLogs)
+          .filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))
+          .flatMap(([, v]) => v)
+      ),
+    [tradeLogs]
+  );
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 bg-gradient-to-b from-[#07050C] via-[#0D0A17] to-[#0D0A17] text-white min-h-screen space-y-5">
@@ -370,6 +379,42 @@ export function AITest() {
                   <td className="py-2 font-bold text-[#a3e635]">{d.breakeven}</td>
                   <td className="py-2 font-bold text-[#f43f5e]">{d.slHit}</td>
                   <td className="py-2 text-white/60">{d.total}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* SIGNAL WIN RATE RANKING */}
+      <section className="rounded-2xl bg-white/[0.05] backdrop-blur-xl border border-white/10 p-4 overflow-x-auto">
+        <p className="text-xs font-bold uppercase text-white/70 mb-1">Signal Win Rate Ranking — Both Symbols</p>
+        <p className="text-[10px] text-white/40 mb-3">Which signal (Strong Buy, Good Buy, Risky Buy, Don't Buy Risky) actually wins more, from real closed trades across all timeframes. Win rate excludes breakeven closes.</p>
+        {signalRanking.every((r) => r.total === 0) ? (
+          <p className="text-xs text-white/40 text-center py-3">No trades have closed yet — this fills in as signals run their course.</p>
+        ) : (
+          <table className="w-full text-[11px] min-w-[420px]">
+            <thead>
+              <tr className="text-white/40 text-left">
+                <th className="font-semibold pb-2">Signal</th>
+                <th className="font-semibold pb-2">Win Rate</th>
+                <th className="font-semibold pb-2">Target Hit</th>
+                <th className="font-semibold pb-2">Breakeven</th>
+                <th className="font-semibold pb-2">SL Hit</th>
+                <th className="font-semibold pb-2">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signalRanking.map((r, i) => (
+                <tr key={r.label} className="border-t border-white/10">
+                  <td className="py-2 font-semibold flex items-center gap-1.5">
+                    {i === 0 && r.winRate !== null && <span className="text-amber-400">#1</span>} {r.label}
+                  </td>
+                  <td className={`py-2 font-bold ${r.winRate === null ? "text-white/30" : r.winRate >= 50 ? "text-[#22c55e]" : "text-[#f43f5e]"}`}>{r.winRate !== null ? `${r.winRate}%` : "—"}</td>
+                  <td className="py-2 font-bold text-[#22c55e]">{r.targetHit}</td>
+                  <td className="py-2 font-bold text-[#a3e635]">{r.breakeven}</td>
+                  <td className="py-2 font-bold text-[#f43f5e]">{r.slHit}</td>
+                  <td className="py-2 text-white/60">{r.total}</td>
                 </tr>
               ))}
             </tbody>

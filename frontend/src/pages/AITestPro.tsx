@@ -7,7 +7,7 @@ import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
 import { findEliteSignal } from "../utils/eliteSignal";
 import { computePortfolioSummary } from "../utils/portfolioStats";
-import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
 import { flattenClosedTrades, computePerformanceStats } from "../utils/tradeLogPnl";
 import { computeIndicatorSnapshot, cci } from "../utils/indicators";
 import { formatTipCard } from "../utils/tipFormat";
@@ -138,6 +138,15 @@ export function AITestPro() {
   const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
   const realizedTrades = useMemo(() => flattenClosedTrades(tradeLogs), [tradeLogs]);
   const perf = useMemo(() => computePerformanceStats(realizedTrades), [realizedTrades]);
+  const signalRanking = useMemo(
+    () =>
+      rankSignalsByWinRate(
+        Object.entries(tradeLogs)
+          .filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))
+          .flatMap(([, v]) => v)
+      ),
+    [tradeLogs]
+  );
 
   const allEntries = useMemo(
     () =>
@@ -744,6 +753,46 @@ export function AITestPro() {
                     <td className="py-2 font-bold" style={{ color: "#a3e635" }}>{d.breakeven}</td>
                     <td className="py-2 font-bold" style={{ color: "#FF4D4F" }}>{d.slHit}</td>
                     <td className="py-2 text-[#9AA4B2]">{d.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </GlassCard>
+
+      {/* SIGNAL WIN RATE RANKING */}
+      <GlassCard title="Signal Win Rate Ranking — Both Symbols">
+        <p className="text-[9px] text-[#9AA4B2] mb-2">Which signal (Strong Buy, Good Buy, Risky Buy, Don't Buy Risky) actually wins more, from real closed trades. Win rate excludes breakeven closes.</p>
+        {signalRanking.every((r) => r.total === 0) ? (
+          <p className="text-xs text-[#9AA4B2] text-center py-3">No trades have closed yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] min-w-[420px]">
+              <thead>
+                <tr className="text-left text-[#9AA4B2]">
+                  <th className="font-semibold pb-2">Signal</th>
+                  <th className="font-semibold pb-2">Win Rate</th>
+                  <th className="font-semibold pb-2">Target Hit</th>
+                  <th className="font-semibold pb-2">Breakeven</th>
+                  <th className="font-semibold pb-2">SL Hit</th>
+                  <th className="font-semibold pb-2">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signalRanking.map((r, i) => (
+                  <tr key={r.label} className="border-t" style={{ borderColor: "rgba(255,255,255,.06)" }}>
+                    <td className="py-2 font-semibold">
+                      {i === 0 && r.winRate !== null ? "#1 " : ""}
+                      {r.label}
+                    </td>
+                    <td className="py-2 font-bold" style={{ color: r.winRate === null ? "#9AA4B2" : r.winRate >= 50 ? "#00E676" : "#FF4D4F" }}>
+                      {r.winRate !== null ? `${r.winRate}%` : "—"}
+                    </td>
+                    <td className="py-2 font-bold" style={{ color: "#00E676" }}>{r.targetHit}</td>
+                    <td className="py-2 font-bold" style={{ color: "#a3e635" }}>{r.breakeven}</td>
+                    <td className="py-2 font-bold" style={{ color: "#FF4D4F" }}>{r.slHit}</td>
+                    <td className="py-2 text-[#9AA4B2]">{r.total}</td>
                   </tr>
                 ))}
               </tbody>

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { InstrumentSymbol } from "../types";
+import type { Decision6 } from "../utils/timeframeEngine";
 
 export type Timeframe = "5" | "15" | "30" | "1D";
 
@@ -34,6 +35,12 @@ export interface TradeLogEntry {
   // trade) or inventing something. Optional so existing entries and callers
   // that don't track this (AI-Test V2/Pro) are unaffected.
   meta?: { label: string; reasons: string[]; confirmingTimeframes: string[] };
+  // The decision tier (Strong Buy/Good Buy/Risky Buy/Don't Buy Risky) that
+  // was active when this entry opened -- lets a "which signal actually wins
+  // more" ranking group real closed trades by tier. Optional: entries from
+  // before this field existed, and Kimi's setup-based log (no Decision6
+  // concept), simply have no tier and are excluded from that ranking.
+  decision?: Decision6;
 }
 
 // One line per fired alert, newest first. The engine that produces these

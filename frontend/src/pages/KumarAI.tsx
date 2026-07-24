@@ -24,6 +24,7 @@ import {
 import { useMarketStatus, usePortfolio, useOptionsAnalytics, useKumarAiAnalyze } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { rankSignalsByWinRate } from "../utils/tradeLogStats";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useKumarAISuite, KUMAR_AI_TIMEFRAMES, type KumarAiTimeframeSnapshot, type KumarAiTradableSymbol } from "../hooks/useKumarAISuite";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
@@ -259,6 +260,15 @@ export function KumarAI() {
   useTradeLog("NATURALGAS", ngAnalyses, ngProjections, naturalGas.options, kumarAiKeyPrefix("NATURALGAS"));
   const kumarAiTradeLogs = useTradeLog("CRUDEOIL", clAnalyses, clProjections, crudeOil.options, kumarAiKeyPrefix("CRUDEOIL"));
   const tfRanking = useMemo(() => rankTimeframes(kumarAiTradeLogs), [kumarAiTradeLogs]);
+  const signalRanking = useMemo(
+    () =>
+      rankSignalsByWinRate(
+        Object.entries(kumarAiTradeLogs)
+          .filter(([k]) => k.startsWith("KUMARAI-"))
+          .flatMap(([, v]) => v)
+      ),
+    [kumarAiTradeLogs]
+  );
 
   const keyFor = (sym: KumarAiTradableSymbol, tf: string) => `${sym}-${tf}`;
 
@@ -453,6 +463,47 @@ export function KumarAI() {
         <div className="space-y-1.5">
           {tfRanking.map((r, i) => (
             <div key={r.tf} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"
+                  style={i === 0 && r.winRate !== null ? { background: "#FBBF24", color: "#07060C" } : { background: "var(--ka-border)", color: "var(--ka-muted)" }}
+                >
+                  {i + 1}
+                </span>
+                <span className="text-xs font-bold">{r.label}</span>
+              </div>
+              {r.total === 0 ? (
+                <span className="text-[10px]" style={{ color: "var(--ka-muted)" }}>
+                  No closed trades yet
+                </span>
+              ) : (
+                <div className="text-right">
+                  <span className="text-xs font-black" style={{ color: r.winRate === null ? "var(--ka-muted)" : r.winRate >= 50 ? "#22C55E" : "#EF4444" }}>
+                    {r.winRate !== null ? `${r.winRate}% win rate` : "Breakeven only"}
+                  </span>
+                  <p className="text-[9px]" style={{ color: "var(--ka-muted)" }}>
+                    {r.targetHit}W · {r.breakeven}BE · {r.slHit}L ({r.total} closed)
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* SIGNAL WIN RATE RANKING -- which signal (Strong Buy, Good Buy, Risky
+          Buy, Don't Buy Risky) actually wins more, combined across every
+          timeframe and both markets */}
+      <section className="rounded-2xl p-4" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
+        <p className="text-xs font-bold uppercase mb-1" style={{ color: "var(--ka-text)" }}>
+          Signal Win Rate Ranking
+        </p>
+        <p className="text-[10px] mb-3" style={{ color: "var(--ka-muted)" }}>
+          Ranked by real closed-trade win rate, every timeframe and both markets combined. Win rate excludes breakeven closes.
+        </p>
+        <div className="space-y-1.5">
+          {signalRanking.map((r, i) => (
+            <div key={r.label} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
               <div className="flex items-center gap-2">
                 <span
                   className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"

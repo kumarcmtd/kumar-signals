@@ -8,7 +8,7 @@ import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { findEliteSignal } from "../utils/eliteSignal";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
-import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { CircularGauge } from "../components/CircularGauge";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
@@ -136,6 +136,7 @@ export function AITestElite() {
   const realized = useMemo(() => flattenClosedTrades(eliteTradeLogsOnly), [eliteTradeLogsOnly]);
   const perf = useMemo(() => computePerformanceStats(realized), [realized]);
   const dayStats = useMemo(() => summarizeTradeLogsByDay(eliteTradeLogsOnly), [eliteTradeLogsOnly]);
+  const signalRanking = useMemo(() => rankSignalsByWinRate(Object.values(eliteTradeLogsOnly).flat()), [eliteTradeLogsOnly]);
 
   // Every call this filter has ever made, open or closed, newest first --
   // this is what makes past calls reviewable/chattable, not just the
@@ -240,6 +241,43 @@ export function AITestElite() {
                     <td className="py-2 font-bold" style={{ color: "#FF4D4F" }}>{d.slHit}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      )}
+
+      {signalRanking.some((r) => r.total > 0) && (
+        <GlassCard title="Signal Win Rate Ranking">
+          <p className="text-[9px] text-[#9AA4B2] mb-2">
+            Since Elite only ever tracks Strong Buy / Don't Buy Risky (strong sell) calls, this will usually only show one or two rows — but still shows which of those two actually wins more.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] min-w-[380px]">
+              <thead>
+                <tr className="text-left text-[#9AA4B2]">
+                  <th className="font-semibold pb-2">Signal</th>
+                  <th className="font-semibold pb-2">Win Rate</th>
+                  <th className="font-semibold pb-2">Target Hit</th>
+                  <th className="font-semibold pb-2">SL Hit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signalRanking
+                  .filter((r) => r.total > 0)
+                  .map((r, i) => (
+                    <tr key={r.label} className="border-t" style={{ borderColor: "rgba(255,255,255,.06)" }}>
+                      <td className="py-2 font-semibold">
+                        {i === 0 && r.winRate !== null ? "#1 " : ""}
+                        {r.label}
+                      </td>
+                      <td className="py-2 font-bold" style={{ color: r.winRate === null ? "#9AA4B2" : r.winRate >= 50 ? "#00E676" : "#FF4D4F" }}>
+                        {r.winRate !== null ? `${r.winRate}%` : "—"}
+                      </td>
+                      <td className="py-2 font-bold" style={{ color: "#00E676" }}>{r.targetHit}</td>
+                      <td className="py-2 font-bold" style={{ color: "#FF4D4F" }}>{r.slHit}</td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

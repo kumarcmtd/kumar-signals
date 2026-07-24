@@ -25,7 +25,7 @@ function makeId(proj: ProjLike, now: number): string {
   return `${proj.strike}-${proj.optSide}-${now}`;
 }
 
-export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["meta"]): TradeLogEntry {
+export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["meta"], decision?: Decision6): TradeLogEntry {
   return {
     id: makeId(proj, now),
     strike: proj.strike,
@@ -39,6 +39,7 @@ export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["
     openedAt: now,
     closedAt: null,
     meta,
+    decision,
   };
 }
 
@@ -103,7 +104,7 @@ export function advanceTradeLog(
   }
 
   if (!ctx.insufficient && ctx.decision !== "WAIT" && ctx.optSide && ctx.proj) {
-    const created = openNewEntry({ strike: ctx.proj.strike, optSide: ctx.optSide, entry: ctx.proj.entry, targets: ctx.proj.targets, stop: ctx.proj.stop }, now, ctx.meta);
+    const created = openNewEntry({ strike: ctx.proj.strike, optSide: ctx.optSide, entry: ctx.proj.entry, targets: ctx.proj.targets, stop: ctx.proj.stop }, now, ctx.meta, ctx.decision);
     const next = [...history, created];
     return next.length > maxHistory ? next.slice(next.length - maxHistory) : next;
   }
