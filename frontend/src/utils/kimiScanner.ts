@@ -2,7 +2,7 @@ import type { Candle, Direction, IndicatorSnapshot } from "../types";
 import { rsi, computeIndicatorSnapshot, macd } from "./indicators";
 import { detectCandlePattern, findSwingPoints, analyzeStructure, type SwingPoint, type StructureAnalysis } from "./priceAction";
 import { sessionDayKey } from "./tradeLogStats";
-import { findPlaybookSetup } from "./kimiPlaybook";
+import { findPlaybookSetup, type ConfluenceFactor } from "./kimiPlaybook";
 
 // Real rule-based scanners for the 13 Kimi AI playbook setups that are
 // purely technical (price/indicator based). The other 3 setups in the
@@ -28,6 +28,18 @@ export interface ScanResult {
   stop: number;
   target: number;
   notes: string[];
+}
+
+// Which of the matched playbook setup's requiredConfluence factors are
+// ACTUALLY true right now, checked independently of whichever internal
+// logic made this specific scanner fire. Several scanners fire without ever
+// checking volume/trend/RSI-divergence/key-level factors their own playbook
+// entry claims as required -- computing this generically from real ctx data
+// (rather than assuming "it fired, so it must have every required factor")
+// is what makes calculateHitProbability's missing-confluence check
+// meaningful instead of a permanent no-op.
+export interface ScannedResult extends ScanResult {
+  detectedConfluence: ConfluenceFactor[];
 }
 
 interface ScanContext {
@@ -436,21 +448,82 @@ function applyAtrFloor(r: ScanResult, atr14: number | null, commodity: "NG" | "C
   return { ...r, stop, target, notes: [...r.notes, `Stop/target widened to ${setup.minAtrSl}x/${setup.minAtrTarget}x ATR minimum (was too tight)`] };
 }
 
-export function scanNaturalGasSetups(candles: Candle[], todaysCandles: Candle[]): ScanResult[] {
+// Real bullish/bearish RSI divergence between the last two opposing swing
+// points -- price making a lower low (bullish) or higher high (bearish)
+// while RSI moves the other way. Reused generically here rather than
+// duplicated per-scanner, since only 2 of the 7 setups claiming
+// "divergence_rsi" actually computed this inline.
+function hasRsiDivergence(ctx: ScanContext, direction: Direction): boolean {
+  const { swings, closes } = ctx;
+  if (direction === "bullish") {
+    const lows = swings.filter((s) => s.type === "low");
+    if (lows.length < 2) return false;
+    const [a, b] = lows.slice(-2);
+    if (b.price >= a.price) return false;
+    const r1 = rsi(closes.slice(0, a.index + 1));
+    const r2 = rsi(closes.slice(0, b.index + 1));
+    return r1 !== null && r2 !== null && r2 > r1;
+  }
+  if (direction === "bearish") {
+    const highs = swings.filter((s) => s.type === "high");
+    if (highs.length < 2) return false;
+    const [a, b] = highs.slice(-2);
+    if (b.price <= a.price) return false;
+    const r1 = rsi(closes.slice(0, a.index + 1));
+    const r2 = rsi(closes.slice(0, b.index + 1));
+    return r1 !== null && r2 !== null && r2 < r1;
+  }
+  return false;
+}
+
+// Is price genuinely near a recent, opposing swing level right now (a real
+// support for a bullish trade, a real resistance for a bearish one) --
+// reused generically for the same reason as hasRsiDivergence above.
+function nearKeyLevel(ctx: ScanContext, direction: Direction, tolerancePct = 0.8): boolean {
+  const { swings, last } = ctx;
+  const relevant = swings.filter((s) => s.type === (direction === "bullish" ? "low" : "high"));
+  if (!relevant.length) return false;
+  const level = relevant[relevant.length - 1].price;
+  const price = direction === "bullish" ? last.low : last.high;
+  return pctDiff(price, level) < tolerancePct;
+}
+
+// Checks each of the matched setup's requiredConfluence factors against
+// real, currently-computed market data -- NOT against whatever the scanner
+// happened to check internally to fire. This is what makes it honest: a
+// factor only counts as detected if it demonstrably holds right now.
+function detectConfluence(ctx: ScanContext, r: ScanResult, required: ConfluenceFactor[]): ConfluenceFactor[] {
+  const out: ConfluenceFactor[] = [];
+  for (const f of required) {
+    if (f === "volume_spike_1_5x" && ctx.volumeRatio >= 1.5) out.push(f);
+    else if (f === "volume_spike_2x" && ctx.volumeRatio >= 2) out.push(f);
+    else if (f === "trend_aligned" && ctx.structure.trend === r.direction) out.push(f);
+    else if (f === "divergence_rsi" && hasRsiDivergence(ctx, r.direction)) out.push(f);
+    else if (f === "key_level_sr" && nearKeyLevel(ctx, r.direction)) out.push(f);
+  }
+  return out;
+}
+
+function withConfluence(r: ScanResult, ctx: ScanContext, commodity: "NG" | "CL"): ScannedResult {
+  const setup = findPlaybookSetup(r.setupName, commodity);
+  return { ...r, detectedConfluence: setup ? detectConfluence(ctx, r, setup.requiredConfluence) : [] };
+}
+
+export function scanNaturalGasSetups(candles: Candle[], todaysCandles: Candle[]): ScannedResult[] {
   const ctx = buildContext(candles);
   if (!ctx) return [];
   const results = NG_SCANNERS.map((fn) => fn(ctx)).filter((r): r is ScanResult => r !== null);
   const orb = scanOpeningRangeBreakout(ctx, todaysCandles);
   if (orb) results.push(orb);
-  return results.map((r) => applyAtrFloor(r, ctx.snap.atr14, "NG"));
+  return results.map((r) => withConfluence(applyAtrFloor(r, ctx.snap.atr14, "NG"), ctx, "NG"));
 }
 
-export function scanCrudeOilSetups(candles: Candle[]): ScanResult[] {
+export function scanCrudeOilSetups(candles: Candle[]): ScannedResult[] {
   const ctx = buildContext(candles);
   if (!ctx) return [];
   return CL_SCANNERS.map((fn) => fn(ctx))
     .filter((r): r is ScanResult => r !== null)
-    .map((r) => applyAtrFloor(r, ctx.snap.atr14, "CL"));
+    .map((r) => withConfluence(applyAtrFloor(r, ctx.snap.atr14, "CL"), ctx, "CL"));
 }
 
 // Candles belonging to the same MCX session day as the most recent candle --
@@ -462,7 +535,7 @@ function todaysCandles(candles: Candle[]): Candle[] {
   return idx === -1 ? candles : candles.slice(idx);
 }
 
-export interface TimedScanResult extends ScanResult {
+export interface TimedScanResult extends ScannedResult {
   tf: string;
   tfLabel: string;
 }

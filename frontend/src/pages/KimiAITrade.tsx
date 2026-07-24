@@ -14,7 +14,6 @@ import {
   calculateHitProbability,
   calculatePotentialLeft,
   calculatePositionSize,
-  findPlaybookSetup,
   type PlaybookSetup,
   type Commodity,
   type ConfluenceFactor,
@@ -125,8 +124,12 @@ function buildWatchlistRows(
   return suggestions
     .map((r) => {
       const premium = projectScanPremium(r, options);
-      const matchedSetup = findPlaybookSetup(r.setupName, commodity);
-      const probResult = calculateHitProbability(r.setupName, commodity, matchedSetup?.requiredConfluence ?? []);
+      // r.detectedConfluence reflects factors actually verified against real,
+      // current market data (kimiScanner.ts's detectConfluence) -- NOT the
+      // setup's full requiredConfluence list, so a setup missing genuine
+      // confirmation correctly shows as blocked/lower-probability here
+      // instead of always looking fully confirmed.
+      const probResult = calculateHitProbability(r.setupName, commodity, r.detectedConfluence);
       const prob = "error" in probResult ? null : probResult;
       const sizing = premium ? calculatePositionSize(capital, riskPercent, premium.entry, premium.stop, LOT_SIZE[symbol]) : null;
       const row: WatchlistRow = {
@@ -337,16 +340,14 @@ export function KimiAITrade() {
             {liveSuggestions.map((r, i) => {
               const premium = projectScanPremium(r, options);
               const bullish = r.direction === "bullish";
-              // The scanner already verified this setup's own required
-              // confluence factors before firing (e.g. the volume/trend
-              // checks inside the scanner ARE "volume_spike_1_5x" /
-              // "trend_aligned") -- and its stop/target are already floored
-              // to the ATR minimum -- so neither check can legitimately fail
-              // here. Passing the matched setup's requiredConfluence (rather
-              // than an empty list) reflects that honestly instead of always
-              // showing "missing confluence".
-              const matchedSetup = findPlaybookSetup(r.setupName, commodity);
-              const probResult = calculateHitProbability(r.setupName, commodity, matchedSetup?.requiredConfluence ?? []);
+              // r.detectedConfluence reflects factors actually verified
+              // against real, current market data (kimiScanner.ts's
+              // detectConfluence), not just assumed from the setup's full
+              // requiredConfluence list -- so a setup that fired without
+              // genuine volume/trend/RSI/key-level confirmation correctly
+              // shows a lower probability and can be blocked, instead of
+              // always looking fully confirmed.
+              const probResult = calculateHitProbability(r.setupName, commodity, r.detectedConfluence);
               const finalProb = "error" in probResult ? null : probResult.finalProbability;
               const callTime = formatCallTime(ledger.openedAtFor(r.setupName, r.tf));
               const ledgerEntry = ledger.entryFor(r.setupName, r.tf);
@@ -377,7 +378,11 @@ export function KimiAITrade() {
                         </span>
                       </div>
                       <p className="text-[8px] mt-0.5" style={{ color: probabilityStyle(finalProb).text, opacity: 0.75 }}>
-                        Includes this setup's own required confluence — already verified by the scan
+                        {"error" in probResult
+                          ? ""
+                          : probResult.missingConfluence.length === 0
+                            ? "All required confluence confirmed against live data"
+                            : `Missing confluence: ${probResult.missingConfluence.map((f) => f.replace(/_/g, " ")).join(", ")}`}
                       </p>
                     </div>
                   )}
