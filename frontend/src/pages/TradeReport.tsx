@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { TrendingUp, TrendingDown, Target, Wallet } from "lucide-react";
+import { TrendingUp, TrendingDown, Target, Wallet, Trophy, Sparkles } from "lucide-react";
 import { usePortfolio } from "../api/hooks";
 import { useTimeframeSuite, TIMEFRAMES } from "../hooks/useTimeframeSuite";
 import { useTradeLog } from "../hooks/useTradeLog";
@@ -72,6 +72,21 @@ interface RowStats {
   amount: number;
 }
 
+interface TimeframeRank extends RowStats {
+  closed: number;
+  winRatePct: number | null;
+}
+
+// Medal styling for the top 3 by rank; anything past 3rd gets a plain slate
+// badge. Rank 1 also gets a warm gold card background so it stands out at a
+// glance without needing to read the numbers first.
+const RANK_STYLE: { ring: string; badgeBg: string; badgeText: string; label: string }[] = [
+  { ring: "#F59E0B", badgeBg: "linear-gradient(135deg,#FBBF24,#F59E0B)", badgeText: "#78350F", label: "1st" },
+  { ring: "#94A3B8", badgeBg: "linear-gradient(135deg,#E2E8F0,#94A3B8)", badgeText: "#334155", label: "2nd" },
+  { ring: "#C2703D", badgeBg: "linear-gradient(135deg,#F0B27A,#B5651D)", badgeText: "#4A2511", label: "3rd" },
+  { ring: "#CBD5E1", badgeBg: "#F1F5F9", badgeText: "#64748B", label: "4th" },
+];
+
 function summarize(entries: TradeLogEntry[], lotSize: number, capital: number, riskPercent: number): { targetHit: number; breakeven: number; slHit: number; running: number; netPoints: number; amount: number } {
   let targetHit = 0,
     breakeven = 0,
@@ -125,6 +140,30 @@ export function TradeReport() {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tradeLogs, capital, riskPercent]);
+
+  // Combines both symbols per timeframe (a 1-hour signal on Crude Oil and a
+  // 1-hour signal on Natural Gas are both "the 1-hour timeframe") and ranks
+  // by net rupee P&L -- the same real, already-computed numbers shown in the
+  // per-symbol tables below, just aggregated to answer "which timeframe
+  // should I actually trade" at a glance.
+  const timeframeRanking = useMemo<TimeframeRank[]>(() => {
+    return TIMEFRAMES.map(({ tf, label }) => {
+      const cRow = rowsBySymbol.CRUDEOIL.find((r) => r.tf === tf);
+      const nRow = rowsBySymbol.NATURALGAS.find((r) => r.tf === tf);
+      const suggested = (cRow?.suggested ?? 0) + (nRow?.suggested ?? 0);
+      const targetHit = (cRow?.targetHit ?? 0) + (nRow?.targetHit ?? 0);
+      const breakeven = (cRow?.breakeven ?? 0) + (nRow?.breakeven ?? 0);
+      const slHit = (cRow?.slHit ?? 0) + (nRow?.slHit ?? 0);
+      const running = (cRow?.running ?? 0) + (nRow?.running ?? 0);
+      const netPoints = Number(((cRow?.netPoints ?? 0) + (nRow?.netPoints ?? 0)).toFixed(2));
+      const amount = (cRow?.amount ?? 0) + (nRow?.amount ?? 0);
+      const closed = targetHit + breakeven + slHit;
+      const winRatePct = closed > 0 ? Math.round((targetHit / closed) * 100) : null;
+      return { tf, label, suggested, targetHit, breakeven, slHit, running, netPoints, amount, closed, winRatePct };
+    }).sort((a, b) => b.amount - a.amount);
+  }, [rowsBySymbol]);
+
+  const maxRankAmount = Math.max(1, ...timeframeRanking.map((r) => Math.abs(r.amount)));
 
   const grandTotal = useMemo(() => {
     const all = [...rowsBySymbol.CRUDEOIL, ...rowsBySymbol.NATURALGAS];
@@ -180,6 +219,65 @@ export function TradeReport() {
           </label>
         </div>
         <p className="text-[10px] text-slate-400 mt-2">Same settings as the Risk page — quantity per trade is sized so its own stop-loss distance risks this % of capital, not a flat lot count.</p>
+      </section>
+
+      {/* TIMEFRAME RANKING */}
+      <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">
+        <p className="text-xs font-bold uppercase text-slate-400 mb-1 flex items-center gap-1.5">
+          <Trophy size={14} className="text-amber-500" /> Timeframe Ranking — Overall Net
+        </p>
+        <p className="text-[10px] text-slate-400 mb-3">Ranked by combined net ₹ P&amp;L across Crude Oil + Natural Gas — use this to decide which timeframe to actually trade.</p>
+
+        {grandTotal.suggested === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-4">No signals yet — rankings will appear once calls start firing and closing.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {timeframeRanking.map((r, i) => {
+              const style = RANK_STYLE[i] ?? RANK_STYLE[RANK_STYLE.length - 1];
+              const barPct = Math.max(4, (Math.abs(r.amount) / maxRankAmount) * 100);
+              return (
+                <div
+                  key={r.tf}
+                  className="rounded-xl p-3 border"
+                  style={{ borderColor: `${style.ring}55`, background: i === 0 ? "linear-gradient(135deg,#FFFBEB,#FFFFFF)" : "#FAFAFA" }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span
+                        className="w-8 h-8 rounded-full flex items-center justify-center font-black text-[11px] shrink-0"
+                        style={{ background: style.badgeBg, color: style.badgeText }}
+                      >
+                        {i === 0 ? <Trophy size={15} /> : style.label}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-slate-800 truncate">{r.label}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {r.suggested} signals · {r.closed} closed{r.running ? ` · ${r.running} running` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-black" style={{ color: r.amount >= 0 ? "#16A34A" : "#DC2626" }}>
+                        {r.amount >= 0 ? "+" : ""}₹{r.amount.toLocaleString("en-IN")}
+                      </p>
+                      {r.winRatePct !== null && <p className="text-[10px] font-semibold text-slate-400">{r.winRatePct}% win rate</p>}
+                    </div>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${barPct}%`, background: r.amount >= 0 ? "linear-gradient(90deg,#4ADE80,#16A34A)" : "linear-gradient(90deg,#F87171,#DC2626)" }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="text-[10px] text-slate-400 mt-3 flex items-start gap-1.5">
+          <Sparkles size={11} className="mt-0.5 shrink-0" /> Based on actual closed-trade history so far, not a prediction — rankings will shift as more trades close.
+        </p>
       </section>
 
       {/* GRAND TOTAL */}
