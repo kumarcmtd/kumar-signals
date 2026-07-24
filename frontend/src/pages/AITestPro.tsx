@@ -5,6 +5,7 @@ import { useMarketStatus, usePrices, usePortfolio, useCreateTrade, useSignal, us
 import { useAppStore } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { findEliteSignal } from "../utils/eliteSignal";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { flattenClosedTrades, computePerformanceStats } from "../utils/tradeLogPnl";
@@ -137,25 +138,23 @@ export function AITestPro() {
   const realizedTrades = useMemo(() => flattenClosedTrades(tradeLogs), [tradeLogs]);
   const perf = useMemo(() => computePerformanceStats(realizedTrades), [realizedTrades]);
 
-  // "Best" pick across both symbols and all six timeframes -- same idea as
-  // AI-Test V2's Best Trade of the Day, picking whichever open/active line
-  // currently has the highest real hit probability.
   const allEntries = useMemo(
     () =>
       SYMBOLS.flatMap((sym) => board[sym].analyses.map((a, i) => ({ symbol: sym, analysis: a, options: board[sym].options, proj: (sym === "CRUDEOIL" ? crudeOilProjections : naturalGasProjections)[i] }))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [crudeOil.analyses, naturalGas.analyses, crudeOilProjections, naturalGasProjections]
   );
-  const actionable = allEntries.filter((e) => e.analysis.decision !== "WAIT" && e.analysis.hitProbability !== null);
-  // Prefer a genuinely strong tier for the single flagship "hero" spotlight
-  // over a marginal one, even if the marginal tier's hitProbability happens
-  // to score higher -- a WATCH BUY/SELL shouldn't get the same "this is
-  // today's best pick" spotlight as a STRONG BUY/BUY/STRONG SELL when a
-  // stronger tier is available. Only falls back to a marginal pick when
-  // nothing stronger currently qualifies.
-  const strongActionable = actionable.filter((e) => !MARGINAL_DECISIONS.has(e.analysis.decision));
-  const heroPool = strongActionable.length ? strongActionable : actionable;
-  const hero = heroPool.length ? heroPool.reduce((best, e) => ((e.analysis.hitProbability ?? 0) > (best.analysis.hitProbability ?? 0) ? e : best)) : null;
+  // The single flagship spotlight now uses the EXACT SAME gate as the AI
+  // Elite page (findEliteSignal): STRONG BUY/SELL only, zero vetoes, another
+  // timeframe on the same symbol confirming, genuine price-action +
+  // support/resistance value-zone + volume confirmation, and a minimum
+  // 1:1.5 reward-to-risk -- not just "highest hitProbability among non-WAIT
+  // tiers" like before. findEliteSignal already compares across ALL
+  // candidates (both symbols) and picks the single most extreme, so this
+  // naturally produces one spotlight pick, same as passing one symbol at a
+  // time would on the Elite page itself.
+  const eliteHero = useMemo(() => findEliteSignal(allEntries), [allEntries]);
+  const hero = eliteHero ? { symbol: eliteHero.symbol as TradableSymbol, analysis: eliteHero.analysis, options: eliteHero.options } : null;
   const heroKey = hero ? `${hero.symbol}-${hero.analysis.tf}` : null;
   const heroLog = heroKey ? tradeLogs[heroKey] ?? [] : [];
   const heroEntry = heroLog[heroLog.length - 1];
@@ -212,7 +211,7 @@ export function AITestPro() {
         <div className="flex items-start justify-between">
           <div>
             <h1 className="text-lg font-black tracking-tight bg-gradient-to-r from-[#00C2FF] via-[#7C4DFF] to-[#00C2FF] bg-clip-text text-transparent">AI-Test Pro</h1>
-            <p className="text-[10px] text-[#9AA4B2]">Institutional Commodity Dashboard</p>
+            <p className="text-[10px] text-[#9AA4B2]">Institutional Commodity Dashboard — flagship pick now Elite-gated</p>
           </div>
           <Link to="/settings" className="p-2 rounded-full" style={{ background: "#181A24" }}>
             <SettingsIcon size={16} className="text-[#9AA4B2]" />
@@ -225,12 +224,20 @@ export function AITestPro() {
         </div>
       </header>
 
-      {/* HERO SIGNAL CARD */}
+      {/* HERO SIGNAL CARD -- gated by findEliteSignal, same bar as the Elite page */}
       <GlassCard glow={hero ? DECISION_COLOR[hero.analysis.decision] : undefined}>
+        <div className="flex items-center gap-1.5 mb-2">
+          <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full" style={{ background: "#00E67622", color: "#00E676" }}>
+            Elite-Gated Spotlight
+          </span>
+        </div>
         {!hero || !heroEntry ? (
           <div className="text-center py-6">
             <p className="text-sm font-bold text-[#9AA4B2]">No actionable signal right now</p>
-            <p className="text-xs text-[#9AA4B2] mt-1">Both instruments are below the confidence bar across every timeframe. Nothing is fabricated — check back shortly.</p>
+            <p className="text-xs text-[#9AA4B2] mt-1">
+              Neither instrument currently clears the same strict bar AI Elite uses: STRONG BUY/SELL, zero vetoes, another timeframe confirming, genuine price-action + value-zone + volume
+              confirmation, and at least 1:1.5 reward-to-risk. Nothing is fabricated — check back shortly.
+            </p>
           </div>
         ) : (
           <div className="flex flex-col sm:flex-row gap-4 items-center">
@@ -245,14 +252,16 @@ export function AITestPro() {
               <p className="text-2xl font-black mt-0.5">
                 {heroEntry.strike} {heroEntry.optSide}
               </p>
-              <p className="text-sm font-bold mt-1 flex items-center gap-1.5" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
+              <p className="text-sm font-bold mt-1" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
                 {hero.analysis.decision} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
-                {MARGINAL_DECISIONS.has(hero.analysis.decision) && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold border" style={{ color: "#FFC107", borderColor: "#FFC10766" }}>
-                    MARGINAL
-                  </span>
-                )}
               </p>
+              <p className="text-[10px] text-[#9AA4B2] mt-0.5">Confirmed by: {eliteHero?.confirmingTimeframes.join(", ")}</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                <ConfluenceChip label="Price Action" ok={!!eliteHero?.confluence.priceAction} />
+                <ConfluenceChip label="Value Zone" ok={!!eliteHero?.confluence.valueZone} />
+                <ConfluenceChip label="Volume" ok={!!eliteHero?.confluence.volume} />
+                <ConfluenceChip label={`R:R 1:${eliteHero?.rr ?? "—"}`} ok={(eliteHero?.rr ?? 0) >= 1.5} />
+              </div>
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <StatChip label="Entry" value={`₹${heroEntry.entry}`} />
                 <StatChip label="Stop Loss" value={`₹${heroEntry.stop}`} color="#FF4D4F" />
@@ -840,7 +849,10 @@ export function AITestPro() {
             </div>
             <p className="text-[10px] text-[#9AA4B2] mb-3">Answers below are built from this signal's own real numbers — not a free-text chat model.</p>
             <div className="space-y-3">
-              <Faq q="Why this signal?" a={hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} />
+              <Faq
+                q="Why this signal?"
+                a={`${hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} It cleared the same strict bar as AI Elite: ${hero.analysis.decision}, zero vetoes, confirmed by ${eliteHero?.confirmingTimeframes.join(", ") ?? "another timeframe"}, genuine price-action + value-zone + volume confirmation, and a 1:${eliteHero?.rr} reward-to-risk.`}
+              />
               <Faq
                 q="What if the target fails?"
                 a={`Stop loss is set at ₹${heroEntry.stop}. ${
@@ -883,6 +895,20 @@ function GlassCard({ children, title, glow }: { children: React.ReactNode; title
       {title && <p className="text-xs font-bold uppercase text-[#9AA4B2] mb-3">{title}</p>}
       {children}
     </section>
+  );
+}
+
+// The hero card only ever renders once findEliteSignal has already verified
+// every one of these -- this checklist makes that verifiable at a glance
+// rather than a claim the user has to take on faith.
+function ConfluenceChip({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-bold"
+      style={{ background: ok ? "#00E67622" : "#FF4D4F22", color: ok ? "#00E676" : "#FF4D4F" }}
+    >
+      {label}
+    </span>
   );
 }
 
