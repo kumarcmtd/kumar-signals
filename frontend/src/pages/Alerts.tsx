@@ -150,7 +150,7 @@ export function Alerts() {
 function AlertRow({ alert, onRead }: { alert: AlertEntry; onRead: () => void }) {
   const style = SOURCE_STYLE[alert.source];
   const Icon = style.icon;
-  const isBearish = /sell/i.test(alert.title) || alert.title.includes("PE");
+  const isBearish = alert.bearish ?? (/sell/i.test(alert.title) || alert.title.includes("PE"));
   const DirIcon = isBearish ? TrendingDown : TrendingUp;
   return (
     <button onClick={onRead} className={`card p-3 w-full text-left flex gap-3 ${alert.read ? "opacity-60" : ""}`}>

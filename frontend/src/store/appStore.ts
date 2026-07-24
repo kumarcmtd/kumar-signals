@@ -51,6 +51,11 @@ export interface AlertEntry {
   title: string;
   detail: string;
   read: boolean;
+  // Explicit bearish flag set from the real decision/direction at creation
+  // time -- older, already-persisted alerts predate this field and fall
+  // back to text-sniffing the title (see Alerts.tsx) since label wording
+  // isn't guaranteed to contain "sell" anymore.
+  bearish?: boolean;
 }
 
 export interface AlertSettings {

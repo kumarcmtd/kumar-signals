@@ -157,7 +157,7 @@ export function AITestElite() {
           <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-[#00E676] via-[#00C2FF] to-[#00E676] bg-clip-text text-transparent">AI Elite</h1>
         </div>
         <p className="text-[11px] text-[#9AA4B2] px-4">
-          Only Very Strong Buy / Very Strong Sell, confirmed by a second timeframe, zero trading-rule vetoes, genuine price-action + support/resistance value-zone + volume confirmation, and at least a
+          Only Strong Buy / Don't Buy Risky (strong sell) tier signals, confirmed by a second timeframe, zero trading-rule vetoes, genuine price-action + support/resistance value-zone + volume confirmation, and at least a
           1:1.5 reward-to-risk. No middle-tier signals shown here.
         </p>
         <p className="text-[10px] text-[#9AA4B2] flex items-center justify-center gap-1">
@@ -172,7 +172,7 @@ export function AITestElite() {
             <Info size={28} className="mx-auto text-[#9AA4B2]" />
             <p className="text-sm font-bold text-white">No Elite-grade setup right now</p>
             <p className="text-xs text-[#9AA4B2] px-4">
-              Neither Crude Oil nor Natural Gas currently clears every bar: Very Strong Buy/Sell confirmed by another timeframe, zero vetoes, real price-action + value-zone + volume confirmation, and
+              Neither Crude Oil nor Natural Gas currently clears every bar: Strong Buy / Don't Buy Risky (strong sell) confirmed by another timeframe, zero vetoes, real price-action + value-zone + volume confirmation, and
               at least 1:1.5 reward-to-risk. That's expected most of the time — this page is built to stay quiet rather than show a weaker signal just to have something on screen.
             </p>
           </div>

@@ -236,7 +236,7 @@ export function AITestPro() {
           <div className="text-center py-6">
             <p className="text-sm font-bold text-[#9AA4B2]">No actionable signal right now</p>
             <p className="text-xs text-[#9AA4B2] mt-1">
-              Neither instrument currently clears the same strict bar AI Elite uses: Very Strong Buy/Sell, zero vetoes, another timeframe confirming, genuine price-action + value-zone + volume
+              Neither instrument currently clears the same strict bar AI Elite uses: Strong Buy / Don't Buy Risky (strong sell), zero vetoes, another timeframe confirming, genuine price-action + value-zone + volume
               confirmation, and at least 1:1.5 reward-to-risk. Nothing is fabricated — check back shortly.
             </p>
           </div>

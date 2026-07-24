@@ -78,6 +78,7 @@ export function useAlertEngine(): void {
             title: `${decisionLabelWithScore(a.decision)} — ${DISPLAY_NAME[symbol]} (${a.label})`,
             detail: a.reasons.slice(0, 2).join("; ") || "Confluence signal fired",
             read: false,
+            bearish: a.decision === "SELL" || a.decision === "STRONG SELL",
           });
         }
       }
@@ -106,6 +107,7 @@ export function useAlertEngine(): void {
           title: `AI Elite ${decisionLabelWithScore(elite.analysis.decision)} — ${DISPLAY_NAME[symbol]} (${elite.analysis.label})`,
           detail: `Confirmed by ${elite.confirmingTimeframes.join(", ") || "no other timeframes"}`,
           read: false,
+          bearish: elite.analysis.decision === "SELL" || elite.analysis.decision === "STRONG SELL",
         });
       }
     }
@@ -136,6 +138,7 @@ export function useAlertEngine(): void {
             title: `${r.setupName} — ${DISPLAY_NAME[symbol]} (${r.tfLabel})`,
             detail: prob ? `${prob.recommendation} · ${prob.finalProbability}% hit probability` : (r.notes[0] ?? "Setup triggered"),
             read: false,
+            bearish: r.direction === "bearish",
           });
         }
       }
