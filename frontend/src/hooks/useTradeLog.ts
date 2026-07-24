@@ -111,14 +111,26 @@ export function advanceTradeLog(
   return history;
 }
 
-export function useTradeLog(symbol: string, analyses: TimeframeAnalysis[], projections: (ProjLike | null)[], options: OptionsAnalytics | undefined) {
+// keyPrefix defaults to symbol (unchanged behavior for every existing
+// caller). Pass a distinct prefix to track a separate page's own history
+// under exclusive keys in the SAME shared tradeLogs dictionary without
+// colliding with another page's entries for the same symbol+timeframe --
+// e.g. Kumar AI uses "KUMARAI-<symbol>" so its background tracking never
+// mixes with AI-Test V2/Pro's own logs.
+export function useTradeLog(
+  symbol: string,
+  analyses: TimeframeAnalysis[],
+  projections: (ProjLike | null)[],
+  options: OptionsAnalytics | undefined,
+  keyPrefix: string = symbol
+) {
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const setTradeLog = useAppStore((s) => s.setTradeLog);
 
   useEffect(() => {
     const now = Date.now();
     analyses.forEach((a, i) => {
-      const key = `${symbol}-${a.tf}`;
+      const key = `${keyPrefix}-${a.tf}`;
       const history = tradeLogs[key] ?? [];
       const last = history[history.length - 1];
       const open = last && !last.closed ? last : undefined;
@@ -128,7 +140,7 @@ export function useTradeLog(symbol: string, analyses: TimeframeAnalysis[], proje
       if (next !== history) setTradeLog(key, next);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, analyses, projections, options]);
+  }, [keyPrefix, analyses, projections, options]);
 
   return tradeLogs;
 }

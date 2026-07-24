@@ -23,10 +23,78 @@ import {
 } from "lucide-react";
 import { useMarketStatus, usePortfolio, useOptionsAnalytics, useKumarAiAnalyze } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
-import { liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useKumarAISuite, KUMAR_AI_TIMEFRAMES, type KumarAiTimeframeSnapshot, type KumarAiTradableSymbol } from "../hooks/useKumarAISuite";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
 import type { Direction, OptionsAnalytics, KumarAiAnalyzeRequest, KumarAiAnalyzeResult } from "../types";
+
+// This page's own trade-log namespace: "KUMARAI-<symbol>-<tf>" keys in the
+// SAME shared, persisted tradeLogs store every other page already writes
+// to -- exclusive to this page (mirrors how AI Elite tracks under its own
+// "ELITE-<symbol>" key) so it never collides with AI-Test V2/Pro's logs
+// for the same symbol+timeframe, while still surviving page reloads like
+// every other page's trade log does.
+function kumarAiKeyPrefix(sym: KumarAiTradableSymbol): string {
+  return `KUMARAI-${sym}`;
+}
+
+const LOG_STATUS_LABEL: Record<TradeLogStatus, string> = {
+  running: "Running",
+  sl_hit: "Stop Loss Hit",
+  stopped_breakeven: "Closed at Breakeven (T1)",
+  stopped_after_t1: "Closed after T1 (T2 hit)",
+  target3_hit: "Target 3 Hit",
+};
+const LOG_STATUS_COLOR: Record<TradeLogStatus, string> = {
+  running: "#38BDF8",
+  sl_hit: "#EF4444",
+  stopped_breakeven: "#A3E635",
+  stopped_after_t1: "#22C55E",
+  target3_hit: "#22C55E",
+};
+
+function fmtLogTime(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+interface TfRanking {
+  tf: string;
+  label: string;
+  targetHit: number;
+  breakeven: number;
+  slHit: number;
+  total: number;
+  winRate: number | null;
+}
+
+// Ranks the 6 timeframes by real closed-trade performance, combined across
+// both Natural Gas and Crude Oil (same "Both Symbols" convention the
+// Day-wise Trade Log summary on AI-Test V2 already uses). Win rate excludes
+// breakeven closes from the decided count -- a breakeven is not a loss, but
+// it isn't a win either, same convention tradeLogPnl.ts's accuracyPct uses.
+function rankTimeframes(tradeLogs: Record<string, TradeLogEntry[]>): TfRanking[] {
+  return KUMAR_AI_TIMEFRAMES.map(({ tf, label }) => {
+    const entries = [...(tradeLogs[`${kumarAiKeyPrefix("NATURALGAS")}-${tf}`] ?? []), ...(tradeLogs[`${kumarAiKeyPrefix("CRUDEOIL")}-${tf}`] ?? [])].filter((e) => e.closed);
+    let targetHit = 0;
+    let breakeven = 0;
+    let slHit = 0;
+    for (const e of entries) {
+      if (e.status === "target3_hit" || e.status === "stopped_after_t1") targetHit += 1;
+      else if (e.status === "stopped_breakeven") breakeven += 1;
+      else if (e.status === "sl_hit") slHit += 1;
+    }
+    const decided = targetHit + slHit;
+    const winRate = decided > 0 ? Math.round((targetHit / decided) * 100) : null;
+    return { tf, label, targetHit, breakeven, slHit, total: entries.length, winRate };
+  }).sort((a, b) => {
+    if (a.winRate === null && b.winRate === null) return b.total - a.total;
+    if (a.winRate === null) return 1;
+    if (b.winRate === null) return -1;
+    if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+    return b.total - a.total;
+  });
+}
 
 const SYMBOLS: KumarAiTradableSymbol[] = ["NATURALGAS", "CRUDEOIL"];
 const DISPLAY_NAME: Record<KumarAiTradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -178,6 +246,19 @@ export function KumarAI() {
   const current = board[symbol];
   const { data: options } = useOptionsAnalytics(symbol);
   const aiMutation = useKumarAiAnalyze();
+
+  // Background trade-log tracking for BOTH symbols regardless of which one
+  // is currently selected -- same reason AI-Test V2 does this: switching
+  // symbols must not stall the other one's log, or its history/ranking
+  // would silently go stale. Namespaced under "KUMARAI-<symbol>-<tf>" keys
+  // so it never mixes with any other page's trade log.
+  const ngAnalyses = useMemo(() => naturalGas.snapshots.map((s) => s.analysis), [naturalGas.snapshots]);
+  const ngProjections = useMemo(() => naturalGas.snapshots.map((s) => projectPremium(s.analysis, naturalGas.options)), [naturalGas.snapshots, naturalGas.options]);
+  const clAnalyses = useMemo(() => crudeOil.snapshots.map((s) => s.analysis), [crudeOil.snapshots]);
+  const clProjections = useMemo(() => crudeOil.snapshots.map((s) => projectPremium(s.analysis, crudeOil.options)), [crudeOil.snapshots, crudeOil.options]);
+  useTradeLog("NATURALGAS", ngAnalyses, ngProjections, naturalGas.options, kumarAiKeyPrefix("NATURALGAS"));
+  const kumarAiTradeLogs = useTradeLog("CRUDEOIL", clAnalyses, clProjections, crudeOil.options, kumarAiKeyPrefix("CRUDEOIL"));
+  const tfRanking = useMemo(() => rankTimeframes(kumarAiTradeLogs), [kumarAiTradeLogs]);
 
   const keyFor = (sym: KumarAiTradableSymbol, tf: string) => `${sym}-${tf}`;
 
@@ -360,6 +441,46 @@ export function KumarAI() {
         <ActionButton icon={Sparkles} label="Generate AI Signal" onClick={() => current.snapshots.forEach((s) => generateSignal(symbol, s, true))} accent="#A78BFA" isDark={isDark} />
       </div>
 
+      {/* TIMEFRAME PERFORMANCE RANKING -- combined Natural Gas + Crude Oil,
+          from real closed trades this page has tracked in the background */}
+      <section className="rounded-2xl p-4" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
+        <p className="text-xs font-bold uppercase mb-1" style={{ color: "var(--ka-text)" }}>
+          Timeframe Performance Ranking
+        </p>
+        <p className="text-[10px] mb-3" style={{ color: "var(--ka-muted)" }}>
+          Ranked by real closed-trade win rate, both markets combined. Win rate excludes breakeven closes.
+        </p>
+        <div className="space-y-1.5">
+          {tfRanking.map((r, i) => (
+            <div key={r.tf} className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0"
+                  style={i === 0 && r.winRate !== null ? { background: "#FBBF24", color: "#07060C" } : { background: "var(--ka-border)", color: "var(--ka-muted)" }}
+                >
+                  {i + 1}
+                </span>
+                <span className="text-xs font-bold">{r.label}</span>
+              </div>
+              {r.total === 0 ? (
+                <span className="text-[10px]" style={{ color: "var(--ka-muted)" }}>
+                  No closed trades yet
+                </span>
+              ) : (
+                <div className="text-right">
+                  <span className="text-xs font-black" style={{ color: r.winRate === null ? "var(--ka-muted)" : r.winRate >= 50 ? "#22C55E" : "#EF4444" }}>
+                    {r.winRate !== null ? `${r.winRate}% win rate` : "Breakeven only"}
+                  </span>
+                  <p className="text-[9px]" style={{ color: "var(--ka-muted)" }}>
+                    {r.targetHit}W · {r.breakeven}BE · {r.slHit}L ({r.total} closed)
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
       {current.liveDataUnavailable && (
         <div className="rounded-2xl p-4 text-center" style={{ background: "var(--ka-card)", border: "1px solid rgba(239,68,68,0.3)" }}>
           <p className="text-sm font-bold flex items-center justify-center gap-1.5" style={{ color: "#EF4444" }}>
@@ -382,6 +503,9 @@ export function KumarAI() {
           const techOpen = expandedTech.has(key);
           const word = decisionWord(snap.analysis.bias);
           const wordColor = word === "BUY" ? "#22C55E" : word === "SELL" ? "#EF4444" : "#94A3B8";
+          const log = kumarAiTradeLogs[`${kumarAiKeyPrefix(symbol)}-${snap.tf}`] ?? [];
+          const openLogEntry = log.length && !log[log.length - 1].closed ? log[log.length - 1] : undefined;
+          const openLogLiveLtp = openLogEntry ? liveLtpFor(current.options, openLogEntry.strike, openLogEntry.optSide) : null;
 
           return (
             <section key={snap.tf} className="rounded-2xl overflow-hidden backdrop-blur-xl" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
@@ -441,6 +565,26 @@ export function KumarAI() {
                     <Stat label="Time Generated" value={sig ? new Date(sig.generatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"} />
                     <Stat label="Signal Expiry" value={sig ? fmtCountdown(sig.expiresAt - now) : "—"} />
                   </div>
+
+                  {/* Trade log -- when this timeframe's call was actually given
+                      and, once closed, when it closed and the real result.
+                      Tracked automatically in the background (same as
+                      AI-Test V2/Pro), independent of the Generate button
+                      above, so it stays a truthful record even if nothing
+                      was ever manually generated for this timeframe. */}
+                  {log.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase" style={{ color: "var(--ka-muted)" }}>
+                        Trade Log (newest first)
+                      </p>
+                      {[...log]
+                        .reverse()
+                        .slice(0, 5)
+                        .map((entry) => (
+                          <KumarTradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openLogEntry?.id ? openLogLiveLtp : null} />
+                        ))}
+                    </div>
+                  )}
 
                   {/* Card actions */}
                   <div className="grid grid-cols-2 gap-2">
@@ -617,6 +761,45 @@ export function KumarAI() {
         never invents or overrides a price level. Signals are independent per browser session and aren't shared with any other page on this site.
       </p>
     </div>
+  );
+}
+
+function KumarTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
+  const dulled = entry.closed;
+  return (
+    <div className="rounded-lg px-2.5 py-2 transition-opacity" style={{ opacity: dulled ? 0.6 : 1, background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-bold">
+          {entry.strike} {entry.optSide} · Entry ₹{entry.entry}
+        </span>
+        <span className="text-[10px] font-bold shrink-0" style={{ color: LOG_STATUS_COLOR[entry.status] }}>
+          {LOG_STATUS_LABEL[entry.status]}
+        </span>
+      </div>
+      <p className="text-[9px] mt-1" style={{ color: "var(--ka-muted)" }}>
+        Called {fmtLogTime(entry.openedAt)}
+        {entry.closedAt !== null ? ` · Closed ${fmtLogTime(entry.closedAt)}` : ""}
+      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px]" style={{ color: "var(--ka-muted)" }}>
+        <KumarTargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
+        <KumarTargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
+        <KumarTargetTick label="T3" price={entry.targets[2]} hit={entry.targetsHit[2]} />
+        <span>SL ₹{entry.stop}</span>
+      </div>
+      {!dulled && liveLtp !== null && (
+        <p className="text-[10px] mt-1" style={{ color: "var(--ka-muted)" }}>
+          Current premium: ₹{liveLtp}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function KumarTargetTick({ label, price, hit }: { label: string; price: number; hit: boolean }) {
+  return (
+    <span style={hit ? { color: "#22C55E", fontWeight: 600 } : undefined}>
+      {hit ? "✓" : "○"} {label} ₹{price}
+    </span>
   );
 }
 
