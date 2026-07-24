@@ -122,6 +122,28 @@ export const useAppStore = create<AppState>()(
       setAlertSettings: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, ...patch } })),
       setAlertSources: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, sources: { ...s.alertSettings.sources, ...patch } } })),
     }),
-    { name: "kumar-signals-pro-store" }
+    {
+      name: "kumar-signals-pro-store",
+      version: 1,
+      // v0 -> v1: the Kimi AI Trade ledger used to open a line for ANY
+      // scanner hit (a pattern match alone, no confluence/edge-score bar),
+      // which produced a genuinely broken ~9% win rate. Now that a real
+      // gate exists (kimiScanner.ts's detectConfluence + calculateHitProbability's
+      // tradeable check), that old data is just noise, not a fair baseline
+      // for the new logic -- clearing only the KIMI-* keys here (AI-Test
+      // V2/Pro and Elite's own trade logs are untouched) so the win rate
+      // starts clean instead of dragging a broken average for a long time.
+      migrate: (persistedState, version) => {
+        const state = persistedState as { tradeLogs?: Record<string, TradeLogEntry[]> } | undefined;
+        if (version < 1 && state?.tradeLogs) {
+          const filtered: Record<string, TradeLogEntry[]> = {};
+          for (const [k, v] of Object.entries(state.tradeLogs)) {
+            if (!k.startsWith("KIMI-")) filtered[k] = v;
+          }
+          state.tradeLogs = filtered;
+        }
+        return state;
+      },
+    }
   )
 );

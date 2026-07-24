@@ -74,6 +74,20 @@ function probabilityStyle(pct: number): { bg: string; text: string } {
   return { bg: "#FEE2E2", text: "#B91C1C" };
 }
 
+// The real Kimi trade ledger ran at ~9% win rate (1 target hit, 10 SL hit)
+// because every scanner hit was tracked as a live trade regardless of
+// whether it actually had genuine confluence behind it -- a scanner only
+// needs a pattern match to fire, with no minimum-quality bar before it's
+// treated as an actionable call. This is the same gate AI Elite uses
+// (missing confluence or a sub-1.0 edge score blocks it outright): only a
+// setup with EVERY required confluence factor genuinely detected (real
+// volume/trend/RSI/key-level data, not assumed) AND a BUY/STRONG BUY edge
+// score is shown as a live suggestion or tracked in the ledger at all.
+function isTradeableResult(r: TimedScanResult, commodity: Commodity): boolean {
+  const result = calculateHitProbability(r.setupName, commodity, r.detectedConfluence);
+  return !("error" in result) && !result.blocked && result.tradeable;
+}
+
 // Fetches candles + live suggestions for ONE symbol, unconditionally --
 // called once per symbol so the Daily Watchlist can show both commodities
 // together regardless of which one the page's own symbol toggle has
@@ -176,9 +190,13 @@ export function KimiAITrade() {
   const options = currentScan.options;
   const liveSuggestions = currentScan.suggestions;
   const scanLoading = currentScan.loading;
+  // Only setups that genuinely clear the bar (real confluence + a BUY/STRONG
+  // BUY edge score, not just "a pattern matched") are shown as live
+  // suggestions or tracked in the ledger -- see isTradeableResult above.
+  const qualifiedSuggestions = useMemo(() => liveSuggestions.filter((r) => isTradeableResult(r, commodity)), [liveSuggestions, commodity]);
 
   const projectPremiumFor = useCallback((r: TimedScanResult) => projectScanPremium(r, options), [options]);
-  const ledger = useKimiTradeLog(symbol, liveSuggestions, projectPremiumFor, options);
+  const ledger = useKimiTradeLog(symbol, qualifiedSuggestions, projectPremiumFor, options);
 
   const probabilityResult = useMemo(() => {
     if (!calcSetup) return null;
@@ -331,13 +349,19 @@ export function KimiAITrade() {
           made for confusing, frequently-reversing calls with a high loss rate. 3 news/calendar-driven setups (EIA Storage/Inventory Reversal, OPEC News Gap Fill) are also excluded — this app has
           no economic-calendar feed to confirm those honestly, so they stay catalog-only above.
         </p>
+        <p className="text-[10px] text-emerald-700 mb-3 leading-relaxed">
+          Strengthened 24 Jul: only setups with every required confluence factor genuinely detected against live data AND a BUY/STRONG BUY edge score are shown here or tracked in the ledger below —
+          a pattern match alone is no longer enough. See the Daily Watchlist above for the full ranked list, including setups this bar currently blocks.
+        </p>
         {scanLoading ? (
           <p className="text-xs text-slate-400 text-center py-4">Loading live candles…</p>
-        ) : liveSuggestions.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-4">No setup is currently triggering on {DISPLAY_NAME[symbol]}. Check back after the next few candles.</p>
+        ) : qualifiedSuggestions.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-4">
+            No setup on {DISPLAY_NAME[symbol]} currently clears the confluence + edge-score bar. That's expected most of the time — check the Daily Watchlist above to see what's close.
+          </p>
         ) : (
           <div className="space-y-2">
-            {liveSuggestions.map((r, i) => {
+            {qualifiedSuggestions.map((r, i) => {
               const premium = projectScanPremium(r, options);
               const bullish = r.direction === "bullish";
               // r.detectedConfluence reflects factors actually verified
@@ -434,6 +458,10 @@ export function KimiAITrade() {
         <p className="text-[10px] text-slate-400 mb-3 leading-relaxed">
           Every live suggestion above is tracked as its own line the moment it fires, using the option premium entry/stop/target shown. Win Rate % below is this ledger's own real, running track
           record — not a playbook reference stat.
+        </p>
+        <p className="text-[10px] text-emerald-700 mb-3 leading-relaxed">
+          Reset on 24 Jul: this ledger previously opened a line for ANY scanner hit (a pattern match alone, no confluence or edge-score bar) — that produced a genuinely broken track record, so it
+          was cleared. It now only tracks setups that clear the same confluence + edge-score bar as Live Trade Suggestions above, and starts fresh from here.
         </p>
         <div className="grid grid-cols-2 gap-2 mb-2">
           <StatBox label="Win Rate (real track record)" value={ledger.winRatePct !== null ? `${ledger.winRatePct}%` : "— (no closed trades yet)"} bold color={ledger.winRatePct !== null ? (ledger.winRatePct >= 50 ? "#16A34A" : "#DC2626") : undefined} />
