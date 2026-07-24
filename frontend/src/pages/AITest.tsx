@@ -551,6 +551,10 @@ function TfField({ label, value, tone }: { label: string; value: string; tone?: 
 // at full brightness with the live premium shown; closed trades -- whether
 // they ended in a hit target or a stopped-out loss -- are visually "dulled"
 // per how a real trade log reads: it's history now, not the live position.
+function fmtLogTime(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
   return (
@@ -561,6 +565,10 @@ function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: numbe
         </span>
         <span className={`text-[10px] font-bold shrink-0 ${STATUS_COLOR[entry.status]}`}>{STATUS_LABEL[entry.status]}</span>
       </div>
+      <p className="text-[9px] text-white/40 mt-1">
+        Called {fmtLogTime(entry.openedAt)}
+        {entry.closedAt !== null ? ` · Closed ${fmtLogTime(entry.closedAt)}` : ""}
+      </p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 text-[10px] text-white/50">
         <TargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
         <TargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
