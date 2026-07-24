@@ -10,6 +10,7 @@ import { computePortfolioSummary } from "../utils/portfolioStats";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
+import { DECISION_LABEL } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
@@ -239,11 +240,8 @@ export function AITest() {
             <Star size={13} className="text-amber-300 fill-amber-300" /> BEST TRADE OF THE DAY
           </p>
           <p className="text-lg font-black flex items-center gap-1.5 flex-wrap">
-            {DISPLAY_NAME[bestTrade.symbol]} · {bestTrade.analysis.label} · {bestTrade.analysis.decision} {bestTradeProj ? `${bestTradeProj.strike} ` : ""}
+            {DISPLAY_NAME[bestTrade.symbol]} · {bestTrade.analysis.label} · {DECISION_LABEL[bestTrade.analysis.decision]} {bestTradeProj ? `${bestTradeProj.strike} ` : ""}
             {bestTrade.analysis.optSide ?? ""}
-            {MARGINAL_DECISIONS.has(bestTrade.analysis.decision) && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold border border-amber-400/50 text-amber-300">MARGINAL</span>
-            )}
           </p>
           <div className="grid grid-cols-3 gap-2 mt-2 text-center">
             <div>
@@ -321,10 +319,7 @@ export function AITest() {
               return (
                 <tr key={a.tf} className="border-t border-white/10">
                   <td className="py-2 font-semibold">{a.label}</td>
-                  <td className={`py-2 font-bold ${a.insufficient ? "text-white/30" : decisionColor[a.decision]}`}>
-                    {a.insufficient ? "—" : a.decision}
-                    {!a.insufficient && MARGINAL_DECISIONS.has(a.decision) && <span className="text-[8px] opacity-70"> (marginal)</span>}
-                  </td>
+                  <td className={`py-2 font-bold ${a.insufficient ? "text-white/30" : decisionColor[a.decision]}`}>{a.insufficient ? "—" : DECISION_LABEL[a.decision]}</td>
                   <td className="py-2">{latest ? `${latest.strike} ${latest.optSide}` : "—"}</td>
                   <td className="py-2">{latest ? `₹${latest.entry}` : "—"}</td>
                   <td className="py-2 font-bold">
@@ -398,13 +393,12 @@ export function AITest() {
                   <span className="text-[10px] font-bold text-white/40">NO DATA</span>
                 ) : MARGINAL_DECISIONS.has(a.decision) ? (
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1 ${decisionColor[a.decision]} border-current/40`}>
-                    {a.decision}
+                    {DECISION_LABEL[a.decision]}
                     {a.optSide ? ` ${latest ? latest.strike : ""} ${a.optSide}` : ""}
-                    <span className="text-[8px] opacity-80">MARGINAL</span>
                   </span>
                 ) : (
                   <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full text-black ${decisionBg[a.decision]}`}>
-                    {a.decision}
+                    {DECISION_LABEL[a.decision]}
                     {a.optSide ? ` ${latest ? latest.strike : ""} ${a.optSide}` : ""}
                   </span>
                 )}

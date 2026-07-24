@@ -15,6 +15,7 @@ import { CircularGauge } from "../components/CircularGauge";
 import { TradeChart } from "../components/TradeChart";
 import { TradingViewWidget } from "../components/TradingViewWidget";
 import { Link } from "react-router-dom";
+import { DECISION_LABEL } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -235,7 +236,7 @@ export function AITestPro() {
           <div className="text-center py-6">
             <p className="text-sm font-bold text-[#9AA4B2]">No actionable signal right now</p>
             <p className="text-xs text-[#9AA4B2] mt-1">
-              Neither instrument currently clears the same strict bar AI Elite uses: STRONG BUY/SELL, zero vetoes, another timeframe confirming, genuine price-action + value-zone + volume
+              Neither instrument currently clears the same strict bar AI Elite uses: Very Strong Buy/Sell, zero vetoes, another timeframe confirming, genuine price-action + value-zone + volume
               confirmation, and at least 1:1.5 reward-to-risk. Nothing is fabricated — check back shortly.
             </p>
           </div>
@@ -253,7 +254,7 @@ export function AITestPro() {
                 {heroEntry.strike} {heroEntry.optSide}
               </p>
               <p className="text-sm font-bold mt-1" style={{ color: DECISION_COLOR[hero.analysis.decision] }}>
-                {hero.analysis.decision} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
+                {DECISION_LABEL[hero.analysis.decision]} {heroEntry.optSide === "CE" ? "CALL" : "PUT"}
               </p>
               <p className="text-[10px] text-[#9AA4B2] mt-0.5">Confirmed by: {eliteHero?.confirmingTimeframes.join(", ")}</p>
               <div className="flex flex-wrap gap-1.5 mt-2">
@@ -557,12 +558,11 @@ export function AITestPro() {
                     className="text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1"
                     style={{ color: DECISION_COLOR[a.decision], borderColor: `${DECISION_COLOR[a.decision]}66`, background: `${DECISION_COLOR[a.decision]}14` }}
                   >
-                    {a.decision} {latest ? `${latest.strike} ${latest.optSide}` : ""}
-                    <span className="text-[8px] opacity-80">MARGINAL</span>
+                    {DECISION_LABEL[a.decision]} {latest ? `${latest.strike} ${latest.optSide}` : ""}
                   </span>
                 ) : (
                   <span className="text-[11px] font-bold px-2.5 py-1 rounded-full text-black" style={{ background: DECISION_COLOR[a.decision] }}>
-                    {a.decision} {latest ? `${latest.strike} ${latest.optSide}` : ""}
+                    {DECISION_LABEL[a.decision]} {latest ? `${latest.strike} ${latest.optSide}` : ""}
                   </span>
                 )}
               </div>
@@ -851,7 +851,7 @@ export function AITestPro() {
             <div className="space-y-3">
               <Faq
                 q="Why this signal?"
-                a={`${hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} It cleared the same strict bar as AI Elite: ${hero.analysis.decision}, zero vetoes, confirmed by ${eliteHero?.confirmingTimeframes.join(", ") ?? "another timeframe"}, genuine price-action + value-zone + volume confirmation, and a 1:${eliteHero?.rr} reward-to-risk.`}
+                a={`${hero.analysis.reasons[0] ?? "Confluence across the scored categories favors this direction right now."} It cleared the same strict bar as AI Elite: ${DECISION_LABEL[hero.analysis.decision]}, zero vetoes, confirmed by ${eliteHero?.confirmingTimeframes.join(", ") ?? "another timeframe"}, genuine price-action + value-zone + volume confirmation, and a 1:${eliteHero?.rr} reward-to-risk.`}
               />
               <Faq
                 q="What if the target fails?"

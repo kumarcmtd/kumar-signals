@@ -6,6 +6,7 @@ import { computePortfolioSummary } from "../utils/portfolioStats";
 import { findEliteSignal } from "../utils/eliteSignal";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import { calculateHitProbability } from "../utils/kimiPlaybook";
+import { DECISION_LABEL } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
 import type { Direction, OptionsAnalytics } from "../types";
 
@@ -141,7 +142,7 @@ function buildInstrumentReport(
       : `Not enough live data yet across any timeframe to gauge alignment.`;
 
   const eliteText = elite
-    ? `AI Elite currently has a ${elite.analysis.decision} pick on the ${elite.analysis.label} timeframe, confirmed by ${elite.confirmingTimeframes.join(", ") || "no other timeframe"}.`
+    ? `AI Elite currently has a ${DECISION_LABEL[elite.analysis.decision]} pick on the ${elite.analysis.label} timeframe, confirmed by ${elite.confirmingTimeframes.join(", ") || "no other timeframe"}.`
     : `AI Elite has no qualifying ${name} setup right now -- nothing currently clears its strict confluence + reward-to-risk bar.`;
 
   const kimiText =

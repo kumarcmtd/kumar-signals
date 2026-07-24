@@ -5,6 +5,21 @@ import { detectLiquiditySweep, premiumDiscountZone } from "./smc";
 
 export type Decision6 = "STRONG BUY" | "BUY" | "WATCH BUY" | "WAIT" | "SELL" | "STRONG SELL";
 
+// User-facing labels for each tier -- kept separate from the Decision6 type
+// itself (which stays as the internal enum every comparison/filter in this
+// codebase already keys off) so relabeling never touches scoring logic.
+// "WATCH BUY"/"SELL" are the tiers closest to the neutral WAIT band (only a
+// few points off 45-64), so their label says "Very Risky" up front instead
+// of requiring a separate "(marginal)" badge to convey the same thing.
+export const DECISION_LABEL: Record<Decision6, string> = {
+  "STRONG BUY": "Very Strong Buy",
+  BUY: "Buy",
+  "WATCH BUY": "Very Risky Buy",
+  WAIT: "Wait",
+  SELL: "Very Risky Sell",
+  "STRONG SELL": "Very Strong Sell",
+};
+
 export interface CategoryResult {
   score: number; // 0-100
   notes: string[];

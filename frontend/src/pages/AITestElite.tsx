@@ -11,6 +11,7 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import { CircularGauge } from "../components/CircularGauge";
+import { DECISION_LABEL } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
@@ -156,7 +157,7 @@ export function AITestElite() {
           <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-[#00E676] via-[#00C2FF] to-[#00E676] bg-clip-text text-transparent">AI Elite</h1>
         </div>
         <p className="text-[11px] text-[#9AA4B2] px-4">
-          Only STRONG BUY / STRONG SELL, confirmed by a second timeframe, zero trading-rule vetoes, genuine price-action + support/resistance value-zone + volume confirmation, and at least a
+          Only Very Strong Buy / Very Strong Sell, confirmed by a second timeframe, zero trading-rule vetoes, genuine price-action + support/resistance value-zone + volume confirmation, and at least a
           1:1.5 reward-to-risk. No middle-tier signals shown here.
         </p>
         <p className="text-[10px] text-[#9AA4B2] flex items-center justify-center gap-1">
@@ -171,7 +172,7 @@ export function AITestElite() {
             <Info size={28} className="mx-auto text-[#9AA4B2]" />
             <p className="text-sm font-bold text-white">No Elite-grade setup right now</p>
             <p className="text-xs text-[#9AA4B2] px-4">
-              Neither Crude Oil nor Natural Gas currently clears every bar: STRONG BUY/SELL confirmed by another timeframe, zero vetoes, real price-action + value-zone + volume confirmation, and
+              Neither Crude Oil nor Natural Gas currently clears every bar: Very Strong Buy/Sell confirmed by another timeframe, zero vetoes, real price-action + value-zone + volume confirmation, and
               at least 1:1.5 reward-to-risk. That's expected most of the time — this page is built to stay quiet rather than show a weaker signal just to have something on screen.
             </p>
           </div>
@@ -322,7 +323,7 @@ function EliteCard({
             {latest.strike} {latest.optSide}
           </p>
           <p className="text-sm font-bold mt-1" style={{ color: elite.analysis.bias === "bullish" ? "#00E676" : "#FF4D4F" }}>
-            {elite.analysis.decision}
+            {DECISION_LABEL[elite.analysis.decision]}
           </p>
           <p className="text-[10px] text-[#9AA4B2] mt-1">
             Confirmed by: {elite.confirmingTimeframes.join(", ")}
@@ -416,7 +417,7 @@ function EliteCard({
               <p className="text-[9px] text-[#9AA4B2]">Answers below are built from this trade's own real numbers — not a free-text chat model.</p>
               <ChatBubble
                 q="Why did this qualify as Elite?"
-                a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It cleared every gate: ${elite.analysis.decision}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}, genuine price-action + support/resistance value-zone + volume confirmation, and a 1:${elite.rr} reward-to-risk.`}
+                a={`${elite.analysis.reasons[0] ?? "Multiple scored categories agree on this direction."} It cleared every gate: ${DECISION_LABEL[elite.analysis.decision]}, zero vetoes, confirmed by ${elite.confirmingTimeframes.join(", ")}, genuine price-action + support/resistance value-zone + volume confirmation, and a 1:${elite.rr} reward-to-risk.`}
               />
               <ChatBubble
                 q="What if the target fails?"
