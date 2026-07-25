@@ -135,18 +135,20 @@ export function AITestPro() {
   const tradeLogs = useTradeLog("NATURALGAS", naturalGas.analyses, naturalGasProjections, naturalGas.options);
   const projections = symbol === "CRUDEOIL" ? crudeOilProjections : naturalGasProjections;
 
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
-  const realizedTrades = useMemo(() => flattenClosedTrades(tradeLogs), [tradeLogs]);
-  const perf = useMemo(() => computePerformanceStats(realizedTrades), [realizedTrades]);
-  const signalRanking = useMemo(
+  // tradeLogs is the WHOLE shared store (every page's keys -- ELITE-*,
+  // KIMI-*, KUMARAI-*, GATECE-*, GATEPE-*, SHOOT-*, etc), not just this
+  // page's own "<symbol>-<tf>" entries. Must filter before summarizing/
+  // flattening, or "Both Symbols"/"Realized P&L"/"Signal History" would
+  // silently include every other page's trades too.
+  const ownTradeLogsOnly = useMemo(
     () =>
-      rankSignalsByWinRate(
-        Object.entries(tradeLogs)
-          .filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))
-          .flatMap(([, v]) => v)
-      ),
+      Object.fromEntries(Object.entries(tradeLogs).filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))),
     [tradeLogs]
   );
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(ownTradeLogsOnly), [ownTradeLogsOnly]);
+  const realizedTrades = useMemo(() => flattenClosedTrades(ownTradeLogsOnly), [ownTradeLogsOnly]);
+  const perf = useMemo(() => computePerformanceStats(realizedTrades), [realizedTrades]);
+  const signalRanking = useMemo(() => rankSignalsByWinRate(Object.values(ownTradeLogsOnly).flat()), [ownTradeLogsOnly]);
 
   const allEntries = useMemo(
     () =>

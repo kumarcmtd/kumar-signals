@@ -118,8 +118,17 @@ function DirectionalSignalsPage({ direction, optSide, title, accent, icon: Icon 
   useTradeLog("CRUDEOIL", crudeOilAnalyses, crudeOilProjections, crudeOil.options, `${keyPrefix}-CRUDEOIL`);
   const tradeLogs = useTradeLog("NATURALGAS", naturalGasAnalyses, naturalGasProjections, naturalGas.options, `${keyPrefix}-NATURALGAS`);
 
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
-  const allClosed = useMemo(() => Object.values(tradeLogs).flatMap((v) => v.filter((e) => e.closed)), [tradeLogs]);
+  // tradeLogs is the WHOLE shared store (every page's keys), not just this
+  // page's own -- must filter to only this page's own keyPrefix before
+  // summarizing, or the day-wise log/stats would silently include every
+  // other page's historical trades too.
+  const ownTradeLogsOnly = useMemo(() => {
+    const out: Record<string, TradeLogEntry[]> = {};
+    for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith(`${keyPrefix}-`)) out[k] = v;
+    return out;
+  }, [tradeLogs, keyPrefix]);
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(ownTradeLogsOnly), [ownTradeLogsOnly]);
+  const allClosed = useMemo(() => Object.values(ownTradeLogsOnly).flatMap((v) => v.filter((e) => e.closed)), [ownTradeLogsOnly]);
   const targetHitCount = allClosed.filter((e) => e.status === "target3_hit" || e.status === "stopped_after_t1").length;
   const slHitCount = allClosed.filter((e) => e.status === "sl_hit").length;
   const decidedCount = targetHitCount + slHitCount;

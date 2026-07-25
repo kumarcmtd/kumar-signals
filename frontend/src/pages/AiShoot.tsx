@@ -252,7 +252,17 @@ export function AiShoot() {
   useTradeLog("CRUDEOIL", crudeOilAnalyses, crudeOilProjections, crudeOil.options, `${keyPrefix}-CRUDEOIL`);
   const tradeLogs = useTradeLog("NATURALGAS", naturalGasAnalyses, naturalGasProjections, naturalGas.options, `${keyPrefix}-NATURALGAS`);
 
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
+  // tradeLogs is the WHOLE shared store (every page's keys), not just this
+  // page's own -- must filter to only "SHOOT-" prefixed entries before
+  // summarizing, or the day-wise log would silently include every other
+  // page's historical trades too (same isolation AI Elite's own
+  // eliteTradeLogsOnly already does).
+  const shootTradeLogsOnly = useMemo(() => {
+    const out: Record<string, TradeLogEntry[]> = {};
+    for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith(`${keyPrefix}-`)) out[k] = v;
+    return out;
+  }, [tradeLogs]);
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(shootTradeLogsOnly), [shootTradeLogsOnly]);
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 
   return (

@@ -197,16 +197,17 @@ export function AITest() {
   // advancing (and its day-wise stats would go stale) the moment you switch away.
   useTradeLog("CRUDEOIL", crudeOil.analyses, crudeOilProjections, crudeOil.options);
   const tradeLogs = useTradeLog("NATURALGAS", naturalGas.analyses, naturalGasProjections, naturalGas.options);
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(tradeLogs), [tradeLogs]);
-  const signalRanking = useMemo(
+  // tradeLogs is the WHOLE shared store (every page's keys -- ELITE-*,
+  // KIMI-*, KUMARAI-*, GATECE-*, GATEPE-*, SHOOT-*, etc), not just this
+  // page's own "<symbol>-<tf>" entries. Must filter before summarizing, or
+  // "Both Symbols" would silently include every other page's trades too.
+  const ownTradeLogsOnly = useMemo(
     () =>
-      rankSignalsByWinRate(
-        Object.entries(tradeLogs)
-          .filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))
-          .flatMap(([, v]) => v)
-      ),
+      Object.fromEntries(Object.entries(tradeLogs).filter(([k]) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k))),
     [tradeLogs]
   );
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(ownTradeLogsOnly), [ownTradeLogsOnly]);
+  const signalRanking = useMemo(() => rankSignalsByWinRate(Object.values(ownTradeLogsOnly).flat()), [ownTradeLogsOnly]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 bg-gradient-to-b from-[#07050C] via-[#0D0A17] to-[#0D0A17] text-white min-h-screen space-y-5">
