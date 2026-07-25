@@ -288,11 +288,11 @@ export function AiShoot() {
 
       {calls.length === 0 ? (
         <section className="rounded-3xl bg-white shadow-md p-8 text-center space-y-2">
-          <Sparkles size={28} className="mx-auto text-orange-400" />
-          <p className="text-sm font-bold text-slate-700">No {HIT_SCORE_MIN}+ Hit Score call right now</p>
+          <Sparkles size={28} className="mx-auto text-orange-400 animate-pulse" />
+          <p className="text-base font-black text-slate-700">Wait... No Best Quality Calls Yet Now</p>
           <p className="text-xs text-slate-500 px-4">
-            AI-Shoot only ever shows the best of the best across both markets and all four timeframes (15m/30m/1H/4H). Nothing has cleared the bar this poll — check back shortly, or a stronger
-            setup may already be showing on AI Elite or AI-Test Pro's spotlight.
+            Still scanning both markets across all four timeframes (15m/30m/1H/4H) every poll — nothing has cleared the {HIT_SCORE_MIN}+ Hit Score bar yet. This page is working correctly; it simply
+            never shows a call until one is genuinely the best of the best. Check back shortly.
           </p>
         </section>
       ) : (
