@@ -9,6 +9,7 @@ import { KimiAITrade } from "./pages/KimiAITrade";
 import { MarketAnalysis } from "./pages/MarketAnalysis";
 import { KumarAI } from "./pages/KumarAI";
 import { CEBuySignals, PEBuySignals } from "./pages/DirectionalSignals";
+import { AiShoot } from "./pages/AiShoot";
 import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
@@ -32,6 +33,7 @@ function App() {
           <Route path="/kumar-ai" element={<KumarAI />} />
           <Route path="/ce-buy-signals" element={<CEBuySignals />} />
           <Route path="/pe-buy-signals" element={<PEBuySignals />} />
+          <Route path="/ai-shoot" element={<AiShoot />} />
           <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
