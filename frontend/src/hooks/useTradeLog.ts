@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
-import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
+import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
 const MAX_HISTORY = 10;
@@ -11,6 +11,19 @@ interface ProjLike {
   entry: number;
   targets: [number, number, number];
   stop: number;
+}
+
+// The only fields useTradeLog actually reads off each timeframe's analysis.
+// TimeframeAnalysis already has all of these, so every existing caller
+// (which passes TimeframeAnalysis[]) is unaffected; this just lets a
+// differently-shaped engine (e.g. the CE/PE directional gate, which isn't a
+// Decision6 score at all) feed its own lightweight per-timeframe result in
+// without needing to fabricate an entire TimeframeAnalysis object.
+interface AnalysisLike {
+  tf: string;
+  decision: Decision6;
+  insufficient?: string | null;
+  optSide?: "CE" | "PE" | null;
 }
 
 export function liveLtpFor(options: OptionsAnalytics | undefined, strike: number, optSide: "CE" | "PE"): number | null {
@@ -120,7 +133,7 @@ export function advanceTradeLog(
 // mixes with AI-Test V2/Pro's own logs.
 export function useTradeLog(
   symbol: string,
-  analyses: TimeframeAnalysis[],
+  analyses: AnalysisLike[],
   projections: (ProjLike | null)[],
   options: OptionsAnalytics | undefined,
   keyPrefix: string = symbol
