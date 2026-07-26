@@ -18,6 +18,7 @@ import { Global } from "./pages/Global";
 import { Journal } from "./pages/Journal";
 import { Alerts } from "./pages/Alerts";
 import { Settings } from "./pages/Settings";
+import { AiLearn } from "./pages/AiLearn";
 
 function App() {
   return (
@@ -42,6 +43,7 @@ function App() {
           <Route path="/journal" element={<Journal />} />
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/ai-learn" element={<AiLearn />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>
