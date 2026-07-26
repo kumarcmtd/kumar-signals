@@ -1,0 +1,393 @@
+import { useMemo, useState } from "react";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown } from "lucide-react";
+import { useCandles, useCreateTrade, usePortfolio, useSignal } from "../api/hooks";
+import { useTimeframeSuite, TIMEFRAMES } from "../hooks/useTimeframeSuite";
+import { useDirectionalGateSuite } from "../hooks/useDirectionalGateSuite";
+import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useAppStore, type TradeLogEntry } from "../store/appStore";
+import { computePortfolioSummary } from "../utils/portfolioStats";
+import { findEliteSignal } from "../utils/eliteSignal";
+import { scanAllSetups } from "../utils/kimiScanner";
+import { calculatePotentialLeft } from "../utils/kimiPlaybook";
+import { formatTipCard } from "../utils/tipFormat";
+import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
+import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
+import type { Decision6 } from "../utils/timeframeEngine";
+
+type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
+const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
+const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
+const COMMODITY: Record<TradableSymbol, "NG" | "CL"> = { CRUDEOIL: "CL", NATURALGAS: "NG" };
+const SOURCE_COLOR: Record<BestCallSource, string> = { "AI Elite": "#7C3AED", "Directional Gate": "#0891B2", "Kimi Playbook": "#B45309" };
+
+function formatExpiryTip(expiry: string | undefined): string {
+  if (!expiry) return "—";
+  try {
+    return new Date(expiry).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  } catch {
+    return expiry;
+  }
+}
+
+// Runs all three independently-built engines this app already has (AI Elite,
+// the CE/PE Directional Gate in both directions, and the Kimi playbook
+// scanner across all 4 timeframes) for one instrument, and hands every
+// candidate that already cleared ITS OWN engine's strict bar to
+// pickBestCall(), which keeps only the single highest-confidence one. Also
+// tracks that pick under its own "BEST-<symbol>" trade-log line (same
+// mechanism AI Elite uses) so it shows up in this page's own track record.
+function useBestCallForSymbol(symbol: TradableSymbol, journalWinRate: number | null) {
+  const commodity = COMMODITY[symbol];
+  const suite = useTimeframeSuite(symbol, journalWinRate);
+  const gateBull = useDirectionalGateSuite(symbol, "bullish");
+  const gateBear = useDirectionalGateSuite(symbol, "bearish");
+  const c15 = useCandles(symbol, "15");
+  const c30 = useCandles(symbol, "30");
+  const c60 = useCandles(symbol, "60");
+  const c240 = useCandles(symbol, "240");
+  const { data: signal } = useSignal(symbol);
+
+  const eliteEntries = useMemo(
+    () => suite.analyses.map((a) => ({ symbol, analysis: a, options: suite.options })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [suite.analyses, suite.options]
+  );
+  const elite = useMemo(() => findEliteSignal(eliteEntries), [eliteEntries]);
+  const elitePick = useMemo(() => (elite ? eliteToBestCallPick(elite) : null), [elite]);
+
+  const gatePicks = useMemo(() => {
+    const out: BestCallPick[] = [];
+    for (const r of gateBull.results) {
+      if (r.evaluation.status !== "qualified") continue;
+      const p = gateToBestCallPick(r.evaluation, "bullish", r.label, gateBull.options);
+      if (p) out.push(p);
+    }
+    for (const r of gateBear.results) {
+      if (r.evaluation.status !== "qualified") continue;
+      const p = gateToBestCallPick(r.evaluation, "bearish", r.label, gateBear.options);
+      if (p) out.push(p);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gateBull.results, gateBull.options, gateBear.results, gateBear.options]);
+
+  const kimiPicks = useMemo(() => {
+    const timeframes = TIMEFRAMES.map(({ tf, label }) => {
+      const q = tf === "15" ? c15 : tf === "30" ? c30 : tf === "60" ? c60 : c240;
+      return { tf, label, candles: q.data?.candles ?? [] };
+    });
+    const results = scanAllSetups(commodity, timeframes);
+    return results.map((r) => kimiToBestCallPick(r, commodity, suite.options)).filter((p): p is BestCallPick => p !== null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commodity, c15.data, c30.data, c60.data, c240.data, suite.options]);
+
+  const allPicks = useMemo(() => [...(elitePick ? [elitePick] : []), ...gatePicks, ...kimiPicks], [elitePick, gatePicks, kimiPicks]);
+  const best = useMemo(() => pickBestCall(allPicks), [allPicks]);
+
+  const trackingKey = `BEST-${symbol}`;
+  const decision: Decision6 | null = best ? (best.direction === "bullish" ? "STRONG BUY" : "STRONG SELL") : null;
+  const proj = best ? { strike: best.strike, optSide: best.optSide, entry: best.entry, targets: best.targets, stop: best.stop } : null;
+  const meta = best ? { label: best.source, reasons: best.reasons, confirmingTimeframes: [best.label] } : undefined;
+  useEliteTradeLog(trackingKey, decision, best?.optSide ?? null, proj, suite.options, meta);
+
+  return { best, trackingKey, options: suite.options, expiry: signal?.expiry, allCandidateCount: allPicks.length };
+}
+
+export function BestCall() {
+  const { data: trades } = usePortfolio();
+  const createTrade = useCreateTrade();
+  const [loggedKey, setLoggedKey] = useState<string | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
+
+  const crudeOil = useBestCallForSymbol("CRUDEOIL", journalSummary.winRate);
+  const naturalGas = useBestCallForSymbol("NATURALGAS", journalSummary.winRate);
+  const board = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas };
+
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
+  const bestTradeLogsOnly = useMemo(() => {
+    const out: Record<string, TradeLogEntry[]> = {};
+    for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith("BEST-")) out[k] = v;
+    return out;
+  }, [tradeLogs]);
+  const realized = useMemo(() => flattenClosedTrades(bestTradeLogsOnly), [bestTradeLogsOnly]);
+  const perf = useMemo(() => computePerformanceStats(realized), [realized]);
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(bestTradeLogsOnly), [bestTradeLogsOnly]);
+
+  const bySource = useMemo(() => {
+    const sources: BestCallSource[] = ["AI Elite", "Directional Gate", "Kimi Playbook"];
+    return sources.map((source) => {
+      const closed = realized.filter((r) => r.entry.meta?.label === source);
+      const wins = closed.filter((r) => r.pnlPoints > 0).length;
+      const losses = closed.filter((r) => r.pnlPoints < 0).length;
+      const decided = wins + losses;
+      return { source, total: closed.length, winRate: decided > 0 ? Math.round((wins / decided) * 100) : null };
+    });
+  }, [realized]);
+
+  const anyPick = crudeOil.best || naturalGas.best;
+
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck size={18} className="text-[var(--color-primary)]" />
+          <p className="text-sm font-bold">Best Call</p>
+        </div>
+        <p className="text-xs text-[var(--color-muted)] mt-1.5">
+          Compares three independent engines already running elsewhere in this app — AI Elite (strict Strong Buy/Sell + confluence),
+          the Directional Gate (multi-timeframe trend + ADX + volume), and the Kimi setup scanner — and shows only the single
+          highest-confidence pick per instrument. When none of the three currently qualifies, that instrument shows no call rather
+          than a weaker one just to fill the space.
+        </p>
+      </div>
+
+      {!anyPick && (
+        <div className="card p-6 text-center space-y-2">
+          <Info size={26} className="mx-auto text-[var(--color-muted)]" />
+          <p className="text-sm font-bold">No qualifying call right now</p>
+          <p className="text-xs text-[var(--color-muted)] px-2">
+            Neither Crude Oil nor Natural Gas currently clears any of the three engines' bars. This is expected most of the time —
+            check back after the next candle close.
+          </p>
+        </div>
+      )}
+
+      {SYMBOLS.map((symbol) => {
+        const b = board[symbol];
+        if (!b.best) return null;
+        return (
+          <BestCallCard
+            key={symbol}
+            symbol={symbol}
+            data={b}
+            tradeLogs={tradeLogs}
+            loggedKey={loggedKey}
+            setLoggedKey={setLoggedKey}
+            copiedKey={copiedKey}
+            setCopiedKey={setCopiedKey}
+            createTrade={createTrade}
+          />
+        );
+      })}
+
+      <div className="card p-4">
+        <p className="text-xs font-bold mb-3">Best Call Track Record</p>
+        <div className="grid grid-cols-3 gap-2">
+          <StatTile label="Closed" value={String(perf.totalClosed)} />
+          <StatTile label="Accuracy" value={perf.accuracyPct !== null ? `${perf.accuracyPct}%` : "—"} />
+          <StatTile label="Net Points" value={`${perf.netPoints >= 0 ? "+" : ""}${perf.netPoints}`} color={perf.netPoints >= 0 ? "var(--color-buy)" : "var(--color-sell)"} />
+        </div>
+        <p className="text-[10px] text-[var(--color-muted)] mt-2">
+          Tracked separately from every other page's own trade log, starting from zero the day this page shipped.
+        </p>
+      </div>
+
+      <div className="card p-4">
+        <p className="text-xs font-bold mb-3">Which Engine Wins More</p>
+        <div className="space-y-2">
+          {bySource.map((s) => (
+            <div key={s.source} className="flex items-center justify-between text-xs">
+              <span className="font-semibold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full" style={{ background: SOURCE_COLOR[s.source] }} />
+                {s.source}
+              </span>
+              <span className="text-[var(--color-muted)]">
+                {s.total} closed{s.winRate !== null ? ` · ${s.winRate}% win rate` : ""}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {dayStats.length > 0 && (
+        <div className="card p-4">
+          <p className="text-xs font-bold mb-3">Day-wise Log</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] min-w-[380px]">
+              <thead>
+                <tr className="text-left text-[var(--color-muted)]">
+                  <th className="font-semibold pb-2">Date</th>
+                  <th className="font-semibold pb-2">Target Hit</th>
+                  <th className="font-semibold pb-2">Breakeven</th>
+                  <th className="font-semibold pb-2">SL Hit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayStats.map((d) => (
+                  <tr key={d.dateKey} className="border-t border-[var(--color-border)]">
+                    <td className="py-2 font-semibold">{d.label}</td>
+                    <td className="py-2 font-bold text-[var(--color-buy)]">{d.targetHit}</td>
+                    <td className="py-2 font-bold text-amber-600">{d.breakeven}</td>
+                    <td className="py-2 font-bold text-[var(--color-sell)]">{d.slHit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2">
+        Educational reference only, not financial advice. Always confirm on the live chart before acting.
+      </p>
+    </div>
+  );
+}
+
+function StatTile({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="rounded-xl px-2.5 py-2 bg-[var(--color-surface-soft)]">
+      <p className="text-[9px] text-[var(--color-muted)]">{label}</p>
+      <p className="text-xs font-bold" style={{ color: color ?? "inherit" }}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function BestCallCard({
+  symbol,
+  data,
+  tradeLogs,
+  loggedKey,
+  setLoggedKey,
+  copiedKey,
+  setCopiedKey,
+  createTrade,
+}: {
+  symbol: TradableSymbol;
+  data: ReturnType<typeof useBestCallForSymbol>;
+  tradeLogs: Record<string, TradeLogEntry[]>;
+  loggedKey: string | null;
+  setLoggedKey: (k: string | null) => void;
+  copiedKey: string | null;
+  setCopiedKey: (k: string | null) => void;
+  createTrade: ReturnType<typeof useCreateTrade>;
+}) {
+  const best = data.best!;
+  const log = tradeLogs[data.trackingKey] ?? [];
+  const latest = log[log.length - 1];
+  if (!latest) return null;
+
+  const liveLtp = !latest.closed ? liveLtpFor(data.options, latest.strike, latest.optSide) : null;
+  const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
+  const potential = calculatePotentialLeft(latest.entry, latest.stop, nextTarget, liveLtp ?? latest.entry);
+  const Bias = best.direction === "bullish" ? TrendingUp : TrendingDown;
+  const biasColor = best.direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
+
+  const tip = formatTipCard({
+    symbolLabel: DISPLAY_NAME[symbol],
+    strike: latest.strike,
+    optSide: latest.optSide,
+    expiryLabel: formatExpiryTip(data.expiry),
+    buyZoneLow: latest.entry,
+    buyZoneHigh: Number((latest.entry * 1.02).toFixed(2)),
+    targets: latest.targets,
+    stopLoss: latest.stop,
+  });
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center justify-between px-4 pt-3.5 text-[11px] text-[var(--color-muted)]">
+        <span>Created on: {new Date(latest.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()}</span>
+        <span className="flex items-center gap-1 font-bold" style={{ color: SOURCE_COLOR[best.source] }}>
+          <Info size={12} />
+          {best.source}
+        </span>
+      </div>
+
+      <div className="px-4 pt-3 flex items-center justify-between">
+        <div>
+          <p className="text-lg font-black flex items-center gap-1.5">
+            <Bias size={16} style={{ color: biasColor }} />
+            {DISPLAY_NAME[symbol].toUpperCase()} {latest.strike} {latest.optSide}
+          </p>
+          <p className="text-xs text-[var(--color-muted)]">{formatExpiryTip(data.expiry)} expiry</p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-black" style={{ color: biasColor }}>
+            ₹{liveLtp ?? latest.entry}
+          </p>
+          <p className="text-[10px] text-[var(--color-muted)]">Current premium</p>
+        </div>
+      </div>
+
+      <pre className="mx-4 mt-3 rounded-xl bg-[var(--color-surface-soft)] px-3.5 py-3 text-[13px] leading-6 whitespace-pre-wrap font-sans">{tip}</pre>
+
+      <div className="px-4 mt-2 flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">Confidence {Math.round(best.confidence)}%</span>
+        {best.rr !== null && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">R:R 1:{best.rr}</span>}
+        {!latest.closed && (
+          <span className="text-[10px] px-2 py-1 rounded-full font-bold animate-pulse" style={{ background: "#FEE2E2", color: "#B91C1C" }}>
+            LIVE
+          </span>
+        )}
+      </div>
+
+      <div className="px-4 pt-3 pb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <span className="text-[var(--color-buy)]">▲▲</span>
+            <div>
+              <p className="text-sm font-black text-[var(--color-buy)]">{potential.potentialLeftPercent}%</p>
+              <p className="text-[10px] text-[var(--color-muted)]">Potential left</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(tip);
+                setCopiedKey(data.trackingKey);
+                setTimeout(() => setCopiedKey(null), 2000);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold bg-[var(--color-surface-soft)]"
+            >
+              <Copy size={13} />
+              {copiedKey === data.trackingKey ? "Copied ✓" : "Copy"}
+            </button>
+            {!latest.closed && (
+              <button
+                disabled={loggedKey === data.trackingKey}
+                onClick={() =>
+                  createTrade.mutate(
+                    {
+                      symbol,
+                      optSide: latest.optSide,
+                      strike: latest.strike,
+                      entryPrice: latest.entry,
+                      stopLoss: latest.stop,
+                      target: latest.targets[0],
+                      quantity: 1,
+                      lotSize: LOT_SIZE[symbol],
+                      source: "master-ai",
+                      notes: `Logged from Best Call (${best.source})`,
+                    },
+                    { onSuccess: () => setLoggedKey(data.trackingKey) }
+                  )
+                }
+                className="px-5 py-2.5 rounded-xl text-xs font-bold text-white disabled:opacity-50"
+                style={{ background: biasColor }}
+              >
+                {loggedKey === data.trackingKey ? "Logged ✓" : "Buy"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {!latest.closed && (
+        <p className="px-4 pb-3 -mt-2 text-[10px] text-[var(--color-muted)]">
+          Stop ₹{latest.stop} · Next target ₹{nextTarget}
+        </p>
+      )}
+      {latest.closed && (
+        <p className="px-4 pb-3.5 -mt-2 text-[11px] font-bold" style={{ color: exitPriceFor(latest) - latest.entry >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}>
+          Closed: {latest.status.replace(/_/g, " ")}
+        </p>
+      )}
+    </div>
+  );
+}

@@ -19,6 +19,7 @@ import { Journal } from "./pages/Journal";
 import { Alerts } from "./pages/Alerts";
 import { Settings } from "./pages/Settings";
 import { AiLearn } from "./pages/AiLearn";
+import { BestCall } from "./pages/BestCall";
 
 function App() {
   return (
@@ -44,6 +45,7 @@ function App() {
           <Route path="/alerts" element={<Alerts />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/ai-learn" element={<AiLearn />} />
+          <Route path="/best-call" element={<BestCall />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>
