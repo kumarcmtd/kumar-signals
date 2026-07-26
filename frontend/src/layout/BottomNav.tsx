@@ -3,7 +3,8 @@ import { FlaskConical, Crown, ShieldCheck, BarChart3, BookOpen, BrainCircuit, Cp
 import { useAppStore } from "../store/appStore";
 
 const items = [
-  { to: "/", label: "AI-Test V2", icon: FlaskConical, end: true },
+  { to: "/", label: "AI-Shoot", icon: Rocket, end: true },
+  { to: "/ai-test-v2", label: "AI-Test V2", icon: FlaskConical },
   { to: "/ai-test-pro", label: "AI-Test Pro", icon: Crown },
   { to: "/ai-elite", label: "AI Elite", icon: ShieldCheck },
   { to: "/trade-report", label: "Trade Report", icon: BarChart3 },
@@ -12,7 +13,6 @@ const items = [
   { to: "/kumar-ai", label: "Kumar AI", icon: Cpu },
   { to: "/ce-buy-signals", label: "CE Buy", icon: TrendingUp },
   { to: "/pe-buy-signals", label: "PE Buy", icon: TrendingDown },
-  { to: "/ai-shoot", label: "AI-Shoot", icon: Rocket },
   { to: "/charts", label: "Charts", icon: LineChart },
   { to: "/risk", label: "Risk", icon: Calculator },
   { to: "/journal", label: "Journal", icon: NotebookText },

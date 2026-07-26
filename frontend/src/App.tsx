@@ -24,7 +24,8 @@ function App() {
     <AppShell>
       <ErrorBoundary>
         <Routes>
-          <Route path="/" element={<AITest />} />
+          <Route path="/" element={<AiShoot />} />
+          <Route path="/ai-test-v2" element={<AITest />} />
           <Route path="/ai-test-pro" element={<AITestPro />} />
           <Route path="/ai-elite" element={<AITestElite />} />
           <Route path="/trade-report" element={<TradeReport />} />
@@ -33,7 +34,6 @@ function App() {
           <Route path="/kumar-ai" element={<KumarAI />} />
           <Route path="/ce-buy-signals" element={<CEBuySignals />} />
           <Route path="/pe-buy-signals" element={<PEBuySignals />} />
-          <Route path="/ai-shoot" element={<AiShoot />} />
           <Route path="/prices" element={<Dashboard />} />
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
