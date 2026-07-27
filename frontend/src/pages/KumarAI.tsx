@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Cpu,
@@ -20,6 +20,7 @@ import {
   Gauge,
   Radar,
   AlertTriangle,
+  Crown,
 } from "lucide-react";
 import { useMarketStatus, usePortfolio, useOptionsAnalytics, useKumarAiAnalyze } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
@@ -337,6 +338,38 @@ export function KumarAI() {
     if (withAi) void runAiReasoning(sym, snap, sig);
   }
 
+  // The single most decisive, currently-actionable timeframe across BOTH
+  // symbols and all 6 timeframes -- this is what makes the page useful with
+  // zero clicks: instead of requiring the user to manually generate all 12
+  // combinations just to find something worth reading, this surfaces
+  // whichever one already has the highest real hit-probability right now.
+  const bestPick = useMemo(() => {
+    const all = SYMBOLS.flatMap((sym) => board[sym].snapshots.map((snap) => ({ sym, snap })));
+    const actionable = all.filter(({ snap }) => !snap.analysis.insufficient && snap.analysis.bias !== "neutral" && snap.analysis.hitProbability !== null);
+    if (!actionable.length) return null;
+    return actionable.reduce((best, c) => ((c.snap.analysis.hitProbability ?? 0) > (best.snap.analysis.hitProbability ?? 0) ? c : best));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [naturalGas.snapshots, crudeOil.snapshots]);
+
+  const bestPickProj = bestPick ? projectPremium(bestPick.snap.analysis, board[bestPick.sym].options) : null;
+  const bestPickKey = bestPick ? keyFor(bestPick.sym, bestPick.snap.tf) : null;
+  const bestPickSig = bestPickKey ? signals[bestPickKey] : undefined;
+
+  // Auto-fetches the AI's plain-language reasoning for the featured pick the
+  // moment it changes identity (symbol+timeframe+decision) -- no button
+  // press needed. The ref guard keeps this to one fetch per genuinely new
+  // pick rather than re-firing on every poll.
+  const autoFetchedPickRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bestPick || !bestPickProj || !bestPickKey) return;
+    const identity = `${bestPickKey}-${bestPick.snap.analysis.decision}`;
+    if (autoFetchedPickRef.current === identity) return;
+    autoFetchedPickRef.current = identity;
+    if (bestPickSig?.ai || bestPickSig?.aiLoading) return;
+    generateSignal(bestPick.sym, bestPick.snap, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bestPick, bestPickProj, bestPickKey]);
+
   function analyzeMarket() {
     for (const snap of current.snapshots) {
       if (snap.analysis.bias !== "neutral") generateSignal(symbol, snap, true);
@@ -373,13 +406,13 @@ export function KumarAI() {
   const bullishCount = validAnalyses.filter((s) => s.analysis.bias === "bullish").length;
   const bearishCount = validAnalyses.filter((s) => s.analysis.bias === "bearish").length;
   const marketTrend: Direction = bullishCount > bearishCount ? "bullish" : bearishCount > bullishCount ? "bearish" : "neutral";
-  const activeSignalKeys = KUMAR_AI_TIMEFRAMES.map(({ tf }) => keyFor(symbol, tf)).filter((k) => signals[k] && now <= signals[k].expiresAt);
-  const activeSignals = activeSignalKeys.map((k) => signals[k]);
-  const winningProbability = activeSignals.length
-    ? Math.round(activeSignals.reduce((s, sig) => s + (sig.confidencePct ?? 0), 0) / activeSignals.length)
-    : validAnalyses.length
-      ? Math.round(validAnalyses.reduce((s, a) => s + (a.analysis.hitProbability ?? 50), 0) / validAnalyses.length)
-      : null;
+  // Always reflects live analysis, not just manually-generated calls -- with
+  // real entry/stop/target now shown on every card automatically, "active"
+  // means "genuinely has a BUY/SELL read right now," not "was clicked."
+  const actionableAnalyses = validAnalyses.filter((s) => s.analysis.bias !== "neutral");
+  const winningProbability = actionableAnalyses.length
+    ? Math.round(actionableAnalyses.reduce((s, a) => s + (a.analysis.hitProbability ?? 50), 0) / actionableAnalyses.length)
+    : null;
   const anyAiLoading = Object.values(signals).some((s) => s.aiLoading);
 
   const vars = theme === "dark" ? DARK_VARS : LIGHT_VARS;
@@ -405,8 +438,8 @@ export function KumarAI() {
           <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-cyan-400 via-blue-400 to-cyan-400 bg-clip-text text-transparent">Kumar AI</h1>
         </div>
         <p className="text-[11px] px-6" style={{ color: "var(--ka-muted)" }}>
-          Advanced AI-powered MCX trading assistant — real technical analysis across 6 timeframes, with Cloudflare Workers AI (Llama 4 Scout) reasoning layered on top of numbers this app
-          already computes. Every price level is deterministic; the AI explains, it never invents.
+          Advanced AI-powered MCX trading assistant — the single most decisive timeframe across both markets is auto-picked and auto-explained below with zero clicks, and every other
+          timeframe's real entry/stop/target is always visible too. Every price level is deterministic; Cloudflare Workers AI (Llama 4 Scout) only explains it, never invents it.
         </p>
         <p className="text-[10px] flex items-center justify-center gap-1" style={{ color: "var(--ka-muted)" }}>
           <span className={`w-1.5 h-1.5 rounded-full ${market?.isOpen ? "bg-emerald-500" : "bg-rose-500"}`} />
@@ -418,13 +451,107 @@ export function KumarAI() {
       <section className="grid grid-cols-2 gap-2.5">
         <DashCard label="Market Trend" value={marketTrend === "bullish" ? "Bullish" : marketTrend === "bearish" ? "Bearish" : "Neutral"} icon={marketTrend === "bullish" ? TrendingUp : marketTrend === "bearish" ? TrendingDown : Minus} color={marketTrend === "bullish" ? "#22C55E" : marketTrend === "bearish" ? "#EF4444" : "#94A3B8"} />
         <DashCard label="AI Status" value={anyAiLoading ? "Analyzing…" : "Ready"} icon={Sparkles} color={anyAiLoading ? "#F59E0B" : "#22D3EE"} pulse={anyAiLoading} />
-        <DashCard label="Active Signals" value={String(activeSignals.length)} icon={Radar} color="#38BDF8" />
+        <DashCard label="Active Signals" value={String(actionableAnalyses.length)} icon={Radar} color="#38BDF8" />
         <DashCard label="Winning Probability" value={winningProbability !== null ? `${winningProbability}%` : "—"} icon={Gauge} color="#A78BFA" />
         <DashCard label="Buy Signals" value={String(bullishCount)} icon={TrendingUp} color="#22C55E" />
         <DashCard label="Sell Signals" value={String(bearishCount)} icon={TrendingDown} color="#EF4444" />
         <DashCard label="Live Price" value={options && !options.error && options.spot ? `₹${options.spot}` : "—"} icon={Zap} color="#FBBF24" />
         <DashCard label="Last Updated" value={current.dataUpdatedAt > 0 ? new Date(current.dataUpdatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"} icon={Clock} color="var(--ka-muted)" />
       </section>
+
+      {/* KUMAR AI'S PICK -- the single most decisive live timeframe across
+          both markets, auto-selected and auto-explained with zero clicks.
+          This is the page's whole point: real numbers plus a real
+          AI-explained "why," with nothing to press. */}
+      {bestPick && bestPickProj ? (
+        <section className="rounded-2xl overflow-hidden" style={{ border: "1px solid var(--ka-accent)" }}>
+          <div className="px-4 py-2.5 flex items-center justify-between" style={{ background: "var(--ka-accent)" }}>
+            <p className="text-xs font-black flex items-center gap-1.5" style={{ color: isDark ? "#07060C" : "#FFFFFF" }}>
+              <Crown size={14} /> Kumar AI's Pick
+            </p>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(0,0,0,0.2)", color: isDark ? "#07060C" : "#FFFFFF" }}>
+              {DISPLAY_NAME[bestPick.sym]} · {bestPick.snap.label}
+            </span>
+          </div>
+          <div className="p-4 space-y-3" style={{ background: "var(--ka-card-strong)" }}>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-lg font-black flex items-center gap-1.5" style={{ color: bestPick.snap.analysis.bias === "bullish" ? "#22C55E" : "#EF4444" }}>
+                {bestPick.snap.analysis.bias === "bullish" ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
+                {decisionWord(bestPick.snap.analysis.bias)} {bestPickProj.strike} {bestPickProj.optSide}
+              </p>
+              <div className="text-right shrink-0">
+                <p className="text-sm font-black" style={{ color: confidenceTier(bestPick.snap.analysis.hitProbability).color }}>
+                  {bestPick.snap.analysis.hitProbability}% · {confidenceTier(bestPick.snap.analysis.hitProbability).label}
+                </p>
+                <p className="text-[9px]" style={{ color: "var(--ka-muted)" }}>
+                  Confidence
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <Stat label="Entry" value={`₹${bestPickProj.entry}`} />
+              <Stat label="Stop Loss" value={`₹${bestPickProj.stop}`} color="#EF4444" />
+              <Stat label="Risk:Reward" value={bestPickProj.rr !== null ? `1:${bestPickProj.rr}` : "—"} />
+              <Stat label="Target 1" value={`₹${bestPickProj.targets[0]}`} color="#22C55E" />
+              <Stat label="Target 2" value={`₹${bestPickProj.targets[1]}`} color="#22C55E" />
+              <Stat label="Target 3" value={`₹${bestPickProj.targets[2]}`} color="#22C55E" />
+            </div>
+
+            <div className="rounded-xl p-3 space-y-2" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
+              <p className="text-[10px] font-bold uppercase flex items-center gap-1.5" style={{ color: "var(--ka-accent)" }}>
+                <Sparkles size={12} /> Why Kumar AI picked this (Llama 4 Scout)
+              </p>
+              {bestPickSig?.aiLoading ? (
+                <p className="text-xs" style={{ color: "var(--ka-muted)" }}>
+                  Analyzing market conditions…
+                </p>
+              ) : bestPickSig?.aiError ? (
+                <p className="text-xs flex items-center gap-1.5" style={{ color: "#EF4444" }}>
+                  <ShieldAlert size={12} /> {bestPickSig.aiError}
+                </p>
+              ) : bestPickSig?.ai ? (
+                <div className="space-y-2 text-xs" style={{ color: "var(--ka-text)" }}>
+                  <p>{bestPickSig.ai.reasoning}</p>
+                  {bestPickSig.ai.bullishReasons.length > 0 && <ReasonList label="Bullish reasons" items={bestPickSig.ai.bullishReasons} color="#22C55E" />}
+                  {bestPickSig.ai.bearishReasons.length > 0 && <ReasonList label="Bearish reasons" items={bestPickSig.ai.bearishReasons} color="#EF4444" />}
+                  {bestPickSig.ai.riskFactors.length > 0 && <ReasonList label="Risk factors" items={bestPickSig.ai.riskFactors} color="#F59E0B" />}
+                  {bestPickSig.ai.expectedMovement && (
+                    <p>
+                      <span className="font-bold">Expected movement:</span> {bestPickSig.ai.expectedMovement}
+                    </p>
+                  )}
+                  {bestPickSig.ai.holdingDuration && (
+                    <p className="flex items-center gap-1.5">
+                      <Clock size={11} /> <span className="font-bold">Suggested holding:</span> {bestPickSig.ai.holdingDuration}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs" style={{ color: "var(--ka-muted)" }}>
+                  Fetching the AI's reasoning for this pick…
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={() => setSymbol(bestPick.sym)}
+              className="w-full py-2 rounded-xl text-xs font-bold border"
+              style={{ borderColor: "var(--ka-border)", color: "var(--ka-text)" }}
+            >
+              View full {bestPick.snap.label} breakdown below ↓
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-2xl p-6 text-center space-y-2" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
+          <Radar size={22} className="mx-auto" style={{ color: "var(--ka-muted)" }} />
+          <p className="text-sm font-bold">No decisive timeframe right now</p>
+          <p className="text-xs px-4" style={{ color: "var(--ka-muted)" }}>
+            Every timeframe across both markets currently reads neutral or lacks enough data. Check back after the next candle close.
+          </p>
+        </section>
+      )}
 
       {/* SYMBOL SELECTOR */}
       <div className="flex gap-2">
@@ -444,11 +571,13 @@ export function KumarAI() {
         ))}
       </div>
 
-      {/* ACTION BUTTONS */}
-      <div className="grid grid-cols-3 gap-2">
-        <ActionButton icon={Zap} label="Analyze Market" onClick={analyzeMarket} accent="var(--ka-accent)" isDark={isDark} />
+      {/* ACTION BUTTONS -- entry/stop/target are always live now, so the only
+          remaining manual actions are refreshing the underlying data and
+          asking the AI to explain every timeframe for the selected symbol
+          (the featured pick above already gets this automatically). */}
+      <div className="grid grid-cols-2 gap-2">
         <ActionButton icon={RefreshCw} label="Refresh Analysis" onClick={() => current.refetchAll()} spinning={current.isFetching} isDark={isDark} />
-        <ActionButton icon={Sparkles} label="Generate AI Signal" onClick={() => current.snapshots.forEach((s) => generateSignal(symbol, s, true))} accent="#A78BFA" isDark={isDark} />
+        <ActionButton icon={Sparkles} label="Ask AI About All Timeframes" onClick={analyzeMarket} accent="var(--ka-accent)" isDark={isDark} />
       </div>
 
       {/* TIMEFRAME PERFORMANCE RANKING -- combined Natural Gas + Crude Oil,
@@ -548,7 +677,15 @@ export function KumarAI() {
         {current.snapshots.map((snap) => {
           const key = keyFor(symbol, snap.tf);
           const sig = signals[key];
-          const liveLtp = sig ? liveLtpFor(current.options, sig.strike, sig.optSide) : null;
+          // Live entry/stop/target/RR computed fresh every render -- shown
+          // immediately on every card regardless of whether the user has
+          // ever pressed "Ask AI Why" for it. sig (once asked) freezes a
+          // specific instance for tracking/copy/export/share; until then,
+          // this live projection is what the numbers below fall back to.
+          const liveProj = projectPremium(snap.analysis, current.options);
+          const activeStrike = sig?.strike ?? liveProj?.strike;
+          const activeOptSide = sig?.optSide ?? liveProj?.optSide;
+          const liveLtp = activeStrike !== undefined && activeOptSide ? liveLtpFor(current.options, activeStrike, activeOptSide) : null;
           const status = sig ? tradeStatus(sig, liveLtp, now) : null;
           const tier = confidenceTier(sig?.confidencePct ?? snap.analysis.hitProbability);
           const techOpen = expandedTech.has(key);
@@ -568,7 +705,7 @@ export function KumarAI() {
                   </span>
                 ) : (
                   <span className="text-[11px] font-black px-2.5 py-1 rounded-full text-white flex items-center gap-1" style={{ background: wordColor }}>
-                    {word} {sig ? `${sig.strike} ${sig.optSide}` : snap.analysis.optSide ?? ""}
+                    {word} {activeStrike !== undefined && activeOptSide ? `${activeStrike} ${activeOptSide}` : snap.analysis.optSide ?? ""}
                   </span>
                 )}
               </div>
@@ -600,17 +737,20 @@ export function KumarAI() {
                     </div>
                   </div>
 
-                  {/* Trade fields */}
+                  {/* Trade fields -- prefer the frozen sig (once "Ask AI
+                      Why" has been tapped and a specific instance is being
+                      tracked), otherwise fall back to the always-available
+                      live projection so a number is never just "—". */}
                   <div className="grid grid-cols-3 gap-2">
-                    <Stat label="Entry" value={sig ? `₹${sig.entry}` : "—"} />
+                    <Stat label="Entry" value={sig ? `₹${sig.entry}` : liveProj ? `₹${liveProj.entry}` : "—"} />
                     <Stat label="Current" value={liveLtp !== null ? `₹${liveLtp}` : "—"} />
-                    <Stat label="Stop Loss" value={sig ? `₹${sig.stop}` : "—"} color="#EF4444" />
-                    <Stat label="Target 1" value={sig ? `₹${sig.targets[0]}` : "—"} color="#22C55E" />
-                    <Stat label="Target 2" value={sig ? `₹${sig.targets[1]}` : "—"} color="#22C55E" />
-                    <Stat label="Target 3" value={sig ? `₹${sig.targets[2]}` : "—"} color="#22C55E" />
-                    <Stat label="Risk:Reward" value={sig?.rr !== null && sig?.rr !== undefined ? `1:${sig.rr}` : "—"} />
+                    <Stat label="Stop Loss" value={sig ? `₹${sig.stop}` : liveProj ? `₹${liveProj.stop}` : "—"} color="#EF4444" />
+                    <Stat label="Target 1" value={sig ? `₹${sig.targets[0]}` : liveProj ? `₹${liveProj.targets[0]}` : "—"} color="#22C55E" />
+                    <Stat label="Target 2" value={sig ? `₹${sig.targets[1]}` : liveProj ? `₹${liveProj.targets[1]}` : "—"} color="#22C55E" />
+                    <Stat label="Target 3" value={sig ? `₹${sig.targets[2]}` : liveProj ? `₹${liveProj.targets[2]}` : "—"} color="#22C55E" />
+                    <Stat label="Risk:Reward" value={(sig?.rr ?? liveProj?.rr) !== null && (sig?.rr ?? liveProj?.rr) !== undefined ? `1:${sig?.rr ?? liveProj?.rr}` : "—"} />
                     <Stat label="Trend Direction" value={snap.analysis.bias === "bullish" ? "Bullish" : snap.analysis.bias === "bearish" ? "Bearish" : "Neutral"} color={wordColor} />
-                    <Stat label="Trade Status" value={status?.label ?? "Not Generated"} color={status?.color} />
+                    <Stat label="Trade Status" value={status?.label ?? "Live — not locked"} color={status?.color} />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <Stat label="Time Generated" value={sig ? new Date(sig.generatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"} />
@@ -644,7 +784,7 @@ export function KumarAI() {
                       className="py-2 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5"
                       style={{ background: "var(--ka-accent)" }}
                     >
-                      <Sparkles size={13} /> {sig ? "Regenerate" : "Generate AI Signal"}
+                      <Sparkles size={13} /> {sig?.ai ? "Ask AI Again" : "Ask AI Why"}
                     </button>
                     <button
                       onClick={() =>
@@ -782,7 +922,7 @@ export function KumarAI() {
                         </div>
                       ) : (
                         <p className="text-xs" style={{ color: "var(--ka-muted)" }}>
-                          Tap "Generate AI Signal" to get the AI's reasoning for this call.
+                          Tap "Ask AI Why" to get the AI's reasoning for this call.
                         </p>
                       )}
                     </div>
