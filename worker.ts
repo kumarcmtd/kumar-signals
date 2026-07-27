@@ -1526,6 +1526,7 @@ async function debugOptionChain(token: string, symbol: Symbol) {
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
+  const rawExpiries = await getOptionExpiries(token, fut.instrument_key);
   const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
   const chainRes = { chain, error };
 
@@ -1535,6 +1536,7 @@ async function debugOptionChain(token: string, symbol: Symbol) {
     futuresTradingSymbol: fut.trading_symbol,
     futuresExpiry: fut.expiry,
     resolvedOptionExpiry: optionExpiry,
+    rawExpiries,
     spot,
     error: chainRes.error ?? null,
     rowCount: chainRes.chain?.length ?? 0,
