@@ -139,7 +139,17 @@ export function BestCall() {
     return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
   }, [bestTradeLogsOnly]);
 
-  const anyPick = crudeOil.best || naturalGas.best;
+  // A call must keep showing up top for as long as it's still RUNNING, even
+  // if this particular poll's fresh re-scan doesn't currently re-detect the
+  // exact same firing condition (a candlestick/setup match is momentary by
+  // nature -- the underlying trade is still open and tracked against live
+  // premium regardless). Only hide a symbol's card once its latest tracked
+  // call has actually CLOSED and nothing new is currently live to replace it.
+  const hasVisibleCall = (b: { trackingKey: string; best: BestCallPick | null }) => {
+    const latest = tradeLogs[b.trackingKey]?.[tradeLogs[b.trackingKey].length - 1];
+    return !!latest && (!latest.closed || !!b.best);
+  };
+  const anyPick = hasVisibleCall(crudeOil) || hasVisibleCall(naturalGas);
 
   return (
     <div className="space-y-4">
@@ -169,7 +179,7 @@ export function BestCall() {
 
       {SYMBOLS.map((symbol) => {
         const b = board[symbol];
-        if (!b.best) return null;
+        if (!hasVisibleCall(b)) return null;
         return (
           <BestCallCard
             key={symbol}
@@ -350,16 +360,25 @@ function BestCallCard({
   setCopiedKey: (k: string | null) => void;
   createTrade: ReturnType<typeof useCreateTrade>;
 }) {
-  const best = data.best!;
+  // `data.best` is only ever the CURRENT poll's live re-scan -- a
+  // candlestick/setup match is momentary by nature, so it can legitimately
+  // go null on a later poll even while the trade it opened is still running.
+  // The tracked entry itself (latest) is the source of truth for what's
+  // actually open; its own meta (captured at the moment it opened) covers
+  // source/reasons when the live pick has since gone quiet. Confidence/R:R
+  // aren't persisted in meta, so those badges simply hide once best is null.
+  const best = data.best;
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
   if (!latest) return null;
 
+  const source = (best?.source ?? (latest.meta?.label as BestCallSource | undefined) ?? "AI Elite") as BestCallSource;
+  const direction = best?.direction ?? (latest.optSide === "CE" ? "bullish" : "bearish");
   const liveLtp = !latest.closed ? liveLtpFor(data.options, latest.strike, latest.optSide) : null;
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
   const potential = calculatePotentialLeft(latest.entry, latest.stop, nextTarget, liveLtp ?? latest.entry);
-  const Bias = best.direction === "bullish" ? TrendingUp : TrendingDown;
-  const biasColor = best.direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
+  const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
+  const biasColor = direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
 
   const tip = formatTipCard({
     symbolLabel: DISPLAY_NAME[symbol],
@@ -376,9 +395,9 @@ function BestCallCard({
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-3.5 text-[11px] text-[var(--color-muted)]">
         <span>Created on: {new Date(latest.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()}</span>
-        <span className="flex items-center gap-1 font-bold" style={{ color: SOURCE_COLOR[best.source] }}>
+        <span className="flex items-center gap-1 font-bold" style={{ color: SOURCE_COLOR[source] }}>
           <Info size={12} />
-          {best.source}
+          {source}
         </span>
       </div>
 
@@ -401,8 +420,8 @@ function BestCallCard({
       <pre className="mx-4 mt-3 rounded-xl bg-[var(--color-surface-soft)] px-3.5 py-3 text-[13px] leading-6 whitespace-pre-wrap font-sans">{tip}</pre>
 
       <div className="px-4 mt-2 flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">Confidence {Math.round(best.confidence)}%</span>
-        {best.rr !== null && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">R:R 1:{best.rr}</span>}
+        {best && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">Confidence {Math.round(best.confidence)}%</span>}
+        {best?.rr != null && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">R:R 1:{best.rr}</span>}
         {!latest.closed && (
           <span className="text-[10px] px-2 py-1 rounded-full font-bold animate-pulse" style={{ background: "#FEE2E2", color: "#B91C1C" }}>
             LIVE
@@ -446,7 +465,7 @@ function BestCallCard({
                       quantity: 1,
                       lotSize: LOT_SIZE[symbol],
                       source: "master-ai",
-                      notes: `Logged from Best Call (${best.source})`,
+                      notes: `Logged from Best Call (${source})`,
                     },
                     { onSuccess: () => setLoggedKey(data.trackingKey) }
                   )
