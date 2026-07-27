@@ -404,6 +404,23 @@ async function getNearestFuture(token: string, query: string): Promise<FutureInf
   return { instrument_key: nearest.instrument_key, expiry: nearest.expiry, trading_symbol: nearest.trading_symbol };
 }
 
+// The next few upcoming futures contracts (nearest first), for when the
+// NEAREST one's own option series has nothing listed at all (seen live: MCX
+// Natural Gas returning zero contracts AND zero discoverable expiries for
+// its nearest future the day before that future's own expiry -- its options
+// had already stopped listing even though the future itself hadn't expired
+// yet). Reuses the same search query as getNearestFuture.
+async function getUpcomingFutures(token: string, query: string, count: number): Promise<FutureInfo[]> {
+  const usp = new URLSearchParams({ query, exchanges: "MCX", instrument_types: "FUT", records: "10" });
+  const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  const json: any = await res.json();
+  if (json.status !== "success" || !json.data || !json.data.length) return [];
+  const contracts = [...json.data].sort((a: any, b: any) => +new Date(a.expiry) - +new Date(b.expiry));
+  return contracts.slice(0, count).map((c: any) => ({ instrument_key: c.instrument_key, expiry: c.expiry, trading_symbol: c.trading_symbol }));
+}
+
 async function getHistoricalCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
   const to = new Date();
   const from = new Date();
@@ -656,6 +673,34 @@ async function resolveOptionChain(token: string, fut: FutureInfo, spot: number |
   return { expiry: candidates[0], error: lastError };
 }
 
+// When the nearest future's own option series has NOTHING discoverable at
+// all (getOptionExpiries found zero expiries, so resolveOptionChain only had
+// the future's own -- often wrong -- expiry date to try), there is no
+// expiry left to fall back to within that one future. This widens the
+// search to the next couple of upcoming futures contracts and tries each
+// one's own option chain in turn, so a near-month future whose options
+// already stopped listing a day or two before its own expiry doesn't leave
+// the page with nothing. Falls back to the primary future's own result
+// (including its error) if every alternative also comes up empty, so the
+// error message still describes a real attempt.
+async function resolveOptionChainAcrossFutures(
+  token: string,
+  query: string,
+  primaryFut: FutureInfo,
+  spot: number | null
+): Promise<{ fut: FutureInfo; expiry: string; chain?: any[]; error?: string }> {
+  const primary = await resolveOptionChain(token, primaryFut, spot);
+  if (primary.chain) return { fut: primaryFut, ...primary };
+
+  const upcoming = await getUpcomingFutures(token, query, 3);
+  for (const altFut of upcoming) {
+    if (altFut.instrument_key === primaryFut.instrument_key) continue;
+    const alt = await resolveOptionChain(token, altFut, spot);
+    if (alt.chain) return { fut: altFut, ...alt };
+  }
+  return { fut: primaryFut, ...primary };
+}
+
 function nearestStrikes(chain: any[], spot: number, sideCount = 6) {
   const sorted = [...chain].sort((a, b) => a.strike_price - b.strike_price);
   let atmIdx = 0;
@@ -893,7 +938,7 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
   const spot = candles[candles.length - 1].close;
 
   let trade: TradeSignal = { action: "NO TRADE", note: "Option chain unavailable." };
-  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot);
   const chainRes = { chain, error };
   if (!chainRes.error && chainRes.chain) {
     const chainAnalysis = analyzeChain(chainRes.chain);
@@ -907,7 +952,7 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
 
   return {
     symbol,
-    tradingSymbol: fut.trading_symbol,
+    tradingSymbol: optionFut.trading_symbol,
     expiry: optionExpiry,
     currentPrice: spot,
     lastDate: candles[candles.length - 1].date,
@@ -1175,7 +1220,7 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot);
   const chainRes = { chain, error };
   if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
 
@@ -1219,7 +1264,7 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
 
   return {
     symbol,
-    tradingSymbol: fut.trading_symbol,
+    tradingSymbol: optionFut.trading_symbol,
     expiry: optionExpiry,
     spot: refSpot,
     atmStrike,
@@ -1527,7 +1572,7 @@ async function debugOptionChain(token: string, symbol: Symbol) {
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
   const rawExpiries = await getOptionExpiries(token, fut.instrument_key);
-  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot);
   const chainRes = { chain, error };
 
   return {
@@ -1535,8 +1580,11 @@ async function debugOptionChain(token: string, symbol: Symbol) {
     futuresInstrumentKey: fut.instrument_key,
     futuresTradingSymbol: fut.trading_symbol,
     futuresExpiry: fut.expiry,
-    resolvedOptionExpiry: optionExpiry,
     rawExpiries,
+    optionFuturesInstrumentKey: optionFut.instrument_key,
+    optionFuturesTradingSymbol: optionFut.trading_symbol,
+    usedFallbackFuture: optionFut.instrument_key !== fut.instrument_key,
+    resolvedOptionExpiry: optionExpiry,
     spot,
     error: chainRes.error ?? null,
     rowCount: chainRes.chain?.length ?? 0,
