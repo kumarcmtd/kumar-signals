@@ -16,6 +16,15 @@ const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NA
 const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 const SOURCE_COLOR: Record<BestCallSource, string> = { "AI Elite": "#7C3AED", "Directional Gate": "#0891B2", "Kimi Playbook": "#B45309", "Pattern Signal": "#0D9488" };
 
+// 0 touches -> a plain unfilled circle; 1-3 -> that many ticks; 4+ -> a
+// single tick with a count, so a target that keeps getting re-tested doesn't
+// blow out the row width.
+function tickMarks(count: number): string {
+  if (count <= 0) return "○";
+  if (count <= 3) return "✓".repeat(count);
+  return `✓×${count}`;
+}
+
 function formatExpiryTip(expiry: string | undefined): string {
   if (!expiry) return "—";
   try {
@@ -246,13 +255,13 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px] text-[var(--color-muted)]">
         <span className={entry.targetsHit[0] ? "text-[var(--color-buy)] font-semibold" : ""}>
-          {entry.targetsHit[0] ? "✓" : "○"} T1 ₹{entry.targets[0]}
+          {tickMarks(entry.targetTouches?.[0] ?? (entry.targetsHit[0] ? 1 : 0))} T1 ₹{entry.targets[0]}
         </span>
         <span className={entry.targetsHit[1] ? "text-[var(--color-buy)] font-semibold" : ""}>
-          {entry.targetsHit[1] ? "✓" : "○"} T2 ₹{entry.targets[1]}
+          {tickMarks(entry.targetTouches?.[1] ?? (entry.targetsHit[1] ? 1 : 0))} T2 ₹{entry.targets[1]}
         </span>
         <span className={entry.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
-          {entry.targetsHit[2] ? "✓" : "○"} T3 ₹{entry.targets[2]}
+          {tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))} T3 ₹{entry.targets[2]}
         </span>
         <span>SL ₹{entry.stop}</span>
       </div>
@@ -410,13 +419,23 @@ function BestCallCard({
         </div>
       </div>
 
+      <div className="px-4 pb-3 -mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--color-muted)]">
+        <span className={latest.targetsHit[0] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {tickMarks(latest.targetTouches?.[0] ?? (latest.targetsHit[0] ? 1 : 0))} T1 ₹{latest.targets[0]}
+        </span>
+        <span className={latest.targetsHit[1] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {tickMarks(latest.targetTouches?.[1] ?? (latest.targetsHit[1] ? 1 : 0))} T2 ₹{latest.targets[1]}
+        </span>
+        <span className={latest.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {tickMarks(latest.targetTouches?.[2] ?? (latest.targetsHit[2] ? 1 : 0))} T3 ₹{latest.targets[2]}
+        </span>
+        <span>SL ₹{latest.stop}</span>
+      </div>
       {!latest.closed && (
-        <p className="px-4 pb-3 -mt-2 text-[10px] text-[var(--color-muted)]">
-          Stop ₹{latest.stop} · Next target ₹{nextTarget}
-        </p>
+        <p className="px-4 pb-3 text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>
       )}
       {latest.closed && (
-        <p className="px-4 pb-3.5 -mt-2 text-[11px] font-bold" style={{ color: exitPriceFor(latest) - latest.entry >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}>
+        <p className="px-4 pb-3.5 text-[11px] font-bold" style={{ color: exitPriceFor(latest) - latest.entry >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}>
           Closed: {latest.status.replace(/_/g, " ")}
         </p>
       )}

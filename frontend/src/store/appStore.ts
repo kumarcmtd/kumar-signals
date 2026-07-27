@@ -41,6 +41,17 @@ export interface TradeLogEntry {
   // before this field existed, and Kimi's setup-based log (no Decision6
   // concept), simply have no tier and are excluded from that ranking.
   decision?: Decision6;
+  // How many separate TIMES price has crossed up through each target --
+  // unlike targetsHit (a permanent, one-way "reached at least once" flag
+  // used to trail the stop and decide closure), this keeps counting on every
+  // fresh touch: hit T1, pull back below it, hit T1 again -> 2. Optional so
+  // entries persisted before this field existed just start counting from
+  // whatever targetsHit already recorded (see advanceOpenEntry).
+  targetTouches?: [number, number, number];
+  // Internal bookkeeping for targetTouches: was price at/above each target
+  // as of the last poll -- lets advanceOpenEntry tell a genuine new touch
+  // (crossing up from below) apart from "still sitting above from before."
+  targetAboveState?: [boolean, boolean, boolean];
 }
 
 // One line per fired alert, newest first. The engine that produces these

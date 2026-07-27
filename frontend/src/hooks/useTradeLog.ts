@@ -56,36 +56,46 @@ export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["
   };
 }
 
-// Advances one open entry against a fresh live premium. Target ticks are
-// permanent once touched. Close rules, in order the user asked for them:
-// hit stop before any target -> SL Hit; after Target 1, the effective stop
-// trails up to breakeven (entry); after Target 2, it trails to the Target 1
-// level; Target 3 fully closes the trade regardless of what happens after.
-// Returns the SAME object reference when nothing actually changed, so
-// callers can skip a write.
+// Advances one open entry against a fresh live premium. Target HITS are
+// permanent once touched (drives the trailing stop/closure below). Target
+// TOUCHES keep counting on every fresh crossing -- a rising edge from below
+// a target back up through it, detected against targetAboveState -- so a
+// price that hits a target, pulls back, and later hits it again shows 2
+// touches, not just a flag stuck at 1. Close rules, in order the user asked
+// for them: hit stop before any target -> SL Hit; after Target 1, the
+// effective stop trails up to breakeven (entry); after Target 2, it trails
+// to the Target 1 level; Target 3 fully closes the trade regardless of what
+// happens after. Returns the SAME object reference when nothing actually
+// changed, so callers can skip a write.
 export function advanceOpenEntry(entry: TradeLogEntry, liveLtp: number | null, now: number): TradeLogEntry {
   if (entry.closed || liveLtp === null) return entry;
 
+  const priorAbove = entry.targetAboveState ?? entry.targetsHit;
+  const aboveNow: [boolean, boolean, boolean] = [liveLtp >= entry.targets[0], liveLtp >= entry.targets[1], liveLtp >= entry.targets[2]];
+  const stateChanged = aboveNow.some((v, i) => v !== priorAbove[i]);
+
+  const priorTouches = entry.targetTouches ?? [0, 0, 0];
+  const targetTouches = priorTouches.map((t, i) => t + (aboveNow[i] && !priorAbove[i] ? 1 : 0)) as [number, number, number];
+
   const targetsHit: [boolean, boolean, boolean] = [
-    entry.targetsHit[0] || liveLtp >= entry.targets[0],
-    entry.targetsHit[1] || liveLtp >= entry.targets[1],
-    entry.targetsHit[2] || liveLtp >= entry.targets[2],
+    entry.targetsHit[0] || aboveNow[0],
+    entry.targetsHit[1] || aboveNow[1],
+    entry.targetsHit[2] || aboveNow[2],
   ];
-  const targetsChanged = targetsHit.some((v, i) => v !== entry.targetsHit[i]);
 
   if (targetsHit[2]) {
     if (entry.status === "target3_hit") return entry;
-    return { ...entry, targetsHit, status: "target3_hit", closed: true, closedAt: entry.closedAt ?? now };
+    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status: "target3_hit", closed: true, closedAt: entry.closedAt ?? now };
   }
 
   const effectiveStop = targetsHit[1] ? entry.targets[0] : targetsHit[0] ? entry.entry : entry.stop;
   if (liveLtp <= effectiveStop) {
     const status: TradeLogEntry["status"] = targetsHit[1] ? "stopped_after_t1" : targetsHit[0] ? "stopped_breakeven" : "sl_hit";
-    return { ...entry, targetsHit, status, closed: true, closedAt: now };
+    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status, closed: true, closedAt: now };
   }
 
-  if (!targetsChanged) return entry;
-  return { ...entry, targetsHit, status: "running" };
+  if (!stateChanged) return entry;
+  return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status: "running" };
 }
 
 // Pure reducer over one timeframe's trade log: advances the currently open
