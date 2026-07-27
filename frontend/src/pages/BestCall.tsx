@@ -127,6 +127,18 @@ export function BestCall() {
     });
   }, [realized]);
 
+  // Every Best Call ever made (open or closed), newest first -- the exact
+  // time + price it was called, and (once closed) the exact time + price the
+  // target/breakeven/stop rule that closed it actually acted on.
+  const allCalls = useMemo(() => {
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry }[] = [];
+    for (const [k, v] of Object.entries(bestTradeLogsOnly)) {
+      const symbol = k.replace("BEST-", "") as TradableSymbol;
+      for (const entry of v) out.push({ symbol, entry });
+    }
+    return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
+  }, [bestTradeLogsOnly]);
+
   const anyPick = crudeOil.best || naturalGas.best;
 
   return (
@@ -202,6 +214,21 @@ export function BestCall() {
         </div>
       </div>
 
+      {allCalls.length > 0 && (
+        <div className="card p-4">
+          <p className="text-xs font-bold mb-1">Call History</p>
+          <p className="text-[10px] text-[var(--color-muted)] mb-3">
+            Every Best Call ever made, newest first — exact time and price it was called, and once closed, exact time and price of
+            whichever target/breakeven/stop rule actually closed it.
+          </p>
+          <div className="space-y-2">
+            {allCalls.map(({ symbol, entry }) => (
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {dayStats.length > 0 && (
         <div className="card p-4">
           <p className="text-xs font-bold mb-3">Day-wise Log</p>
@@ -233,6 +260,62 @@ export function BestCall() {
       <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2">
         Educational reference only, not financial advice. Always confirm on the live chart before acting.
       </p>
+    </div>
+  );
+}
+
+function fmtWhen(ms: number): string {
+  return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: TradeLogEntry }) {
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
+  const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "var(--color-buy)" : pnl !== null && pnl < 0 ? "var(--color-sell)" : "#B45309";
+
+  return (
+    <div className="rounded-xl border border-[var(--color-border)] px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-bold truncate">
+            {DISPLAY_NAME[symbol]} · {entry.strike} {entry.optSide}
+            {entry.meta?.label ? ` · ${entry.meta.label}` : ""}
+          </p>
+          <p className="text-[10px] text-[var(--color-muted)]">
+            Called {fmtWhen(entry.openedAt)} at ₹{entry.entry}
+            {entry.closed && entry.closedAt !== null && (
+              <>
+                {" "}
+                · Closed {fmtWhen(entry.closedAt)} at ₹{exit}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs font-bold" style={{ color: statusColor }}>
+            {statusLabel}
+          </p>
+          {pnl !== null && (
+            <p className="text-[10px] text-[var(--color-muted)]">
+              {pnl >= 0 ? "+" : ""}
+              {pnl} pts
+            </p>
+          )}
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px] text-[var(--color-muted)]">
+        <span className={entry.targetsHit[0] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {entry.targetsHit[0] ? "✓" : "○"} T1 ₹{entry.targets[0]}
+        </span>
+        <span className={entry.targetsHit[1] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {entry.targetsHit[1] ? "✓" : "○"} T2 ₹{entry.targets[1]}
+        </span>
+        <span className={entry.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
+          {entry.targetsHit[2] ? "✓" : "○"} T3 ₹{entry.targets[2]}
+        </span>
+        <span>SL ₹{entry.stop}</span>
+      </div>
     </div>
   );
 }
