@@ -16,7 +16,7 @@ import type { TimeframeAnalysis } from "./timeframeEngine";
 // flag), so there is nothing here to loosen further -- if none of the three
 // currently qualifies for an instrument, there is no pick. Never falls back
 // to "best of a weak field."
-export type BestCallSource = "AI Elite" | "Directional Gate" | "Kimi Playbook";
+export type BestCallSource = "AI Elite" | "Directional Gate" | "Kimi Playbook" | "Pattern Signal";
 
 export interface BestCallPick {
   source: BestCallSource;
@@ -34,7 +34,11 @@ export interface BestCallPick {
 
 const DELTA = 0.5; // same ATM-option delta approximation used by every projection in this app
 
-function projectFromUnderlying(
+// Exported so other engines (e.g. patternSignalEngine's AI-Learn-informed
+// candlestick detector) can project their own underlying entry/stop/targets
+// into an option premium using this exact same convention, instead of each
+// writing a slightly different copy.
+export function projectFromUnderlying(
   optSide: "CE" | "PE",
   underlyingEntry: number,
   underlyingStop: number,
