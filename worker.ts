@@ -1,6 +1,16 @@
 // Kumar Signals Pro API worker.
 // Serves JSON under /api/* and falls back to the built React SPA (frontend/dist)
 // for everything else via the ASSETS binding.
+//
+// These are the exact same pure, React-free scoring engines the frontend
+// itself imports for the Best Call page -- reused here (not reimplemented)
+// so the Cron-triggered background notification check can never drift from
+// what the app actually displays.
+import { analyzeTimeframe } from "./frontend/src/utils/timeframeEngine";
+import { findEliteSignal } from "./frontend/src/utils/eliteSignal";
+import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEngine";
+import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
+import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1592,6 +1602,132 @@ async function debugOptionChain(token: string, symbol: Symbol) {
   };
 }
 
+// ---- Best Call background push notifications (ntfy.sh) ----
+// A Cron Trigger (see wrangler.jsonc) calls runBestCallNotificationCheck on a
+// schedule, independent of anyone having the app open -- unlike the
+// browser-notification alert engine on the frontend (which only runs while a
+// tab is open), this is what lets a call reach the user even with the site
+// fully closed. Deliberately built on ntfy.sh (a free, no-signup push relay:
+// just an HTTPS POST to a topic URL) instead of hand-rolling the raw Web
+// Push protocol -- that would need per-subscription VAPID/AES-GCM crypto
+// this environment has no way to verify end-to-end against a real device,
+// and a broken crypto path could break at runtime in ways that are very
+// hard to diagnose. ntfy trades a small amount of trust in a third-party
+// relay for something that's simple, free, and immediately testable by the
+// user via the "Send test notification" button in Settings.
+const NTFY_TOPIC_KV_KEY = "ntfy_topic";
+
+const CRON_TIMEFRAMES: { tf: string; label: string }[] = [
+  { tf: "15", label: "15 Minutes" },
+  { tf: "30", label: "30 Minutes" },
+  { tf: "60", label: "1 Hour" },
+  { tf: "240", label: "4 Hours" },
+];
+// Same "next higher timeframe confirms the trend" mapping the Directional
+// Gate page's own useDirectionalGateSuite hook uses on the frontend.
+const CRON_TREND_TF: Record<string, string> = { "15": "60", "30": "60", "60": "240", "240": "1D" };
+
+function bestCallSignature(pick: BestCallPick): string {
+  return `${pick.strike}-${pick.optSide}-${pick.source}`;
+}
+
+async function sendNtfyNotification(topic: string, title: string, body: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+      method: "POST",
+      headers: { Title: title, Priority: "high", Tags: "chart_with_upwards_trend" },
+      body,
+    });
+    if (!res.ok) return { ok: false, error: `ntfy.sh responded HTTP ${res.status}` };
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err.message ?? "ntfy.sh request failed" };
+  }
+}
+
+// Runs the exact same 3-engine comparison (AI Elite + Directional Gate +
+// Kimi playbook -> pickBestCall) the frontend's Best Call page displays,
+// entirely server-side so it can run on a schedule with nobody's browser
+// open. Returns null the same way the frontend does when nothing currently
+// qualifies -- never fabricates a pick just to have something to notify.
+async function computeBestCallForSymbol(env: Env, token: string, symbol: Symbol): Promise<BestCallPick | null> {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return null;
+  const commodity: "NG" | "CL" = symbol === "NATURALGAS" ? "NG" : "CL";
+
+  const candlesByTf: Record<string, Candle[]> = {};
+  for (const { tf } of CRON_TIMEFRAMES) {
+    const c = await getCandlesForTF(env, token, fut, tf);
+    candlesByTf[tf] = "error" in c ? [] : c;
+  }
+  const daily = await getCandlesForTF(env, token, fut, "1D");
+  candlesByTf["1D"] = "error" in daily ? [] : daily;
+
+  const optionsResult = await computeOptionsAnalytics(token, symbol);
+  const options = "error" in optionsResult ? undefined : optionsResult;
+
+  const analyses = CRON_TIMEFRAMES.map(({ tf, label }) =>
+    analyzeTimeframe({ tf, label, candles: candlesByTf[tf], dailyCandles: candlesByTf["1D"], options, journalWinRate: null })
+  );
+  const eliteEntries = analyses.map((a) => ({ symbol, analysis: a, options }));
+  const elite = findEliteSignal(eliteEntries);
+  const elitePick = elite ? eliteToBestCallPick(elite) : null;
+
+  const gatePicks: BestCallPick[] = [];
+  for (const direction of ["bullish", "bearish"] as const) {
+    for (const { tf, label } of CRON_TIMEFRAMES) {
+      const evaluation = evaluateDirectionalGate(direction, candlesByTf[tf], candlesByTf[CRON_TREND_TF[tf]] ?? []);
+      if (evaluation.status !== "qualified") continue;
+      const p = gateToBestCallPick(evaluation, direction, label, options);
+      if (p) gatePicks.push(p);
+    }
+  }
+
+  const kimiTimeframes = CRON_TIMEFRAMES.map(({ tf, label }) => ({ tf, label, candles: candlesByTf[tf] }));
+  const kimiResults = scanAllSetups(commodity, kimiTimeframes);
+  const kimiPicks = kimiResults.map((r) => kimiToBestCallPick(r, commodity, options)).filter((p): p is BestCallPick => p !== null);
+
+  const allPicks = [...(elitePick ? [elitePick] : []), ...gatePicks, ...kimiPicks];
+  return pickBestCall(allPicks);
+}
+
+// Only notifies when the pick actually CHANGES (tracked via a per-symbol
+// "last notified" signature in KV) -- otherwise the same still-running call
+// would re-notify every single Cron tick.
+async function runBestCallNotificationCheck(env: Env): Promise<void> {
+  const token = await env.COMMODITY_KV.get("access_token");
+  if (!token) return;
+  const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+  if (!topic) return;
+
+  for (const symbol of OPTION_SYMBOLS) {
+    try {
+      const pick = await computeBestCallForSymbol(env, token, symbol as Symbol);
+      if (!pick) continue;
+      const lastSigKey = `notified:BEST-${symbol}`;
+      const lastSig = await env.COMMODITY_KV.get(lastSigKey);
+      const sig = bestCallSignature(pick);
+      if (sig === lastSig) continue;
+      await env.COMMODITY_KV.put(lastSigKey, sig);
+
+      const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
+      const title = `Best Call: ${displayName} ${pick.strike} ${pick.optSide}`;
+      const body = [
+        `BUY ${displayName} ${pick.strike} ${pick.optSide}`,
+        "",
+        `Entry: Rs ${pick.entry}`,
+        `Targets: ${pick.targets.join(" / ")}`,
+        `Stop: Rs ${pick.stop}`,
+        "",
+        `Source: ${pick.source} (${Math.round(pick.confidence)}% confidence)`,
+      ].join("\n");
+      await sendNtfyNotification(topic, title, body);
+    } catch {
+      // best-effort -- one symbol failing shouldn't block the other
+    }
+  }
+}
+
 async function requireToken(env: Env): Promise<string | Response> {
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return json({ error: "No token found in KV. Log in via the main kumarcmtd worker's /login first." }, 400);
@@ -1677,6 +1813,42 @@ export default {
           return json(await computeOptionsAnalytics(token, symbol));
         }
 
+        if (url.pathname === "/api/notify/topic") {
+          if (request.method === "GET") {
+            const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+            return json({ topic: topic ?? null });
+          }
+          if (request.method === "POST") {
+            const body = (await request.json().catch(() => ({}))) as { topic?: string };
+            const topic = (body.topic ?? "").trim();
+            if (!topic || topic.length > 64 || !/^[a-zA-Z0-9_-]+$/.test(topic)) {
+              return json({ error: "Topic must be 1-64 characters: letters, numbers, dashes, or underscores only" }, 400);
+            }
+            await env.COMMODITY_KV.put(NTFY_TOPIC_KV_KEY, topic);
+            return json({ ok: true, topic });
+          }
+          if (request.method === "DELETE") {
+            await env.COMMODITY_KV.delete(NTFY_TOPIC_KV_KEY);
+            return json({ ok: true });
+          }
+          return json({ error: "Method not allowed" }, 405);
+        }
+
+        if (url.pathname === "/api/notify/test") {
+          if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+          const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+          if (!topic) return json({ error: "No ntfy topic saved yet -- save one first" }, 400);
+          const result = await sendNtfyNotification(topic, "Kumar Signals Pro test", "If you can see this, background push notifications are working.");
+          if (!result.ok) return json({ error: result.error ?? "Failed to send test notification" }, 502);
+          return json({ ok: true });
+        }
+
+        if (url.pathname === "/api/notify/check-now") {
+          if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+          await runBestCallNotificationCheck(env);
+          return json({ ok: true });
+        }
+
         if (url.pathname === "/api/portfolio") {
           if (request.method === "GET") return json(await getPortfolioTrades(env));
           if (request.method === "POST") {
@@ -1714,5 +1886,12 @@ export default {
       return env.ASSETS.fetch(indexRequest);
     }
     return assetResponse;
+  },
+
+  // Cloudflare Cron Trigger (see wrangler.jsonc "triggers.crons") -- runs
+  // independent of any browser tab being open, which is what makes push
+  // notifications actually reach the user with the app fully closed.
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(runBestCallNotificationCheck(env));
   },
 };

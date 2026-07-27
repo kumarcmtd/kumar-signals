@@ -108,3 +108,39 @@ export function useKumarAiAnalyze() {
     mutationFn: (payload: KumarAiAnalyzeRequest) => api.kumarAiAnalyze(payload),
   });
 }
+
+export function useNtfyTopic() {
+  return useQuery({
+    queryKey: ["ntfy-topic"],
+    queryFn: api.getNtfyTopic,
+    staleTime: 60_000,
+  });
+}
+
+export function useSaveNtfyTopic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (topic: string) => api.saveNtfyTopic(topic),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ntfy-topic"] }),
+  });
+}
+
+export function useDeleteNtfyTopic() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteNtfyTopic(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ntfy-topic"] }),
+  });
+}
+
+export function useSendTestNotification() {
+  return useMutation({ mutationFn: () => api.sendTestNotification() });
+}
+
+// The background push check normally only runs on the server's own 5-minute
+// Cron schedule -- this lets a user trigger it on demand right after saving
+// a topic, so they don't have to wait up to 5 minutes to see whether a
+// currently-open Best Call notifies correctly.
+export function useCheckNotificationsNow() {
+  return useMutation({ mutationFn: () => api.checkNotificationsNow() });
+}

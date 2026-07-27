@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical } from "lucide-react";
+import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair } from "lucide-react";
 import { useAppStore, type AlertEntry, type AlertSource } from "../store/appStore";
 import { notificationPermission, requestNotificationPermission } from "../utils/notify";
 
@@ -7,6 +7,7 @@ const SOURCE_STYLE: Record<AlertSource, { label: string; icon: typeof FlaskConic
   Timeframe: { label: "AI-Test V2 / Pro", icon: FlaskConical, bg: "#DBEAFE", text: "#1D4ED8" },
   Elite: { label: "AI Elite", icon: ShieldCheck, bg: "#EDE9FE", text: "#6D28D9" },
   Kimi: { label: "Kimi AI Playbook", icon: Radar, bg: "#DCFCE7", text: "#15803D" },
+  BestCall: { label: "Best Call", icon: Crosshair, bg: "#CFFAFE", text: "#0E7490" },
 };
 
 function formatTime(ts: number): string {
@@ -103,6 +104,7 @@ export function Alerts() {
           <ToggleRow label="AI-Test V2 / Pro (timeframe signals)" checked={alertSettings.sources.timeframe} onChange={(v) => setAlertSources({ timeframe: v })} compact />
           <ToggleRow label="AI Elite (strict confluence)" checked={alertSettings.sources.elite} onChange={(v) => setAlertSources({ elite: v })} compact />
           <ToggleRow label="Kimi AI (playbook setups)" checked={alertSettings.sources.kimi} onChange={(v) => setAlertSources({ kimi: v })} compact />
+          <ToggleRow label="Best Call (single highest-confidence pick)" checked={alertSettings.sources.bestCall} onChange={(v) => setAlertSources({ bestCall: v })} compact />
         </div>
       </div>
 

@@ -11,5 +11,12 @@
   "assets": {
     "directory": "./frontend/dist",
     "binding": "ASSETS"
+  },
+  // Drives the Best Call background push check (scheduled() in worker.ts) --
+  // independent of any browser tab being open. Every 5 minutes during market
+  // hours is frequent enough to catch a new pick promptly without hammering
+  // the Upstox API rate limits.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   }
 }

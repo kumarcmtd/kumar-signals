@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useCandles } from "../api/hooks";
 import { useTimeframeSuite, TIMEFRAMES } from "./useTimeframeSuite";
+import { useBestCallForSymbol } from "./useBestCall";
 import { scanAllSetups, type TimedScanResult } from "../utils/kimiScanner";
 import { findPlaybookSetup, calculateHitProbability } from "../utils/kimiPlaybook";
 import { findEliteSignal } from "../utils/eliteSignal";
@@ -40,14 +41,23 @@ function useKimiScan(symbol: TradableSymbol, commodity: "NG" | "CL"): TimedScanR
 export function useAlertEngine(): void {
   const alertSettings = useAppStore((s) => s.alertSettings);
   const addAlerts = useAppStore((s) => s.addAlerts);
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
 
   const crudeOil = useTimeframeSuite("CRUDEOIL", null);
   const naturalGas = useTimeframeSuite("NATURALGAS", null);
   const ngKimi = useKimiScan("NATURALGAS", "NG");
   const clKimi = useKimiScan("CRUDEOIL", "CL");
+  // Runs the exact same 3-engine comparison the Best Call page itself
+  // displays, mounted here at the app-shell level so a new pick is tracked
+  // (and alertable) regardless of which page is actually open -- otherwise
+  // its "BEST-<symbol>" trade log would only ever advance while the Best
+  // Call page happened to be the visible one.
+  const crudeOilBest = useBestCallForSymbol("CRUDEOIL", null);
+  const naturalGasBest = useBestCallForSymbol("NATURALGAS", null);
 
   const lastSignatureRef = useRef<Map<string, string>>(new Map());
   const kimiPresentRef = useRef<Set<string>>(new Set());
+  const bestCallLastIdRef = useRef<Map<string, string>>(new Map());
   const firstRunRef = useRef(true);
 
   useEffect(() => {
@@ -145,6 +155,33 @@ export function useAlertEngine(): void {
       kimiPresentRef.current = presentNow;
     }
 
+    if (alertSettings.sources.bestCall) {
+      const boards: [TradableSymbol, typeof crudeOilBest][] = [
+        ["CRUDEOIL", crudeOilBest],
+        ["NATURALGAS", naturalGasBest],
+      ];
+      for (const [symbol, board] of boards) {
+        const log = tradeLogs[board.trackingKey] ?? [];
+        const latest = log[log.length - 1];
+        if (!latest) continue;
+        if (bestCallLastIdRef.current.get(board.trackingKey) === latest.id) continue;
+        bestCallLastIdRef.current.set(board.trackingKey, latest.id);
+        if (firstRunRef.current) continue;
+        const sourceLabel = latest.meta?.label ?? board.best?.source ?? "Best Call";
+        fresh.push({
+          id: `${board.trackingKey}-${latest.id}`,
+          createdAt: now,
+          source: "BestCall",
+          symbol,
+          tfLabel: sourceLabel,
+          title: `Best Call — ${DISPLAY_NAME[symbol]} ${latest.strike} ${latest.optSide} (${sourceLabel})`,
+          detail: `Entry ₹${latest.entry} · Target ₹${latest.targets[0]} · SL ₹${latest.stop}`,
+          read: false,
+          bearish: latest.optSide === "PE",
+        });
+      }
+    }
+
     firstRunRef.current = false;
     if (!fresh.length) return;
 
@@ -160,11 +197,13 @@ export function useAlertEngine(): void {
     alertSettings.sources.timeframe,
     alertSettings.sources.elite,
     alertSettings.sources.kimi,
+    alertSettings.sources.bestCall,
     alertSettings.browserNotifications,
     alertSettings.soundEnabled,
     crudeOil.analyses,
     naturalGas.analyses,
     ngKimi,
     clKimi,
+    tradeLogs,
   ]);
 }

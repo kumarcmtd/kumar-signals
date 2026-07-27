@@ -47,7 +47,7 @@ export interface TradeLogEntry {
 // (useAlertEngine) never invents a signal -- every entry mirrors a decision
 // the corresponding page (AI-Test V2/Pro, AI Elite, or Kimi AI) is already
 // showing live, just surfaced app-wide instead of only on that one page.
-export type AlertSource = "Timeframe" | "Elite" | "Kimi";
+export type AlertSource = "Timeframe" | "Elite" | "Kimi" | "BestCall";
 
 export interface AlertEntry {
   id: string;
@@ -73,7 +73,7 @@ export interface AlertSettings {
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.
   minTier: "strong" | "all";
-  sources: { timeframe: boolean; elite: boolean; kimi: boolean };
+  sources: { timeframe: boolean; elite: boolean; kimi: boolean; bestCall: boolean };
 }
 
 const MAX_ALERTS = 200;
@@ -129,7 +129,7 @@ export const useAppStore = create<AppState>()(
         browserNotifications: false,
         soundEnabled: true,
         minTier: "strong",
-        sources: { timeframe: true, elite: true, kimi: true },
+        sources: { timeframe: true, elite: true, kimi: true, bestCall: true },
       },
       setAlertSettings: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, ...patch } })),
       setAlertSources: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, sources: { ...s.alertSettings.sources, ...patch } } })),

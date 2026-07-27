@@ -38,4 +38,9 @@ export const api = {
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),
   deleteTrade: (id: string) => sendJSON<{ ok: true }>(`/portfolio/${id}`, "DELETE"),
   kumarAiAnalyze: (payload: KumarAiAnalyzeRequest) => sendJSON<KumarAiAnalyzeResult>("/kumar-ai/analyze", "POST", payload),
+  getNtfyTopic: () => getJSON<{ topic: string | null }>("/notify/topic"),
+  saveNtfyTopic: (topic: string) => sendJSON<{ ok: true; topic: string }>("/notify/topic", "POST", { topic }),
+  deleteNtfyTopic: () => sendJSON<{ ok: true }>("/notify/topic", "DELETE"),
+  sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
+  checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
 };
