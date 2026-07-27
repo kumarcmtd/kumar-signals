@@ -542,15 +542,16 @@ async function getOptionExpiries(token: string, instrumentKey: string): Promise<
   return expiries.length ? expiries : null;
 }
 
-// Picks the nearest upcoming real option expiry for a future; falls back to
-// the future's own expiry if the contract-discovery lookup fails or returns
-// nothing, so an unexpected response shape doesn't regress prior behavior.
-async function resolveOptionExpiry(token: string, fut: FutureInfo): Promise<string> {
+// Every upcoming real option expiry for a future, nearest first; falls back
+// to a single-entry list with the future's own expiry if the
+// contract-discovery lookup fails or returns nothing, so an unexpected
+// response shape doesn't regress prior behavior.
+async function resolveOptionExpiryCandidates(token: string, fut: FutureInfo): Promise<string[]> {
   const expiries = await getOptionExpiries(token, fut.instrument_key);
-  if (!expiries) return fut.expiry;
+  if (!expiries) return [fut.expiry];
   const now = Date.now();
-  const upcoming = expiries.find((e) => +new Date(e) >= now);
-  return upcoming ?? expiries[expiries.length - 1];
+  const upcoming = expiries.filter((e) => +new Date(e) >= now);
+  return upcoming.length ? upcoming : [expiries[expiries.length - 1]];
 }
 
 // Confirmed via a live diagnostic call that Upstox's /v2/option/chain
@@ -632,6 +633,27 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
   }
 
   return { chain: Array.from(rowsByStrike.values()) };
+}
+
+// Upstox's expiry-discovery call (getOptionExpiries, no expiry_date filter)
+// and its per-expiry contract lookup (getOptionChain, with expiry_date set)
+// can disagree right around a rollover -- discovery lists an expiry as
+// available, but querying that exact expiry_date comes back with zero
+// contracts (seen live: MCX Natural Gas's near-month expiry returning empty
+// at market open while the next expiry already had live contracts). Rather
+// than surface that as a dead end, this tries every candidate expiry
+// (nearest first) until one actually has contracts, and reports whichever
+// expiry it actually used -- not just the first guess -- so downstream
+// Greeks/expiry display stay consistent with the chain that was returned.
+async function resolveOptionChain(token: string, fut: FutureInfo, spot: number | null): Promise<{ expiry: string; chain?: any[]; error?: string }> {
+  const candidates = await resolveOptionExpiryCandidates(token, fut);
+  let lastError: string | undefined;
+  for (const expiry of candidates) {
+    const res = await getOptionChain(token, fut.instrument_key, expiry, spot);
+    if (res.chain) return { expiry, chain: res.chain };
+    lastError = res.error;
+  }
+  return { expiry: candidates[0], error: lastError };
 }
 
 function nearestStrikes(chain: any[], spot: number, sideCount = 6) {
@@ -870,9 +892,9 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
   const pattern = analyzeCommodity(candles);
   const spot = candles[candles.length - 1].close;
 
-  const optionExpiry = await resolveOptionExpiry(token, fut);
   let trade: TradeSignal = { action: "NO TRADE", note: "Option chain unavailable." };
-  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
+  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const chainRes = { chain, error };
   if (!chainRes.error && chainRes.chain) {
     const chainAnalysis = analyzeChain(chainRes.chain);
     const { atmStrike } = nearestStrikes(chainRes.chain, spot, 1);
@@ -1153,8 +1175,8 @@ async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<O
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const optionExpiry = await resolveOptionExpiry(token, fut);
-  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
+  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const chainRes = { chain, error };
   if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
 
   const refSpot = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
@@ -1504,8 +1526,8 @@ async function debugOptionChain(token: string, symbol: Symbol) {
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const optionExpiry = await resolveOptionExpiry(token, fut);
-  const chainRes = await getOptionChain(token, fut.instrument_key, optionExpiry, spot);
+  const { expiry: optionExpiry, chain, error } = await resolveOptionChain(token, fut, spot);
+  const chainRes = { chain, error };
 
   return {
     symbol,
