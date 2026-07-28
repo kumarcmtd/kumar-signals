@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers } from "lucide-react";
 import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useHitScoreSuite } from "../hooks/useHitScoreSuite";
 import { scanForHitScoreCalls, HIT_SCORE_MIN, type HitScoreCandidate } from "../utils/hitScoreEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
@@ -71,6 +71,7 @@ function hitScoreColor(score: number): string {
 
 function ShootTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
+  const effStop = effectiveStopFor(entry);
   return (
     <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-50 bg-slate-50 border-slate-200" : "bg-white border-slate-200"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -93,7 +94,10 @@ function ShootTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: 
         <span className={entry.targetsHit[2] ? "text-emerald-600 font-semibold" : ""}>
           {entry.targetsHit[2] ? "✓" : "○"} T3 ₹{entry.targets[2]}
         </span>
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
+        </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-slate-400 mt-1">Current premium: ₹{liveLtp}</p>}
     </div>
@@ -145,7 +149,7 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
 
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-3 gap-2">
-          <MiniStat label="Stop Loss" value={latest ? `₹${latest.stop}` : "—"} color="#EF4444" />
+          <MiniStat label="Stop Loss" value={latest ? `₹${effectiveStopFor(latest)}` : "—"} color="#EF4444" />
           <MiniStat label="Target 1" value={latest ? `₹${latest.targets[0]}` : "—"} color="#10B981" />
           <MiniStat label="R:R" value={`1:${call.rr}`} color="#6366F1" />
           <MiniStat label="Target 2" value={latest ? `₹${latest.targets[1]}` : "—"} color="#10B981" />

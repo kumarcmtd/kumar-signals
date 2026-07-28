@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, ShieldCheck, Info } from "lucide-react";
 import { useMarketStatus } from "../api/hooks";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useDirectionalGateSuite, type GateTimeframeResult } from "../hooks/useDirectionalGateSuite";
 import { projectGatePremium, type GateDirection, type GatePremiumProjection } from "../utils/directionalGateEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
@@ -51,6 +51,7 @@ function pseudoAnalysisFor(r: GateTimeframeResult, optSide: "CE" | "PE", directi
 
 function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
+  const effStop = effectiveStopFor(entry);
   return (
     <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -67,7 +68,10 @@ function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: numbe
         <TargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
         <TargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
         <TargetTick label="T3" price={entry.targets[2]} hit={entry.targetsHit[2]} />
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="text-white/30"> (was ₹{entry.stop})</span>}
+        </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
     </div>
@@ -214,7 +218,7 @@ function DirectionalSignalsPage({ direction, optSide, title, accent, icon: Icon 
                   <td className="py-2">{latest ? `₹${latest.entry}` : "—"}</td>
                   <td className="py-2 font-bold">{liveLtp !== null ? `₹${liveLtp}` : "—"}</td>
                   <td className="py-2">{latest ? `₹${latest.targets[0]}` : "—"}</td>
-                  <td className="py-2">{latest ? `₹${latest.stop}` : "—"}</td>
+                  <td className="py-2">{latest ? `₹${effectiveStopFor(latest)}` : "—"}</td>
                   <td className="py-2">{qualified ? `${(r.evaluation as { confidence: number }).confidence}%` : "—"}</td>
                   <td className={`py-2 font-bold ${latest ? STATUS_COLOR[latest.status] : "text-white/30"}`}>{latest ? STATUS_LABEL[latest.status] : "—"}</td>
                 </tr>

@@ -5,7 +5,7 @@ import { useMarketStatus, usePortfolio, useCreateTrade } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
@@ -343,7 +343,7 @@ export function AITest() {
                     )}
                   </td>
                   <td className="py-2">{latest ? `₹${latest.targets[0]}` : "—"}</td>
-                  <td className="py-2">{latest ? `₹${latest.stop}` : "—"}</td>
+                  <td className="py-2">{latest ? `₹${effectiveStopFor(latest)}` : "—"}</td>
                   <td className="py-2">{a.hitProbability !== null ? `${a.hitProbability}%` : "—"}</td>
                   <td className={`py-2 font-bold ${latest ? STATUS_COLOR[latest.status] : "text-white/30"}`}>
                     {latest ? STATUS_LABEL[latest.status] : "—"}
@@ -603,6 +603,7 @@ function fmtLogTime(ms: number): string {
 
 function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
+  const effStop = effectiveStopFor(entry);
   return (
     <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -619,7 +620,10 @@ function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: numbe
         <TargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
         <TargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
         <TargetTick label="T3" price={entry.targets[2]} hit={entry.targetsHit[2]} />
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="text-white/30"> (was ₹{entry.stop})</span>}
+        </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
     </div>

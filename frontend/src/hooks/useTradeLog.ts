@@ -26,6 +26,19 @@ interface AnalysisLike {
   optSide?: "CE" | "PE" | null;
 }
 
+// The stop this trade will ACTUALLY exit on next, as opposed to entry.stop
+// (the original level, frozen forever at open time). advanceOpenEntry
+// already trails this internally -- once Target 1 is touched, a pullback to
+// breakeven closes the trade neutral rather than waiting for the original,
+// much deeper stop; once Target 2 is touched, the floor rises again to
+// Target 1. Every card/row that shows "SL ₹..." should show THIS number, not
+// entry.stop, or it looks like the trade is still risking the full original
+// distance long after the real risk has already been locked down to zero
+// (or better).
+export function effectiveStopFor(entry: TradeLogEntry): number {
+  return entry.targetsHit[1] ? entry.targets[0] : entry.targetsHit[0] ? entry.entry : entry.stop;
+}
+
 export function liveLtpFor(options: OptionsAnalytics | undefined, strike: number, optSide: "CE" | "PE"): number | null {
   if (!options || options.error) return null;
   const row = options.rows.find((r) => r.strike === strike);

@@ -3,7 +3,7 @@ import { Flame, Zap, Wind, Volume2, Gauge, Copy, Info, TrendingUp, TrendingDown 
 import { useMarketStatus } from "../api/hooks";
 import { useMomentumBreakoutSuite, type BreakoutTimeframeResult } from "../hooks/useMomentumBreakoutSuite";
 import { projectBreakoutPremium, type BreakoutEvaluation, type BreakoutQualified, type BreakoutPremiumProjection } from "../utils/momentumBreakoutEngine";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import type { TradeLogEntry } from "../store/appStore";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
@@ -339,6 +339,7 @@ function CandidateCard({
   const Bias = bullish ? TrendingUp : TrendingDown;
   const biasColor = bullish ? "var(--color-buy)" : "var(--color-sell)";
   const liveLtp = latest && !latest.closed ? liveLtpFor(options, latest.strike, latest.optSide) : null;
+  const effStop = latest ? effectiveStopFor(latest) : null;
 
   const tip =
     latest &&
@@ -350,7 +351,7 @@ function CandidateCard({
       buyZoneLow: latest.entry,
       buyZoneHigh: Number((latest.entry * 1.02).toFixed(2)),
       targets: latest.targets,
-      stopLoss: latest.stop,
+      stopLoss: effStop ?? latest.stop,
     });
 
   return (
@@ -382,7 +383,7 @@ function CandidateCard({
             <MiniStat label="Entry" value={`₹${latest.entry}`} />
             <MiniStat label="T1" value={`₹${latest.targets[0]}`} />
             <MiniStat label="T2" value={`₹${latest.targets[1]}`} />
-            <MiniStat label="SL" value={`₹${latest.stop}`} tone="down" />
+            <MiniStat label="SL" value={`₹${effStop}`} tone="down" />
           </div>
         )}
 
@@ -452,6 +453,7 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
   const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
   const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
   const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "var(--color-buy)" : pnl !== null && pnl < 0 ? "var(--color-sell)" : "#B45309";
+  const effStop = effectiveStopFor(entry);
 
   return (
     <div className="rounded-xl border border-[var(--color-border)] px-3 py-2.5">
@@ -492,7 +494,10 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
         <span className={entry.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
           {tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))} T3 ₹{entry.targets[2]}
         </span>
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
+        </span>
       </div>
     </div>
   );

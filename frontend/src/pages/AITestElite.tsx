@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Copy, ShieldCheck, Info, Bot, ChevronDown, CheckCircle2 } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade, useSignal } from "../api/hooks";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
-import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useEliteTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { findEliteSignal } from "../utils/eliteSignal";
@@ -341,6 +341,7 @@ function EliteCard({
   const chatOpen = chatKey === trackingKey;
   const rl = riskLabel(elite.analysis.categories?.volatility.score ?? 50);
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
+  const effStop = effectiveStopFor(latest);
 
   return (
     <GlassCard glow={elite.analysis.bias === "bullish" ? "#00E676" : "#FF4D4F"}>
@@ -374,7 +375,7 @@ function EliteCard({
           </div>
           <div className="grid grid-cols-3 gap-2 mt-3">
             <StatChip label="Entry" value={`₹${latest.entry}`} />
-            <StatChip label="Stop Loss" value={`₹${latest.stop}`} color="#FF4D4F" />
+            <StatChip label="Stop Loss" value={`₹${effStop}`} color="#FF4D4F" />
             <StatChip label="Target 1" value={`₹${latest.targets[0]}`} color="#00E676" />
             <StatChip label="Target 2" value={`₹${latest.targets[1]}`} color="#00E676" />
             <StatChip label="Target 3" value={`₹${latest.targets[2]}`} color="#00E676" />
@@ -419,7 +420,7 @@ function EliteCard({
                     buyZoneLow: latest.entry,
                     buyZoneHigh: Number((latest.entry * 1.02).toFixed(2)),
                     targets: latest.targets,
-                    stopLoss: latest.stop,
+                    stopLoss: effStop,
                   });
                   navigator.clipboard.writeText(tip);
                   setCopiedKey(trackingKey);
@@ -459,11 +460,11 @@ function EliteCard({
               />
               <ChatBubble
                 q="What if the target fails?"
-                a={`Stop loss is ₹${latest.stop}. ${
+                a={
                   latest.targetsHit[0]
-                    ? `Target 1 was already reached, so the trailing stop has moved up to ${latest.targetsHit[1] ? `₹${latest.targets[0]} (locking the Target 1–2 gain)` : `₹${latest.entry} (breakeven)`}.`
-                    : "It hasn't reached Target 1 yet, so the original stop still applies."
-                }`}
+                    ? `Target 1 was already reached, so the stop has already trailed up to ₹${effStop}${latest.targetsHit[1] ? " (locking the Target 1–2 gain)" : " (breakeven)"} -- it won't wait for the original ₹${latest.stop} anymore.`
+                    : `It hasn't reached Target 1 yet, so the original stop loss ₹${latest.stop} still applies.`
+                }
               />
               <ChatBubble
                 q="Can I enter now?"
@@ -575,7 +576,7 @@ function CallHistoryRow({
                 q="What happened?"
                 a={
                   !entry.closed
-                    ? `Still running. Entry ₹${entry.entry}, targets ₹${entry.targets.join(" / ₹")}, stop ₹${entry.stop}.`
+                    ? `Still running. Entry ₹${entry.entry}, targets ₹${entry.targets.join(" / ₹")}, stop ₹${effectiveStopFor(entry)}${effectiveStopFor(entry) !== entry.stop ? ` (trailed up from the original ₹${entry.stop})` : ""}.`
                     : `Closed as "${entry.status.replace(/_/g, " ")}" at ₹${exit}, ${pnl! >= 0 ? "a gain" : "a loss"} of ${Math.abs(pnl!)} points from the ₹${entry.entry} entry${durationMin !== null ? ` after ${durationMin} minute(s)` : ""}.`
                 }
               />

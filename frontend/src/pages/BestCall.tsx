@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown } from "lucide-react";
 import { useCreateTrade, usePortfolio } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
-import { liveLtpFor } from "../hooks/useTradeLog";
+import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { calculatePotentialLeft } from "../utils/kimiPlaybook";
@@ -222,6 +222,7 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
   const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
   const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
   const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "var(--color-buy)" : pnl !== null && pnl < 0 ? "var(--color-sell)" : "#B45309";
+  const effStop = effectiveStopFor(entry);
 
   return (
     <div className="rounded-xl border border-[var(--color-border)] px-3 py-2.5">
@@ -263,7 +264,10 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
         <span className={entry.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
           {tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))} T3 ₹{entry.targets[2]}
         </span>
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
+        </span>
       </div>
     </div>
   );
@@ -310,6 +314,7 @@ function BestCallCard({
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
   if (!latest) return null;
+  const effStop = effectiveStopFor(latest);
 
   const source = (best?.source ?? (latest.meta?.label as BestCallSource | undefined) ?? "AI Elite") as BestCallSource;
   const direction = best?.direction ?? (latest.optSide === "CE" ? "bullish" : "bearish");
@@ -327,7 +332,7 @@ function BestCallCard({
     buyZoneLow: latest.entry,
     buyZoneHigh: Number((latest.entry * 1.02).toFixed(2)),
     targets: latest.targets,
-    stopLoss: latest.stop,
+    stopLoss: effStop,
   });
 
   return (
@@ -429,7 +434,10 @@ function BestCallCard({
         <span className={latest.targetsHit[2] ? "text-[var(--color-buy)] font-semibold" : ""}>
           {tickMarks(latest.targetTouches?.[2] ?? (latest.targetsHit[2] ? 1 : 0))} T3 ₹{latest.targets[2]}
         </span>
-        <span>SL ₹{latest.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== latest.stop && <span className="opacity-60"> (was ₹{latest.stop})</span>}
+        </span>
       </div>
       {!latest.closed && (
         <p className="px-4 pb-3 text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>

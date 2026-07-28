@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useMarketStatus, usePortfolio, useOptionsAnalytics, useKumarAiAnalyze } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { rankSignalsByWinRate } from "../utils/tradeLogStats";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useKumarAISuite, KUMAR_AI_TIMEFRAMES, type KumarAiTimeframeSnapshot, type KumarAiTradableSymbol } from "../hooks/useKumarAISuite";
@@ -174,17 +174,38 @@ function fmtCountdown(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+// Once a target is touched, the risk on this call is already banked -- don't
+// wait for the original, deeper stop: a pullback to that locked-in floor
+// closes it out right away (neutral at breakeven after T1, locked profit at
+// T1 after T2), same close rule the real tracked trade log (advanceOpenEntry
+// in useTradeLog.ts) already applies. This mirrors that logic for the
+// per-card generated "sig" instance, which tracks its own ephemeral status
+// independently of the persisted KUMARAI-<symbol>-<tf> trade log.
+function sigTargetsHit(sig: GeneratedSignal, liveLtp: number | null): [boolean, boolean, boolean] {
+  if (liveLtp === null) return [false, false, false];
+  const bullish = sig.bias === "bullish";
+  const favorable = (level: number) => (bullish ? liveLtp >= level : liveLtp <= level);
+  return [favorable(sig.targets[0]), favorable(sig.targets[1]), favorable(sig.targets[2])];
+}
+
+function sigEffectiveStop(sig: GeneratedSignal, liveLtp: number | null): number {
+  const [t1Hit, t2Hit] = sigTargetsHit(sig, liveLtp);
+  return t2Hit ? sig.targets[0] : t1Hit ? sig.entry : sig.stop;
+}
+
 function tradeStatus(sig: GeneratedSignal, liveLtp: number | null, now: number): { label: string; color: string } {
   if (now > sig.expiresAt) return { label: "Expired", color: "#64748B" };
   if (liveLtp === null) return { label: "Active", color: "#F59E0B" };
   const bullish = sig.bias === "bullish";
-  const slHit = bullish ? liveLtp <= sig.stop : liveLtp >= sig.stop;
-  if (slHit) return { label: "Stop Loss Hit", color: "#EF4444" };
-  const t3Hit = bullish ? liveLtp >= sig.targets[2] : liveLtp <= sig.targets[2];
+  const adverse = (level: number) => (bullish ? liveLtp <= level : liveLtp >= level);
+  const [t1Hit, t2Hit, t3Hit] = sigTargetsHit(sig, liveLtp);
   if (t3Hit) return { label: "Target 3 Hit", color: "#16A34A" };
-  const t2Hit = bullish ? liveLtp >= sig.targets[1] : liveLtp <= sig.targets[1];
+  if (adverse(sigEffectiveStop(sig, liveLtp))) {
+    if (t2Hit) return { label: "Closed After T1 (T2 Hit)", color: "#16A34A" };
+    if (t1Hit) return { label: "Closed At Breakeven (T1)", color: "#A3E635" };
+    return { label: "Stop Loss Hit", color: "#EF4444" };
+  }
   if (t2Hit) return { label: "Target 2 Hit", color: "#22C55E" };
-  const t1Hit = bullish ? liveLtp >= sig.targets[0] : liveLtp <= sig.targets[0];
   if (t1Hit) return { label: "Target 1 Hit", color: "#22C55E" };
   return { label: "Running", color: "#38BDF8" };
 }
@@ -744,7 +765,7 @@ export function KumarAI() {
                   <div className="grid grid-cols-3 gap-2">
                     <Stat label="Entry" value={sig ? `₹${sig.entry}` : liveProj ? `₹${liveProj.entry}` : "—"} />
                     <Stat label="Current" value={liveLtp !== null ? `₹${liveLtp}` : "—"} />
-                    <Stat label="Stop Loss" value={sig ? `₹${sig.stop}` : liveProj ? `₹${liveProj.stop}` : "—"} color="#EF4444" />
+                    <Stat label="Stop Loss" value={sig ? `₹${sigEffectiveStop(sig, liveLtp)}` : liveProj ? `₹${liveProj.stop}` : "—"} color="#EF4444" />
                     <Stat label="Target 1" value={sig ? `₹${sig.targets[0]}` : liveProj ? `₹${liveProj.targets[0]}` : "—"} color="#22C55E" />
                     <Stat label="Target 2" value={sig ? `₹${sig.targets[1]}` : liveProj ? `₹${liveProj.targets[1]}` : "—"} color="#22C55E" />
                     <Stat label="Target 3" value={sig ? `₹${sig.targets[2]}` : liveProj ? `₹${liveProj.targets[2]}` : "—"} color="#22C55E" />
@@ -957,6 +978,7 @@ export function KumarAI() {
 
 function KumarTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
+  const effStop = effectiveStopFor(entry);
   return (
     <div className="rounded-lg px-2.5 py-2 transition-opacity" style={{ opacity: dulled ? 0.6 : 1, background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
       <div className="flex items-center justify-between gap-2">
@@ -975,7 +997,12 @@ function KumarTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: 
         <KumarTargetTick label="T1" price={entry.targets[0]} hit={entry.targetsHit[0]} />
         <KumarTargetTick label="T2" price={entry.targets[1]} hit={entry.targetsHit[1]} />
         <KumarTargetTick label="T3" price={entry.targets[2]} hit={entry.targetsHit[2]} />
-        <span>SL ₹{entry.stop}</span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && (
+            <span style={{ opacity: 0.6 }}> (was ₹{entry.stop})</span>
+          )}
+        </span>
       </div>
       {!dulled && liveLtp !== null && (
         <p className="text-[10px] mt-1" style={{ color: "var(--ka-muted)" }}>

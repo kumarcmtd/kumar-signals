@@ -4,7 +4,7 @@ import { Copy, AlertTriangle, ChevronDown, Bot, X, Settings as SettingsIcon } fr
 import { useMarketStatus, usePrices, usePortfolio, useCreateTrade, useSignal, useCandles } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
-import { useTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { findEliteSignal } from "../utils/eliteSignal";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
@@ -171,6 +171,7 @@ export function AITestPro() {
   const heroLog = heroKey ? tradeLogs[heroKey] ?? [] : [];
   const heroEntry = heroLog[heroLog.length - 1];
   const heroLive = heroEntry ? liveLtpFor(hero!.options, heroEntry.strike, heroEntry.optSide) : null;
+  const heroEffStop = heroEntry ? effectiveStopFor(heroEntry) : null;
 
   const priceCard = prices?.find((p) => p.symbol === symbol);
   const c15 = useCandles(symbol, "15");
@@ -196,7 +197,7 @@ export function AITestPro() {
     if (!heroEntry) return [];
     return [
       { price: heroEntry.entry, color: "#00C2FF", title: "Entry" },
-      { price: heroEntry.stop, color: "#FF4D4F", title: "SL" },
+      { price: effectiveStopFor(heroEntry), color: "#FF4D4F", title: "SL" },
       { price: heroEntry.targets[0], color: "#00E676", title: "T1" },
       { price: heroEntry.targets[1], color: "#00E676", title: "T2" },
       { price: heroEntry.targets[2], color: "#00E676", title: "T3" },
@@ -276,7 +277,7 @@ export function AITestPro() {
               </div>
               <div className="grid grid-cols-3 gap-2 mt-3">
                 <StatChip label="Entry" value={`₹${heroEntry.entry}`} />
-                <StatChip label="Stop Loss" value={`₹${heroEntry.stop}`} color="#FF4D4F" />
+                <StatChip label="Stop Loss" value={`₹${heroEffStop}`} color="#FF4D4F" />
                 <StatChip label="Target 1" value={`₹${heroEntry.targets[0]}`} color="#00E676" />
                 <StatChip label="Target 2" value={`₹${heroEntry.targets[1]}`} color="#00E676" />
                 <StatChip label="Target 3" value={`₹${heroEntry.targets[2]}`} color="#00E676" />
@@ -330,7 +331,7 @@ export function AITestPro() {
                       buyZoneLow: heroEntry.entry,
                       buyZoneHigh: Number((heroEntry.entry * 1.02).toFixed(2)),
                       targets: heroEntry.targets,
-                      stopLoss: heroEntry.stop,
+                      stopLoss: heroEffStop ?? heroEntry.stop,
                     });
                     navigator.clipboard.writeText(tip);
                     setCopiedKey(heroKey);
@@ -351,7 +352,7 @@ export function AITestPro() {
                     <span>Current ₹{heroLive}</span>
                     <span>T1 ₹{heroEntry.targets[0]}</span>
                   </div>
-                  <ProgressTrack entry={heroEntry.entry} stop={heroEntry.stop} target={heroEntry.targets[0]} current={heroLive} />
+                  <ProgressTrack entry={heroEntry.entry} stop={heroEffStop ?? heroEntry.stop} target={heroEntry.targets[0]} current={heroLive} />
                 </div>
               )}
             </div>
@@ -585,13 +586,13 @@ export function AITestPro() {
                     <StatChip label="Entry" value={latest ? `₹${latest.entry}` : "—"} />
                     <StatChip label="Current" value={liveLtp !== null ? `₹${liveLtp}` : "—"} />
                     <StatChip label="Target 1" value={latest ? `₹${latest.targets[0]}` : "—"} color="#00E676" />
-                    <StatChip label="Stop Loss" value={latest ? `₹${latest.stop}` : "—"} color="#FF4D4F" />
+                    <StatChip label="Stop Loss" value={latest ? `₹${effectiveStopFor(latest)}` : "—"} color="#FF4D4F" />
                     <StatChip label="Probability" value={a.hitProbability !== null ? `${a.hitProbability}%` : "—"} />
                     <StatChip label="R:R" value={proj?.rr !== null && proj?.rr !== undefined ? `1:${proj.rr}` : "—"} />
                   </div>
                   {liveLtp !== null && latest && (
                     <div className="mt-2">
-                      <ProgressTrack entry={latest.entry} stop={latest.stop} target={latest.targets[0]} current={liveLtp} />
+                      <ProgressTrack entry={latest.entry} stop={effectiveStopFor(latest)} target={latest.targets[0]} current={liveLtp} />
                     </div>
                   )}
                   <div className="grid grid-cols-3 gap-2 mt-2.5">
@@ -910,9 +911,11 @@ export function AITestPro() {
               />
               <Faq
                 q="What if the target fails?"
-                a={`Stop loss is set at ₹${heroEntry.stop}. ${
-                  heroEntry.targetsHit[0] ? `Since Target 1 was already reached, the trailing stop has moved up to ${heroEntry.targetsHit[1] ? `₹${heroEntry.targets[0]} (locking the Target 1–2 gain)` : `₹${heroEntry.entry} (breakeven)`}.` : "It hasn't reached Target 1 yet, so the original stop still applies."
-                }`}
+                a={
+                  heroEntry.targetsHit[0]
+                    ? `Since Target 1 was already reached, the stop has already trailed up to ₹${heroEffStop}${heroEntry.targetsHit[1] ? " (locking the Target 1–2 gain)" : " (breakeven)"} -- it won't wait for the original ₹${heroEntry.stop} anymore.`
+                    : `It hasn't reached Target 1 yet, so the original stop loss ₹${heroEntry.stop} still applies.`
+                }
               />
               <Faq
                 q="Can I enter now?"

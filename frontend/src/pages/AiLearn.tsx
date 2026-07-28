@@ -12,7 +12,7 @@ import {
 } from "../data/learnLibrary";
 import { useCandles, useOptionsAnalytics, useSignal, useCreateTrade } from "../api/hooks";
 import { TIMEFRAMES } from "../hooks/useTimeframeSuite";
-import { useEliteTradeLog, liveLtpFor } from "../hooks/useTradeLog";
+import { useEliteTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { evaluatePatternSignal } from "../utils/patternSignalEngine";
 import type { BestCallPick } from "../utils/bestCallSelector";
@@ -289,7 +289,7 @@ function PatternCallCard({
 
       {!latest.closed && (
         <p className="px-4 pb-3 -mt-2 text-[10px] text-[var(--color-muted)]">
-          Stop ₹{latest.stop} · Next target ₹{nextTarget}
+          Stop ₹{effectiveStopFor(latest)} · Next target ₹{nextTarget}
         </p>
       )}
       {latest.closed && (
