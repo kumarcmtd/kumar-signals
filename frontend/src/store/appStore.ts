@@ -101,6 +101,11 @@ interface AppState {
 
   tradeLogs: Record<string, TradeLogEntry[]>;
   setTradeLog: (key: string, entries: TradeLogEntry[]) => void;
+  // Bulk-replaces the whole record in one go -- used only by the
+  // cross-device sync bootstrap (see syncTradeLogs.ts) after it has merged
+  // this browser's local history with whatever's on the server, so every
+  // page's own per-key setTradeLog calls don't need to know sync exists.
+  hydrateTradeLogs: (logs: Record<string, TradeLogEntry[]>) => void;
 
   alerts: AlertEntry[];
   addAlerts: (entries: AlertEntry[]) => void;
@@ -127,6 +132,7 @@ export const useAppStore = create<AppState>()(
 
       tradeLogs: {},
       setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
+      hydrateTradeLogs: (logs) => set({ tradeLogs: logs }),
 
       alerts: [],
       addAlerts: (entries) =>

@@ -1402,6 +1402,32 @@ async function deletePortfolioTrade(env: Env, id: string): Promise<void> {
   await savePortfolioTrades(env, next);
 }
 
+// Every page's own signal/call history (Best Call, AI-Risk, AI-Test V2/Pro,
+// Kumar AI, Elite, Kimi, Directional Gate) previously lived only in each
+// browser's own localStorage -- opening the app on a different browser or
+// device showed nothing, since it was never sent anywhere. This app has no
+// login, so there's exactly one shared history (same as every other piece
+// of data this Worker already serves) rather than a per-user one. The
+// client is responsible for merging/debouncing before it pushes here -- this
+// is a deliberately simple whole-blob get/put, no per-entry validation,
+// matching the same trust level as the portfolio trades KV store above.
+const TRADE_LOGS_KV_KEY = "trade_logs_v1";
+
+async function getTradeLogsFromKv(env: Env): Promise<Record<string, unknown>> {
+  const raw = await env.COMMODITY_KV.get(TRADE_LOGS_KV_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveTradeLogsToKv(env: Env, logs: Record<string, unknown>): Promise<void> {
+  await env.COMMODITY_KV.put(TRADE_LOGS_KV_KEY, JSON.stringify(logs));
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -1893,6 +1919,17 @@ export default {
           }
           if (request.method === "DELETE") {
             await deletePortfolioTrade(env, id);
+            return json({ ok: true });
+          }
+          return json({ error: "Method not allowed" }, 405);
+        }
+
+        if (url.pathname === "/api/trade-logs") {
+          if (request.method === "GET") return json(await getTradeLogsFromKv(env));
+          if (request.method === "POST") {
+            const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+            if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Body must be an object keyed by trade-log id" }, 400);
+            await saveTradeLogsToKv(env, body);
             return json({ ok: true });
           }
           return json({ error: "Method not allowed" }, 405);

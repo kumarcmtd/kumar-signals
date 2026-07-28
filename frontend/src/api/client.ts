@@ -1,4 +1,5 @@
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult } from "../types";
+import type { TradeLogEntry } from "../store/appStore";
 
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);
@@ -44,4 +45,6 @@ export const api = {
   deleteNtfyTopic: () => sendJSON<{ ok: true }>("/notify/topic", "DELETE"),
   sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
   checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
+  getTradeLogs: () => getJSON<Record<string, TradeLogEntry[]>>("/trade-logs"),
+  saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => sendJSON<{ ok: true }>("/trade-logs", "POST", logs),
 };
