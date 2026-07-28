@@ -394,7 +394,9 @@ function BestCallCard({
   return (
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-3.5 text-[11px] text-[var(--color-muted)]">
-        <span>Created on: {new Date(latest.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()}</span>
+        <span>
+          Created on: {new Date(latest.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()} at ₹{latest.entry}
+        </span>
         <span className="flex items-center gap-1 font-bold" style={{ color: SOURCE_COLOR[source] }}>
           <Info size={12} />
           {source}
