@@ -355,8 +355,18 @@ function BestCallCard({
   if (!latest) return null;
   const effStop = effectiveStopFor(latest);
 
-  const source = (best?.source ?? (latest.meta?.label as BestCallSource | undefined) ?? "AI Elite") as BestCallSource;
-  const direction = best?.direction ?? (latest.optSide === "CE" ? "bullish" : "bearish");
+  // `best` is this poll's fresh, independent re-scan across ALL three
+  // engines -- it can currently be reporting a totally different qualifying
+  // setup (different strike, different direction, different source engine)
+  // than the one actually open and tracked here. Only trust it for
+  // display when it genuinely IS the same instance (matching strike +
+  // side); otherwise every number below must come from the tracked entry
+  // itself, or a live re-scan match for an unrelated setup can silently
+  // relabel an open CE as bearish/"Directional Gate" just because that
+  // engine happens to be qualifying something else on this symbol right now.
+  const sameInstance = best !== null && best.strike === latest.strike && best.optSide === latest.optSide;
+  const source = ((sameInstance ? best.source : undefined) ?? (latest.meta?.label as BestCallSource | undefined) ?? "AI Elite") as BestCallSource;
+  const direction: "bullish" | "bearish" = latest.optSide === "CE" ? "bullish" : "bearish";
   const liveLtp = !latest.closed ? liveLtpFor(data.options, latest.strike, latest.optSide) : null;
   // Underwater but not stopped out -- premium has pulled back below entry
   // without reaching the stop yet. This is exactly the moment "should I
@@ -410,8 +420,8 @@ function BestCallCard({
       <pre className="mx-4 mt-3 rounded-xl bg-[var(--color-surface-soft)] px-3.5 py-3 text-[13px] leading-6 whitespace-pre-wrap font-sans">{tip}</pre>
 
       <div className="px-4 mt-2 flex items-center gap-2 flex-wrap">
-        {best && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">Confidence {Math.round(best.confidence)}%</span>}
-        {best?.rr != null && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">R:R 1:{best.rr}</span>}
+        {sameInstance && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">Confidence {Math.round(best!.confidence)}%</span>}
+        {sameInstance && best!.rr != null && <span className="text-[10px] px-2 py-1 rounded-full font-bold bg-[var(--color-surface-soft)]">R:R 1:{best!.rr}</span>}
         {!latest.closed && (
           <span className="text-[10px] px-2 py-1 rounded-full font-bold animate-pulse" style={{ background: "#FEE2E2", color: "#B91C1C" }}>
             LIVE
