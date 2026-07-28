@@ -15,7 +15,7 @@ interface RiskSettings {
 // each level as the live premium reaches it (permanently, even if price later
 // retraces), and once closed the line is done -- the next actionable signal
 // for that timeframe starts a brand-new entry rather than mutating this one.
-export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit";
+export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit" | "closed_manual";
 
 export interface TradeLogEntry {
   id: string;
@@ -106,6 +106,11 @@ interface AppState {
   // this browser's local history with whatever's on the server, so every
   // page's own per-key setTradeLog calls don't need to know sync exists.
   hydrateTradeLogs: (logs: Record<string, TradeLogEntry[]>) => void;
+  // Manually ends the currently-open entry for a key right now (e.g. the
+  // user took profit/loss outside of any target/SL level the app tracks) --
+  // a no-op if that key's last entry is already closed, so it can't
+  // resurrect or overwrite real history.
+  forceCloseTradeLog: (key: string) => void;
 
   alerts: AlertEntry[];
   addAlerts: (entries: AlertEntry[]) => void;
@@ -133,6 +138,14 @@ export const useAppStore = create<AppState>()(
       tradeLogs: {},
       setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
       hydrateTradeLogs: (logs) => set({ tradeLogs: logs }),
+      forceCloseTradeLog: (key) =>
+        set((s) => {
+          const history = s.tradeLogs[key];
+          const last = history?.[history.length - 1];
+          if (!last || last.closed) return s;
+          const closed: TradeLogEntry = { ...last, closed: true, closedAt: Date.now(), status: "closed_manual" };
+          return { tradeLogs: { ...s.tradeLogs, [key]: [...history.slice(0, -1), closed] } };
+        }),
 
       alerts: [],
       addAlerts: (entries) =>

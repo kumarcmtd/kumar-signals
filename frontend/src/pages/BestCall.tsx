@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight } from "lucide-react";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, Lock } from "lucide-react";
 import { useCreateTrade, usePortfolio } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -16,6 +16,10 @@ const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 const SOURCE_COLOR: Record<BestCallSource, string> = { "AI Elite": "#7C3AED", "Directional Gate": "#0891B2", "Kimi Playbook": "#B45309", "Pattern Signal": "#0D9488" };
+// A soft accidental-tap guard, not real security -- this is a public client
+// bundle, so anyone who opens devtools can read this string. It exists to
+// stop a stray tap from silently ending a live trade, not to gate access.
+const FORCE_STOP_PASSWORD = "SHANVI";
 
 // 0 touches -> a plain unfilled circle; 1-3 -> that many ticks; 4+ -> a
 // single tick with a count, so a target that keeps getting re-tested doesn't
@@ -443,11 +447,23 @@ function BestCallCard({
   // actually open; its own meta (captured at the moment it opened) covers
   // source/reasons when the live pick has since gone quiet. Confidence/R:R
   // aren't persisted in meta, so those badges simply hide once best is null.
+  const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const best = data.best;
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
   if (!latest) return null;
   const effStop = effectiveStopFor(latest);
+  const handleForceStop = () => {
+    const pw = window.prompt("Enter password to force-stop this trade:");
+    if (pw === null) return;
+    if (pw !== FORCE_STOP_PASSWORD) {
+      window.alert("Incorrect password.");
+      return;
+    }
+    if (window.confirm("Mark this trade as completed now? This can't be undone.")) {
+      forceCloseTradeLog(data.trackingKey);
+    }
+  };
 
   // `best` is this poll's fresh, independent re-scan across ALL three
   // engines -- it can currently be reporting a totally different qualifying
@@ -593,7 +609,13 @@ function BestCallCard({
       </div>
       {rebound && <ReboundStrengthCard rebound={rebound} />}
       {!latest.closed && (
-        <p className="px-4 pb-3 text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>
+        <div className="px-4 pb-3 flex items-center justify-between gap-2">
+          <p className="text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>
+          <button onClick={handleForceStop} className="flex items-center gap-1 text-[10px] font-bold text-[var(--color-muted)] underline underline-offset-2 shrink-0">
+            <Lock size={10} />
+            Force Stop
+          </button>
+        </div>
       )}
       {latest.closed && (
         <p className="px-4 pb-3.5 text-[11px] font-bold" style={{ color: exitPriceFor(latest) - latest.entry >= 0 ? "var(--color-buy)" : "var(--color-sell)" }}>

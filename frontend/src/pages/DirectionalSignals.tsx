@@ -18,6 +18,7 @@ const STATUS_LABEL: Record<TradeLogStatus, string> = {
   stopped_breakeven: "Closed at Breakeven (T1)",
   stopped_after_t1: "Closed after T1 (T2 hit)",
   target3_hit: "Target 3 Hit",
+  closed_manual: "Closed Manually",
 };
 const STATUS_COLOR: Record<TradeLogStatus, string> = {
   running: "text-white/60",
@@ -25,6 +26,7 @@ const STATUS_COLOR: Record<TradeLogStatus, string> = {
   stopped_breakeven: "text-[#a3e635]",
   stopped_after_t1: "text-[#22c55e]",
   target3_hit: "text-[#22c55e]",
+  closed_manual: "text-white/40",
 };
 
 function fmtLogTime(ms: number): string {
