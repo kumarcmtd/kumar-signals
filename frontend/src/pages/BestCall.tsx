@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown } from "lucide-react";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight } from "lucide-react";
 import { useCreateTrade, usePortfolio } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -40,6 +40,7 @@ export function BestCall() {
   const createTrade = useCreateTrade();
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
 
   const crudeOil = useBestCallForSymbol("CRUDEOIL", journalSummary.winRate);
@@ -173,7 +174,7 @@ export function BestCall() {
           </p>
           <div className="space-y-2">
             {allCalls.map(({ symbol, entry }) => (
-              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} />
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} onOpen={() => setDetail({ symbol, entry })} />
             ))}
           </div>
         </div>
@@ -210,6 +211,8 @@ export function BestCall() {
       <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2">
         Educational reference only, not financial advice. Always confirm on the live chart before acting.
       </p>
+
+      {detail && <CallDetailModal symbol={detail.symbol} entry={detail.entry} onClose={() => setDetail(null)} />}
     </div>
   );
 }
@@ -218,7 +221,7 @@ function fmtWhen(ms: number): string {
   return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: TradeLogEntry }) {
+function CallHistoryRow({ symbol, entry, onOpen }: { symbol: TradableSymbol; entry: TradeLogEntry; onOpen: () => void }) {
   const exit = entry.closed ? exitPriceFor(entry) : null;
   const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
   const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
@@ -226,7 +229,7 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
   const effStop = effectiveStopFor(entry);
 
   return (
-    <div className="rounded-xl border border-[var(--color-border)] px-3 py-2.5">
+    <button onClick={onOpen} className="w-full text-left rounded-xl border border-[var(--color-border)] px-3 py-2.5 active:bg-[var(--color-surface-soft)]">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs font-bold truncate">
@@ -243,16 +246,19 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
             )}
           </p>
         </div>
-        <div className="text-right shrink-0">
-          <p className="text-xs font-bold" style={{ color: statusColor }}>
-            {statusLabel}
-          </p>
-          {pnl !== null && (
-            <p className="text-[10px] text-[var(--color-muted)]">
-              {pnl >= 0 ? "+" : ""}
-              {pnl} pts
+        <div className="text-right shrink-0 flex items-center gap-1">
+          <div>
+            <p className="text-xs font-bold" style={{ color: statusColor }}>
+              {statusLabel}
             </p>
-          )}
+            {pnl !== null && (
+              <p className="text-[10px] text-[var(--color-muted)]">
+                {pnl >= 0 ? "+" : ""}
+                {pnl} pts
+              </p>
+            )}
+          </div>
+          <ChevronRight size={14} className="text-[var(--color-muted)] shrink-0" />
         </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px] text-[var(--color-muted)]">
@@ -269,6 +275,94 @@ function CallHistoryRow({ symbol, entry }: { symbol: TradableSymbol; entry: Trad
           SL ₹{effStop}
           {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
         </span>
+      </div>
+    </button>
+  );
+}
+
+function DetailRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-[var(--color-border)] last:border-0">
+      <span className="text-sm text-[var(--color-muted)]">{label}</span>
+      <span className="text-base font-bold" style={{ color: valueColor }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; entry: TradeLogEntry; onClose: () => void }) {
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
+  const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "var(--color-buy)" : pnl !== null && pnl < 0 ? "var(--color-sell)" : "#B45309";
+  const effStop = effectiveStopFor(entry);
+  const direction = entry.optSide === "CE" ? "bullish" : "bearish";
+  const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
+  const biasColor = direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
+  const source = entry.meta?.label as BestCallSource | undefined;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50" />
+      <div
+        className="relative w-full sm:max-w-md bg-[var(--color-surface)] rounded-t-3xl sm:rounded-3xl p-5 max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xl font-black flex items-center gap-2">
+            <Bias size={20} style={{ color: biasColor }} />
+            {DISPLAY_NAME[symbol]} {entry.strike} {entry.optSide}
+          </p>
+          <button onClick={onClose} className="p-2 rounded-full bg-[var(--color-surface-soft)] shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+        {source && (
+          <p className="text-sm font-bold mb-3" style={{ color: SOURCE_COLOR[source] }}>
+            {source}
+          </p>
+        )}
+
+        <div className="rounded-2xl p-3.5 mb-3" style={{ background: "var(--color-surface-soft)" }}>
+          <p className="text-lg font-black" style={{ color: statusColor }}>
+            {statusLabel}
+          </p>
+          {pnl !== null && (
+            <p className="text-sm font-bold text-[var(--color-muted)]">
+              {pnl >= 0 ? "+" : ""}
+              {pnl} points
+            </p>
+          )}
+        </div>
+
+        <div>
+          <DetailRow label="Called" value={`${fmtWhen(entry.openedAt)} at ₹${entry.entry}`} />
+          {entry.closed && entry.closedAt !== null && <DetailRow label="Closed" value={`${fmtWhen(entry.closedAt)} at ₹${exit}`} />}
+          <DetailRow label="Entry" value={`₹${entry.entry}`} />
+          <DetailRow label="Target 1" value={`₹${entry.targets[0]}  ${tickMarks(entry.targetTouches?.[0] ?? (entry.targetsHit[0] ? 1 : 0))}`} valueColor={entry.targetsHit[0] ? "var(--color-buy)" : undefined} />
+          <DetailRow label="Target 2" value={`₹${entry.targets[1]}  ${tickMarks(entry.targetTouches?.[1] ?? (entry.targetsHit[1] ? 1 : 0))}`} valueColor={entry.targetsHit[1] ? "var(--color-buy)" : undefined} />
+          <DetailRow label="Target 3" value={`₹${entry.targets[2]}  ${tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))}`} valueColor={entry.targetsHit[2] ? "var(--color-buy)" : undefined} />
+          <DetailRow
+            label="Stop Loss"
+            value={effStop !== entry.stop ? `₹${effStop} (was ₹${entry.stop})` : `₹${entry.stop}`}
+            valueColor="var(--color-sell)"
+          />
+        </div>
+
+        {entry.meta?.reasons && entry.meta.reasons.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-2">Why this call</p>
+            <div className="space-y-1.5">
+              {entry.meta.reasons.map((r, i) => (
+                <p key={i} className="text-sm flex items-start gap-2">
+                  <ShieldCheck size={14} className="shrink-0 mt-0.5 text-[var(--color-primary)]" />
+                  {r}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
