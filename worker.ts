@@ -591,7 +591,7 @@ async function resolveOptionExpiryCandidates(token: string, fut: FutureInfo): Pr
 // }, put_options: { market_data } } row shape the rest of this file already
 // expects -- so analyzeChain/nearestStrikes/computeMaxPain/Greeks are
 // untouched.
-async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null): Promise<{ chain?: any[]; error?: string }> {
+async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null, pinnedStrikes: number[] = []): Promise<{ chain?: any[]; error?: string }> {
   const contractUsp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
   const contractRes = await fetch(`https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
@@ -623,6 +623,12 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
     const nearestIdx = allStrikes.reduce((best, s, i) => (Math.abs(s - spot) < Math.abs(allStrikes[best] - spot) ? i : best), 0);
     keepStrikes = new Set(allStrikes.slice(Math.max(0, nearestIdx - WINDOW), nearestIdx + WINDOW + 1));
   }
+  // A strike the client already has an open trade tracked against must never
+  // silently stop getting live quotes just because the underlying has since
+  // moved far enough that it falls outside the spot-centered window -- pin
+  // it back in regardless of distance, or that trade's premium (and target
+  // hit/close detection, which reads this same quote) freezes forever.
+  for (const s of pinnedStrikes) if (allStrikes.includes(s)) keepStrikes.add(s);
   const contracts = allContracts.filter((c) => keepStrikes.has(c.strike_price));
 
   const quotesByToken = new Map<string, any>();
@@ -672,11 +678,11 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
 // (nearest first) until one actually has contracts, and reports whichever
 // expiry it actually used -- not just the first guess -- so downstream
 // Greeks/expiry display stay consistent with the chain that was returned.
-async function resolveOptionChain(token: string, fut: FutureInfo, spot: number | null): Promise<{ expiry: string; chain?: any[]; error?: string }> {
+async function resolveOptionChain(token: string, fut: FutureInfo, spot: number | null, pinnedStrikes: number[] = []): Promise<{ expiry: string; chain?: any[]; error?: string }> {
   const candidates = await resolveOptionExpiryCandidates(token, fut);
   let lastError: string | undefined;
   for (const expiry of candidates) {
-    const res = await getOptionChain(token, fut.instrument_key, expiry, spot);
+    const res = await getOptionChain(token, fut.instrument_key, expiry, spot, pinnedStrikes);
     if (res.chain) return { expiry, chain: res.chain };
     lastError = res.error;
   }
@@ -697,21 +703,22 @@ async function resolveOptionChainAcrossFutures(
   token: string,
   query: string,
   primaryFut: FutureInfo,
-  spot: number | null
+  spot: number | null,
+  pinnedStrikes: number[] = []
 ): Promise<{ fut: FutureInfo; expiry: string; chain?: any[]; error?: string }> {
-  const primary = await resolveOptionChain(token, primaryFut, spot);
+  const primary = await resolveOptionChain(token, primaryFut, spot, pinnedStrikes);
   if (primary.chain) return { fut: primaryFut, ...primary };
 
   const upcoming = await getUpcomingFutures(token, query, 3);
   for (const altFut of upcoming) {
     if (altFut.instrument_key === primaryFut.instrument_key) continue;
-    const alt = await resolveOptionChain(token, altFut, spot);
+    const alt = await resolveOptionChain(token, altFut, spot, pinnedStrikes);
     if (alt.chain) return { fut: altFut, ...alt };
   }
   return { fut: primaryFut, ...primary };
 }
 
-function nearestStrikes(chain: any[], spot: number, sideCount = 6) {
+function nearestStrikes(chain: any[], spot: number, sideCount = 6, pinnedStrikes: number[] = []) {
   const sorted = [...chain].sort((a, b) => a.strike_price - b.strike_price);
   let atmIdx = 0;
   let atmDiff = Infinity;
@@ -724,7 +731,18 @@ function nearestStrikes(chain: any[], spot: number, sideCount = 6) {
   });
   const start = Math.max(0, atmIdx - sideCount);
   const end = Math.min(sorted.length, atmIdx + sideCount + 1);
-  return { rows: sorted.slice(start, end), atmStrike: sorted.length ? sorted[atmIdx].strike_price : null };
+  const windowRows = sorted.slice(start, end);
+
+  // A strike the client has an open trade tracked against must always come
+  // back, even once the underlying has moved far enough that it falls
+  // outside the normal ATM-centered display window -- otherwise that one
+  // trade's live premium (and its target-hit/close detection) silently
+  // freezes at whatever it last was while everything else keeps updating.
+  const windowStrikes = new Set(windowRows.map((r) => r.strike_price));
+  const pinnedRows = pinnedStrikes.length ? sorted.filter((r) => pinnedStrikes.includes(r.strike_price) && !windowStrikes.has(r.strike_price)) : [];
+  const rows = pinnedRows.length ? [...windowRows, ...pinnedRows].sort((a, b) => a.strike_price - b.strike_price) : windowRows;
+
+  return { rows, atmStrike: sorted.length ? sorted[atmIdx].strike_price : null };
 }
 
 function analyzeChain(chain: any[]) {
@@ -1223,19 +1241,19 @@ interface OptionsAnalytics {
   rows: OptionRowAnalytics[];
 }
 
-async function computeOptionsAnalytics(token: string, symbol: Symbol): Promise<OptionsAnalytics | { error: string }> {
+async function computeOptionsAnalytics(token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
 
   const candles = await getHistoricalCandles(token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot);
+  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot, pinnedStrikes);
   const chainRes = { chain, error };
   if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
 
   const refSpot = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
-  const { rows, atmStrike } = nearestStrikes(chainRes.chain, refSpot, 8);
+  const { rows, atmStrike } = nearestStrikes(chainRes.chain, refSpot, 8, pinnedStrikes);
   const analysis = analyzeChain(chainRes.chain);
   const maxPain = computeMaxPain(chainRes.chain);
   const T = yearsToExpiry(optionExpiry);
@@ -1810,7 +1828,15 @@ export default {
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
           const token = await requireToken(env);
           if (token instanceof Response) return token;
-          return json(await computeOptionsAnalytics(token, symbol));
+          // Strikes the client currently has an open trade tracked against --
+          // always kept in the response even if the underlying has since
+          // moved far enough that they'd otherwise fall outside the normal
+          // ATM-centered window (see nearestStrikes/getOptionChain).
+          const pinnedStrikes = (url.searchParams.get("strikes") ?? "")
+            .split(",")
+            .map((s) => Number(s))
+            .filter((n) => Number.isFinite(n));
+          return json(await computeOptionsAnalytics(token, symbol, pinnedStrikes));
         }
 
         if (url.pathname === "/api/notify/topic") {

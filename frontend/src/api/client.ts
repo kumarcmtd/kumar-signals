@@ -31,7 +31,8 @@ export const api = {
     getJSON<SignalCard & { timeframe: string }>(`/scan?symbol=${symbol}&tf=${tf}`),
   candles: (symbol: InstrumentSymbol, tf: string) =>
     getJSON<{ tradingSymbol: string; timeframe: string; candles: Candle[] }>(`/candles?symbol=${symbol}&tf=${tf}`),
-  optionsAnalytics: (symbol: InstrumentSymbol) => getJSON<OptionsAnalytics>(`/options/${symbol}`),
+  optionsAnalytics: (symbol: InstrumentSymbol, pinnedStrikes: number[] = []) =>
+    getJSON<OptionsAnalytics>(`/options/${symbol}${pinnedStrikes.length ? `?strikes=${pinnedStrikes.join(",")}` : ""}`),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),

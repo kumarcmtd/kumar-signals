@@ -1,5 +1,7 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
+import { useAppStore } from "../store/appStore";
 import type { InstrumentSymbol, PortfolioTrade, KumarAiAnalyzeRequest } from "../types";
 
 export function useMarketStatus() {
@@ -52,10 +54,34 @@ export function useCandles(symbol: InstrumentSymbol, tf: string) {
   });
 }
 
+// Every page's own trade-log key naming is different ("BEST-CRUDEOIL",
+// "AIRISK-NATURALGAS-15", "GATECE-CRUDEOIL-30", "CRUDEOIL-1D", ...) but every
+// one of them contains the plain symbol name somewhere, and "CRUDEOIL" /
+// "NATURALGAS" never collide as substrings of each other -- so this is a
+// safe, page-agnostic way to find every currently-open trade for a symbol
+// across the ENTIRE app without importing every individual page's hook.
+// Without this, an open trade whose strike drifts far enough from the
+// current ATM (exactly what happens on a big move) would silently stop
+// getting live quotes -- see nearestStrikes/getOptionChain on the worker.
+function useOpenStrikesFor(symbol: InstrumentSymbol): number[] {
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
+  return useMemo(() => {
+    const set = new Set<number>();
+    for (const [key, entries] of Object.entries(tradeLogs)) {
+      if (!key.includes(symbol)) continue;
+      const last = entries[entries.length - 1];
+      if (last && !last.closed) set.add(last.strike);
+    }
+    return Array.from(set).sort((a, b) => a - b);
+  }, [tradeLogs, symbol]);
+}
+
 export function useOptionsAnalytics(symbol: InstrumentSymbol) {
+  const pinnedStrikes = useOpenStrikesFor(symbol);
+  const pinnedKey = pinnedStrikes.join(",");
   return useQuery({
-    queryKey: ["options-analytics", symbol],
-    queryFn: () => api.optionsAnalytics(symbol),
+    queryKey: ["options-analytics", symbol, pinnedKey],
+    queryFn: () => api.optionsAnalytics(symbol, pinnedStrikes),
     refetchInterval: 20_000,
   });
 }
