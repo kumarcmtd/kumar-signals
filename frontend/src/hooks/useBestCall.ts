@@ -75,5 +75,15 @@ export function useBestCallForSymbol(symbol: TradableSymbol, journalWinRate: num
   const meta = best ? { label: best.source, reasons: best.reasons, confirmingTimeframes: [best.label] } : undefined;
   useEliteTradeLog(trackingKey, decision, best?.optSide ?? null, proj, suite.options, meta);
 
-  return { best, trackingKey, options: suite.options, expiry: signal?.expiry, allCandidateCount: allPicks.length };
+  return {
+    best,
+    trackingKey,
+    options: suite.options,
+    expiry: signal?.expiry,
+    allCandidateCount: allPicks.length,
+    // 15-minute candles for this symbol, already fetched above for the Kimi
+    // scan -- exposed so the page can re-check the underlying's current
+    // technical strength for an open trade without any extra API call.
+    underlyingCandles: c15.data?.candles ?? [],
+  };
 }

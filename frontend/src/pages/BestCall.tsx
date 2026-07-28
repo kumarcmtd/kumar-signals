@@ -10,6 +10,7 @@ import { formatTipCard } from "../utils/tipFormat";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
+import { checkReboundStrength, type ReboundTier } from "../utils/reboundStrength";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -284,6 +285,44 @@ function StatTile({ label, value, color }: { label: string; value: string; color
   );
 }
 
+const REBOUND_STYLE: Record<ReboundTier, { bg: string; border: string; text: string }> = {
+  strong: { bg: "#DCFCE7", border: "#86EFAC", text: "#15803D" },
+  moderate: { bg: "#FEF3C7", border: "#FCD34D", text: "#B45309" },
+  weak: { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C" },
+};
+
+// Shown only when the trade is currently underwater (premium between entry
+// and stop) but hasn't been stopped out -- re-reads the underlying's own
+// current indicators against the call's original direction so "does this
+// still have strength to rebound to target?" has a real answer instead of
+// being a guess.
+function ReboundStrengthCard({ rebound }: { rebound: ReturnType<typeof checkReboundStrength> }) {
+  if (!rebound) return null;
+  const style = REBOUND_STYLE[rebound.tier];
+  return (
+    <div className="mx-4 mb-3 rounded-xl px-3 py-2.5" style={{ background: style.bg, border: `1px solid ${style.border}` }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-black" style={{ color: style.text }}>
+          {rebound.label}
+        </p>
+        <p className="text-[10px] font-bold" style={{ color: style.text }}>
+          {rebound.score}% of checks favor it
+        </p>
+      </div>
+      <p className="text-[9px] mt-1" style={{ color: style.text, opacity: 0.75 }}>
+        Price is between entry and stop, still open — this re-checks the underlying's current indicators against this call's own direction.
+      </p>
+      <div className="mt-1.5 space-y-0.5">
+        {rebound.reasons.map((r, i) => (
+          <p key={i} className="text-[10px]" style={{ color: style.text }}>
+            {r}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BestCallCard({
   symbol,
   data,
@@ -319,6 +358,13 @@ function BestCallCard({
   const source = (best?.source ?? (latest.meta?.label as BestCallSource | undefined) ?? "AI Elite") as BestCallSource;
   const direction = best?.direction ?? (latest.optSide === "CE" ? "bullish" : "bearish");
   const liveLtp = !latest.closed ? liveLtpFor(data.options, latest.strike, latest.optSide) : null;
+  // Underwater but not stopped out -- premium has pulled back below entry
+  // without reaching the stop yet. This is exactly the moment "should I
+  // still hold this?" matters most and there's normally no signal to answer
+  // it, so re-check the underlying's current technical strength against the
+  // call's own original direction rather than leaving it a guess.
+  const inBetween = !latest.closed && liveLtp !== null && liveLtp < latest.entry && liveLtp > effStop;
+  const rebound = inBetween ? checkReboundStrength(data.underlyingCandles, direction) : null;
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
   const potential = calculatePotentialLeft(latest.entry, latest.stop, nextTarget, liveLtp ?? latest.entry);
   const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
@@ -439,6 +485,7 @@ function BestCallCard({
           {effStop !== latest.stop && <span className="opacity-60"> (was ₹{latest.stop})</span>}
         </span>
       </div>
+      {rebound && <ReboundStrengthCard rebound={rebound} />}
       {!latest.closed && (
         <p className="px-4 pb-3 text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>
       )}
