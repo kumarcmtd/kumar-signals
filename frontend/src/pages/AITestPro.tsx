@@ -836,7 +836,11 @@ export function AITestPro() {
               <tbody>
                 {filteredHistory.map((r) => (
                   <tr key={r.entry.id} className="border-t" style={{ borderColor: "rgba(255,255,255,.06)" }}>
-                    <td className="py-2">{r.entry.closedAt ? new Date(r.entry.closedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+                    <td className="py-2 whitespace-nowrap">
+                      {r.entry.closedAt
+                        ? new Date(r.entry.closedAt).toLocaleString("en-IN", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+                        : "—"}
+                    </td>
                     <td className="py-2">{DISPLAY_NAME[r.symbol as TradableSymbol] ?? r.symbol}</td>
                     <td className="py-2">
                       {r.entry.strike} {r.entry.optSide}
