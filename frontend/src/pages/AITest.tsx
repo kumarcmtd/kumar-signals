@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { CheckCircle2, AlertTriangle, Star, Radio, Copy } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Star, Radio, Copy, X, ChevronRight } from "lucide-react";
 import { useMarketStatus, usePortfolio, useCreateTrade } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
@@ -8,6 +8,7 @@ import { useTimeframeSuite } from "../hooks/useTimeframeSuite";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
+import { exitPriceFor } from "../utils/tradeLogPnl";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
@@ -137,6 +138,7 @@ export function AITest() {
   const createTrade = useCreateTrade();
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TradeLogEntry | null>(null);
 
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
   const journalWinRate = journalSummary.winRate;
@@ -467,7 +469,7 @@ export function AITest() {
                     <div className="space-y-1.5">
                       <p className="text-[10px] font-bold text-white/50 uppercase">Trade Log (newest first)</p>
                       {[...log].reverse().map((entry) => (
-                        <TradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
+                        <TradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} onOpen={() => setDetail(entry)} />
                       ))}
                     </div>
                   ) : (
@@ -553,6 +555,8 @@ export function AITest() {
         Educational reference only, not financial advice. Position sizing uses your Risk page settings (₹{risk.capital.toLocaleString("en-IN")}
         capital, {risk.riskPercent}% risk). Every timeframe is scored independently — nothing here is a guaranteed outcome.
       </p>
+
+      {detail && <TradeLogDetailModal symbol={symbol} entry={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
@@ -601,16 +605,22 @@ function fmtLogTime(ms: number): string {
   return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
+function TradeLogLine({ entry, liveLtp, onOpen }: { entry: TradeLogEntry; liveLtp: number | null; onOpen: () => void }) {
   const dulled = entry.closed;
   const effStop = effectiveStopFor(entry);
   return (
-    <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}>
+    <button
+      onClick={onOpen}
+      className={`w-full text-left rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-bold">
           {entry.strike} {entry.optSide} · Entry ₹{entry.entry}
         </span>
-        <span className={`text-[10px] font-bold shrink-0 ${STATUS_COLOR[entry.status]}`}>{STATUS_LABEL[entry.status]}</span>
+        <span className="flex items-center gap-1 shrink-0">
+          <span className={`text-[10px] font-bold ${STATUS_COLOR[entry.status]}`}>{STATUS_LABEL[entry.status]}</span>
+          <ChevronRight size={12} className="text-white/30" />
+        </span>
       </div>
       <p className="text-[9px] text-white/40 mt-1">
         Called {fmtLogTime(entry.openedAt)}
@@ -626,6 +636,61 @@ function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: numbe
         </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
+    </button>
+  );
+}
+
+function DetailRow({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-white/10 last:border-0">
+      <span className="text-sm text-white/50">{label}</span>
+      <span className="text-base font-bold" style={{ color: valueColor }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function TradeLogDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; entry: TradeLogEntry; onClose: () => void }) {
+  const effStop = effectiveStopFor(entry);
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/60" />
+      <div
+        className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-5 max-h-[85vh] overflow-y-auto bg-[#0D0A17] border border-white/10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xl font-black text-white">
+            {DISPLAY_NAME[symbol]} {entry.strike} {entry.optSide}
+          </p>
+          <button onClick={onClose} className="p-2 rounded-full bg-white/10 shrink-0">
+            <X size={18} className="text-white" />
+          </button>
+        </div>
+
+        <div className="rounded-2xl p-3.5 mb-3 bg-white/5 border border-white/10">
+          <p className={`text-lg font-black ${STATUS_COLOR[entry.status]}`}>{STATUS_LABEL[entry.status]}</p>
+          {pnl !== null && (
+            <p className="text-sm font-bold text-white/50">
+              {pnl >= 0 ? "+" : ""}
+              {pnl} points
+            </p>
+          )}
+        </div>
+
+        <div>
+          <DetailRow label="Called" value={`${fmtLogTime(entry.openedAt)} at ₹${entry.entry}`} />
+          {entry.closed && entry.closedAt !== null && <DetailRow label="Closed" value={`${fmtLogTime(entry.closedAt)} at ₹${exit}`} />}
+          <DetailRow label="Entry" value={`₹${entry.entry}`} />
+          <DetailRow label="Target 1" value={`₹${entry.targets[0]}  ${entry.targetsHit[0] ? "✓" : "○"}`} valueColor={entry.targetsHit[0] ? "#22c55e" : undefined} />
+          <DetailRow label="Target 2" value={`₹${entry.targets[1]}  ${entry.targetsHit[1] ? "✓" : "○"}`} valueColor={entry.targetsHit[1] ? "#22c55e" : undefined} />
+          <DetailRow label="Target 3" value={`₹${entry.targets[2]}  ${entry.targetsHit[2] ? "✓" : "○"}`} valueColor={entry.targetsHit[2] ? "#22c55e" : undefined} />
+          <DetailRow label="Stop Loss" value={effStop !== entry.stop ? `₹${effStop} (was ₹${entry.stop})` : `₹${entry.stop}`} valueColor="#f43f5e" />
+        </div>
+      </div>
     </div>
   );
 }
