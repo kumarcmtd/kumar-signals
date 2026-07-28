@@ -3,7 +3,15 @@ import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
-const MAX_HISTORY = 10;
+// Every page's own trade log is a rolling window capped at this many
+// entries per "<prefix>-<symbol>[-<tf>]" key. This used to be 10, which
+// sounds generous until you notice there are ~50 such keys across the app
+// and some engines (Directional Gate, AI-Test V2's per-timeframe scoring)
+// fire many times a day -- a single busy session could roll a whole
+// morning's calls off the end before anyone got to review them. Raised
+// well past what any real trading day produces per key, so "study today's
+// results" actually has today's results to look at.
+export const MAX_HISTORY = 200;
 
 interface ProjLike {
   strike: number;
