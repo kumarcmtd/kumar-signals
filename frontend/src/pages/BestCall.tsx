@@ -65,14 +65,36 @@ function callChartMarkers(entry: TradeLogEntry): ChartMarkerSpec[] {
   return out;
 }
 
-function CallChart({ candles, entry, loading }: { candles: Candle[]; entry: TradeLogEntry; loading: boolean }) {
+function CallChart({
+  candles,
+  entry,
+  loading,
+  errorReason,
+}: {
+  candles: Candle[];
+  entry: TradeLogEntry;
+  loading: boolean;
+  errorReason?: string | null;
+}) {
   const markers = useMemo(() => callChartMarkers(entry), [entry]);
+  // The worker only ever returns this reason (rather than throwing) when the
+  // underlying's own candle history genuinely isn't ready yet -- almost
+  // always the first ~20 minutes right after MCX opens, before today's
+  // 1-minute feed has enough bars to resample to 15m. That's exactly when a
+  // fresh call is most likely to fire (opening-range moves), so this shows
+  // up more than its rarity suggests -- worth explaining plainly rather than
+  // a bare "no data" that reads as broken.
+  const emptyMessage = loading
+    ? "Loading chart…"
+    : errorReason
+    ? `${errorReason}. This is a normal gap right after market open — check back in a few minutes.`
+    : "No chart data available yet.";
   return (
     <div>
       {candles.length > 0 ? (
         <TradeChart candles={candles} priceLines={[]} markers={markers} height={220} theme="light" />
       ) : (
-        <p className="text-xs text-[var(--color-muted)] text-center py-6">{loading ? "Loading chart…" : "No chart data available yet."}</p>
+        <p className="text-xs text-[var(--color-muted)] text-center py-6 px-2">{emptyMessage}</p>
       )}
       <p className="text-[9px] text-[var(--color-muted)] mt-1.5 px-1">
         Underlying 15m price action, not the option premium — the marked candle is exactly when this call was called
@@ -417,7 +439,12 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
             <CandlestickChart size={13} />
             Chart
           </p>
-          <CallChart candles={candleData?.candles ?? []} entry={entry} loading={candlesLoading} />
+          <CallChart
+            candles={candleData?.candles ?? []}
+            entry={entry}
+            loading={candlesLoading}
+            errorReason={(candleData as { error?: string } | undefined)?.error ?? null}
+          />
         </div>
       </div>
     </div>
@@ -689,7 +716,12 @@ function BestCallCard({
         </button>
         {chartOpen && (
           <div className="mb-2 rounded-xl p-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
-            <CallChart candles={data.underlyingCandles} entry={latest} loading={false} />
+            <CallChart
+              candles={data.underlyingCandles}
+              entry={latest}
+              loading={data.underlyingCandlesLoading}
+              errorReason={data.underlyingCandlesError}
+            />
           </div>
         )}
         <button

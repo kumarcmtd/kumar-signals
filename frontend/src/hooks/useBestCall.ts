@@ -85,5 +85,13 @@ export function useBestCallForSymbol(symbol: TradableSymbol, journalWinRate: num
     // scan -- exposed so the page can re-check the underlying's current
     // technical strength for an open trade without any extra API call.
     underlyingCandles: c15.data?.candles ?? [],
+    underlyingCandlesLoading: c15.isLoading,
+    // The worker returns {error} with a normal 200 status (not a thrown
+    // fetch error) when candles genuinely aren't ready yet -- most commonly
+    // "market may be closed"/"not enough bars yet" in the first ~20 minutes
+    // after MCX opens, before today's 1-minute feed has enough bars to
+    // resample. Surfacing the real reason lets a chart consumer explain
+    // *why* there's nothing to show instead of looking broken.
+    underlyingCandlesError: (c15.data as { error?: string } | undefined)?.error ?? null,
   };
 }
