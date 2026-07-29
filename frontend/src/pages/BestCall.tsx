@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, ChevronDown, Lock, MessageCircle } from "lucide-react";
-import { useCreateTrade, usePortfolio } from "../api/hooks";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, ChevronDown, Lock, MessageCircle, CandlestickChart } from "lucide-react";
+import { useCreateTrade, usePortfolio, useCandles } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
@@ -11,6 +11,8 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
 import { checkReboundStrength, type ReboundTier } from "../utils/reboundStrength";
+import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
+import type { Candle } from "../types";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -37,6 +39,47 @@ function formatExpiryTip(expiry: string | undefined): string {
   } catch {
     return expiry;
   }
+}
+
+// Marks the exact candle the call opened in (and closed in, if it's done) on
+// the UNDERLYING's own price chart. Entry/target/stop are option-PREMIUM
+// levels, not underlying price levels, so they're deliberately not drawn as
+// horizontal lines here (that would put ₹3.50 premium lines on a ₹280
+// futures-price scale) -- this chart exists purely to let a person visually
+// re-check what the underlying was actually doing at and after the moment
+// this call fired, same market data the engines themselves scanned.
+function callChartMarkers(entry: TradeLogEntry): ChartMarkerSpec[] {
+  const bullish = entry.optSide === "CE";
+  const out: ChartMarkerSpec[] = [
+    {
+      timeMs: entry.openedAt,
+      color: bullish ? "#16a34a" : "#dc2626",
+      shape: bullish ? "arrowUp" : "arrowDown",
+      text: `CALL ₹${entry.entry}`,
+      position: bullish ? "belowBar" : "aboveBar",
+    },
+  ];
+  if (entry.closed && entry.closedAt !== null) {
+    out.push({ timeMs: entry.closedAt, color: "#6b7280", shape: "circle", text: "CLOSED", position: "aboveBar" });
+  }
+  return out;
+}
+
+function CallChart({ candles, entry, loading }: { candles: Candle[]; entry: TradeLogEntry; loading: boolean }) {
+  const markers = useMemo(() => callChartMarkers(entry), [entry]);
+  return (
+    <div>
+      {candles.length > 0 ? (
+        <TradeChart candles={candles} priceLines={[]} markers={markers} height={220} theme="light" />
+      ) : (
+        <p className="text-xs text-[var(--color-muted)] text-center py-6">{loading ? "Loading chart…" : "No chart data available yet."}</p>
+      )}
+      <p className="text-[9px] text-[var(--color-muted)] mt-1.5 px-1">
+        Underlying 15m price action, not the option premium — the marked candle is exactly when this call was called
+        {entry.closed ? " and closed" : ""}. Targets/SL are premium levels (see the numbers above), so they aren't drawn on this price scale.
+      </p>
+    </div>
+  );
 }
 
 export function BestCall() {
@@ -305,6 +348,7 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
   const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
   const biasColor = direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
   const source = entry.meta?.label as BestCallSource | undefined;
+  const { data: candleData, isLoading: candlesLoading } = useCandles(symbol, "15");
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
@@ -367,6 +411,14 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
             </div>
           </div>
         )}
+
+        <div className="mt-4">
+          <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-2 flex items-center gap-1.5">
+            <CandlestickChart size={13} />
+            Chart
+          </p>
+          <CallChart candles={candleData?.candles ?? []} entry={entry} loading={candlesLoading} />
+        </div>
       </div>
     </div>
   );
@@ -449,6 +501,7 @@ function BestCallCard({
   // aren't persisted in meta, so those badges simply hide once best is null.
   const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
   const best = data.best;
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
@@ -625,6 +678,20 @@ function BestCallCard({
       )}
 
       <div className="px-4 pb-4">
+        <button
+          onClick={() => setChartOpen((v) => !v)}
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border mb-2"
+          style={{ background: "var(--color-surface-soft)", borderColor: "var(--color-border)", color: "var(--color-primary)" }}
+        >
+          <CandlestickChart size={14} />
+          View Chart
+          <ChevronDown size={14} className={`transition-transform ${chartOpen ? "rotate-180" : ""}`} />
+        </button>
+        {chartOpen && (
+          <div className="mb-2 rounded-xl p-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+            <CallChart candles={data.underlyingCandles} entry={latest} loading={false} />
+          </div>
+        )}
         <button
           onClick={() => setChatOpen((v) => !v)}
           className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border"
