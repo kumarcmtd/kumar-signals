@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, Lock } from "lucide-react";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, ChevronDown, Lock, MessageCircle } from "lucide-react";
 import { useCreateTrade, usePortfolio } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -448,6 +448,7 @@ function BestCallCard({
   // source/reasons when the live pick has since gone quiet. Confidence/R:R
   // aren't persisted in meta, so those badges simply hide once best is null.
   const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
+  const [chatOpen, setChatOpen] = useState(false);
   const best = data.best;
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
@@ -622,6 +623,62 @@ function BestCallCard({
           Closed: {latest.status.replace(/_/g, " ")}
         </p>
       )}
+
+      <div className="px-4 pb-4">
+        <button
+          onClick={() => setChatOpen((v) => !v)}
+          className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border"
+          style={{ background: "var(--color-surface-soft)", borderColor: "var(--color-border)", color: "var(--color-primary)" }}
+        >
+          <MessageCircle size={14} />
+          Chat about this call
+          <ChevronDown size={14} className={`transition-transform ${chatOpen ? "rotate-180" : ""}`} />
+        </button>
+        {chatOpen && (
+          <div className="mt-2 rounded-xl p-3 space-y-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+            <p className="text-[9px] text-[var(--color-muted)]">Answers below are built from this call's own real numbers — not a free-text chat model.</p>
+            <ChatBubble
+              q="Why was this call made?"
+              a={
+                latest.meta
+                  ? `${latest.meta.label} picked this: ${latest.meta.reasons[0] ?? "multiple confirming factors agreed on this direction."}${
+                      latest.meta.confirmingTimeframes.length ? ` Confirmed by: ${latest.meta.confirmingTimeframes.join(", ")}.` : ""
+                    }`
+                  : "This call was opened before detailed reasoning capture shipped, so the original notes weren't saved for it — only the numbers below are available."
+              }
+            />
+            <ChatBubble
+              q="What's happening right now?"
+              a={
+                latest.closed
+                  ? `Closed: ${latest.status.replace(/_/g, " ")} at ₹${exitPriceFor(latest)}, ${exitPriceFor(latest) - latest.entry >= 0 ? "a gain" : "a loss"} of ${Math.abs(Number((exitPriceFor(latest) - latest.entry).toFixed(2)))} points from the ₹${latest.entry} entry.`
+                  : `Current premium ₹${liveLtp ?? latest.entry} vs entry ₹${latest.entry} -- ${potential.potentialLeftPercent}% of the move to the next target (₹${nextTarget}) is still left to capture.${
+                      rebound ? ` Rebound check: ${rebound.label} (${rebound.score}% of checks still favor the original direction).` : ""
+                    }`
+              }
+            />
+            <ChatBubble
+              q="What if the target fails?"
+              a={
+                latest.targetsHit[0]
+                  ? `Target 1 was already reached, so the stop has already trailed up to ₹${effStop}${latest.targetsHit[1] ? " (locking the Target 1-2 gain)" : " (breakeven)"} -- it won't wait for the original ₹${latest.stop} anymore.`
+                  : `It hasn't reached Target 1 yet, so the original stop loss ₹${latest.stop} still applies.`
+              }
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChatBubble({ q, a }: { q: string; a: string }) {
+  return (
+    <div>
+      <p className="text-xs font-bold" style={{ color: "var(--color-primary)" }}>
+        {q}
+      </p>
+      <p className="text-[11px] text-[var(--color-muted)] mt-0.5">{a}</p>
     </div>
   );
 }
