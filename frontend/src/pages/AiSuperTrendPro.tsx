@@ -166,7 +166,7 @@ export function AiSuperTrendPro() {
             </details>
           </GlassCard>
 
-          {snapshot.tradeSetup && (openEntry || snapshot.marketStatus === "Strong Buy" || snapshot.marketStatus === "Strong Sell") && (
+          {snapshot.tradeSetup && (
             <GlassCard title={openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"} glow={snapshot.tradeSetup.direction === "bullish" ? "#00E676" : "#FF4D4F"}>
               <TradeSetupBody snapshot={snapshot} openEntry={openEntry} />
             </GlassCard>
