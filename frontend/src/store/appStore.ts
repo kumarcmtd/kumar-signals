@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { InstrumentSymbol } from "../types";
+import type { InstrumentSymbol, Direction } from "../types";
 import type { Decision6 } from "../utils/timeframeEngine";
 
 export type Timeframe = "5" | "15" | "30" | "1D";
@@ -89,6 +89,33 @@ export interface AlertSettings {
 
 const MAX_ALERTS = 200;
 
+// AI SuperTrend Pro's own trade log. Kept separate from TradeLogEntry/
+// tradeLogs above rather than reusing that shape: every other engine in this
+// app trades OPTION PREMIUM off a strike (strike/optSide/3 targets),
+// SuperTrend Pro trades the raw underlying/futures price directly with 5
+// ATR-based targets -- a genuinely different shape, not a variant of the
+// same one. Keyed by "<symbol>-<timeframe>", same rolling-history
+// convention as tradeLogs.
+export type SuperTrendLogStatus = "running" | "sl_hit" | "target5_hit" | "stopped_trailing";
+
+export interface SuperTrendLogEntry {
+  id: string;
+  symbol: InstrumentSymbol;
+  timeframe: string;
+  direction: Direction;
+  entry: number;
+  stop: number;
+  targets: [number, number, number, number, number];
+  targetsHit: [boolean, boolean, boolean, boolean, boolean];
+  confidence: number;
+  status: SuperTrendLogStatus;
+  closed: boolean;
+  openedAt: number;
+  closedAt: number | null;
+}
+
+const MAX_SUPERTREND_HISTORY = 100;
+
 interface AppState {
   selectedInstrument: InstrumentSymbol;
   setSelectedInstrument: (symbol: InstrumentSymbol) => void;
@@ -121,6 +148,9 @@ interface AppState {
   alertSettings: AlertSettings;
   setAlertSettings: (patch: Partial<AlertSettings>) => void;
   setAlertSources: (patch: Partial<AlertSettings["sources"]>) => void;
+
+  superTrendLogs: Record<string, SuperTrendLogEntry[]>;
+  setSuperTrendLog: (key: string, entries: SuperTrendLogEntry[]) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -163,6 +193,15 @@ export const useAppStore = create<AppState>()(
       },
       setAlertSettings: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, ...patch } })),
       setAlertSources: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, sources: { ...s.alertSettings.sources, ...patch } } })),
+
+      superTrendLogs: {},
+      setSuperTrendLog: (key, entries) =>
+        set((s) => ({
+          superTrendLogs: {
+            ...s.superTrendLogs,
+            [key]: entries.length > MAX_SUPERTREND_HISTORY ? entries.slice(entries.length - MAX_SUPERTREND_HISTORY) : entries,
+          },
+        })),
     }),
     {
       name: "kumar-signals-pro-store",

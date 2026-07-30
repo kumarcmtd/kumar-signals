@@ -21,6 +21,7 @@ import { Settings } from "./pages/Settings";
 import { AiLearn } from "./pages/AiLearn";
 import { BestCall } from "./pages/BestCall";
 import { AiRisk } from "./pages/AiRisk";
+import { AiSuperTrendPro } from "./pages/AiSuperTrendPro";
 
 function App() {
   return (
@@ -48,6 +49,7 @@ function App() {
           <Route path="/ai-learn" element={<AiLearn />} />
           <Route path="/best-call" element={<BestCall />} />
           <Route path="/ai-risk" element={<AiRisk />} />
+          <Route path="/ai-supertrend-pro" element={<AiSuperTrendPro />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>
