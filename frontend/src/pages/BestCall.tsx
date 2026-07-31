@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, ChevronDown, Lock, MessageCircle, CandlestickChart } from "lucide-react";
+import { Copy, Info, ShieldCheck, TrendingUp, TrendingDown, X, ChevronRight, ChevronDown, Lock, MessageCircle, CandlestickChart, Wallet } from "lucide-react";
 import { useCreateTrade, usePortfolio, useCandles } from "../api/hooks";
 import { useBestCallForSymbol, type TradableSymbol } from "../hooks/useBestCall";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -422,6 +422,7 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
 
         <div className="mt-4 -mx-5">
           <PriceScale entry={entry} current={entry.closed ? exit : null} />
+          <ProfitEstimate trade={entry} current={entry.closed ? exit : null} lotSize={LOT_SIZE[symbol]} />
         </div>
 
         {entry.meta?.reasons && entry.meta.reasons.length > 0 && (
@@ -594,6 +595,89 @@ function ScaleLegendItem({ color, label, value }: { color: string; label: string
       <span className="text-[var(--color-muted)]">{label}</span>
       <span>₹{value.toFixed(2)}</span>
     </span>
+  );
+}
+
+const INR = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const PRESET_AMOUNTS = [50000, 100000, 200000, 500000];
+
+// "If I put ~1 lakh into this, what am I actually sitting on right now" --
+// the numbers everywhere else on the card are all in premium points, which
+// don't by themselves say whether the live move is worth booking. Options
+// only trade in whole lots, so this rounds DOWN to however many whole lots
+// the amount actually buys (never fabricates a fractional lot), then prices
+// that exact position at entry vs at the current/exit premium.
+function ProfitEstimate({ trade, current, lotSize }: { trade: TradeLogEntry; current: number | null; lotSize: number }) {
+  const [amount, setAmount] = useState(100000);
+  if (current === null) return null;
+
+  const costPerLot = trade.entry * lotSize;
+  const lots = Math.floor(amount / costPerLot);
+  const pnlPct = Number((((current - trade.entry) / trade.entry) * 100).toFixed(2));
+  const inProfit = current >= trade.entry;
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-2.5 flex items-center gap-1.5">
+        <Wallet size={12} />
+        {trade.closed ? "What that investment would have made" : "What that investment is worth right now"}
+      </p>
+
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className="text-xs text-[var(--color-muted)]">₹</span>
+        <input
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(Math.max(0, Number(e.target.value) || 0))}
+          className="flex-1 min-w-0 rounded-lg px-2.5 py-1.5 text-sm font-bold border"
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
+        />
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {PRESET_AMOUNTS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setAmount(p)}
+            className="text-[10px] px-2 py-1 rounded-full font-bold"
+            style={amount === p ? { background: "var(--color-primary)", color: "#fff" } : { background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+          >
+            ₹{INR(p)}
+          </button>
+        ))}
+      </div>
+
+      {lots < 1 ? (
+        <p className="text-xs text-[var(--color-muted)]">
+          ₹{INR(amount)} isn't enough for even 1 lot at this entry — 1 lot of this call needs ₹{INR(costPerLot)} ({lotSize} qty × ₹{trade.entry}).
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] text-[var(--color-muted)] mb-2">
+            Buys {lots} lot{lots > 1 ? "s" : ""} ({lots * lotSize} qty) for ₹{INR(lots * costPerLot)} at the ₹{trade.entry} entry.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
+              <p className="text-[9px] text-[var(--color-muted)]">Invested</p>
+              <p className="text-xs font-bold">₹{INR(lots * costPerLot)}</p>
+            </div>
+            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
+              <p className="text-[9px] text-[var(--color-muted)]">{trade.closed ? "Exit value" : "Worth now"}</p>
+              <p className="text-xs font-bold">₹{INR(lots * current * lotSize)}</p>
+            </div>
+          </div>
+          <div className="mt-2 rounded-lg px-2.5 py-2 text-center" style={{ background: inProfit ? "#DCFCE7" : "#FEE2E2" }}>
+            <p className="text-lg font-black" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
+              {inProfit ? "+" : ""}
+              ₹{INR(lots * (current - trade.entry) * lotSize)}
+            </p>
+            <p className="text-[10px] font-semibold" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
+              {inProfit ? "+" : ""}
+              {pnlPct}% {trade.closed ? "at exit" : "right now"}
+            </p>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -786,6 +870,7 @@ function BestCallCard({
         </span>
       </div>
       <PriceScale entry={latest} current={latest.closed ? null : liveLtp} />
+      <ProfitEstimate trade={latest} current={latest.closed ? null : liveLtp} lotSize={LOT_SIZE[symbol]} />
       {rebound && <ReboundStrengthCard rebound={rebound} />}
       {!latest.closed && (
         <div className="px-4 pb-3 flex items-center justify-between gap-2">
