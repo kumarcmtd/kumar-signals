@@ -420,6 +420,10 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
           />
         </div>
 
+        <div className="mt-4 -mx-5">
+          <PriceScale entry={entry} current={entry.closed ? exit : null} />
+        </div>
+
         {entry.meta?.reasons && entry.meta.reasons.length > 0 && (
           <div className="mt-4">
             <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-2">Why this call</p>
@@ -497,6 +501,75 @@ function ReboundStrengthCard({ rebound }: { rebound: ReturnType<typeof checkRebo
         ))}
       </div>
     </div>
+  );
+}
+
+// Answers "how close did this actually get before pulling back?" -- a
+// question targetsHit/targetTouches can't, since those only fire at the
+// exact target price. SL and Entry are frozen the moment the call opens
+// (red/blue, never move); Peak is the highest live premium ever seen on
+// this entry (green, only ever moves up, freezes once the trade closes);
+// Now is wherever the live premium sits this instant (amber, only shown
+// when the trade's still running and there's somewhere for it to differ
+// from Peak).
+function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number | null }) {
+  const peak = Math.max(entry.highWaterMark ?? entry.entry, current ?? entry.entry, entry.entry);
+  const values = [entry.stop, entry.entry, ...entry.targets, peak, ...(current !== null && current !== undefined ? [current] : [])];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const pct = (v: number) => Math.min(100, Math.max(0, ((v - min) / span) * 100));
+  const showNow = current !== null && current !== undefined;
+  const showPeak = peak > entry.entry + Math.max(0.01, entry.entry * 0.001);
+  const pulledBack = showNow && showPeak && peak - current! > Math.max(0.01, entry.entry * 0.003);
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-4">Price Scale</p>
+      <div className="relative h-2.5 rounded-full mx-2.5" style={{ background: "linear-gradient(90deg,#FCA5A5,#FDE68A,#86EFAC)" }}>
+        {entry.targets.map((t, i) => (
+          <div
+            key={i}
+            className="absolute top-1/2 w-[2px] h-3.5 -translate-y-1/2 -translate-x-1/2 bg-white/80 border-x border-[var(--color-border)]"
+            style={{ left: `${pct(t)}%` }}
+          />
+        ))}
+        <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
+        <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
+        {showPeak && <ScaleDot pct={pct(peak)} color="#16A34A" />}
+        {showNow && <ScaleDot pct={pct(current!)} color="#F59E0B" pulse />}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px]">
+        <ScaleLegendItem color="#DC2626" label="SL" value={entry.stop} />
+        <ScaleLegendItem color="#2563EB" label="Entry" value={entry.entry} />
+        {showPeak && <ScaleLegendItem color="#16A34A" label="Peak" value={peak} />}
+        {showNow && <ScaleLegendItem color="#F59E0B" label="Now" value={current!} />}
+      </div>
+      {pulledBack && (
+        <p className="text-[10px] mt-2 text-[var(--color-muted)]">
+          Touched ₹{peak.toFixed(2)} at its best, now back to ₹{current!.toFixed(2)} — pulled back ₹{(peak - current!).toFixed(2)} from the peak.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScaleDot({ pct, color, pulse }: { pct: number; color: string; pulse?: boolean }) {
+  return (
+    <div
+      className={`absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white ${pulse ? "animate-pulse" : ""}`}
+      style={{ left: `${pct}%`, background: color, zIndex: pulse ? 3 : 2, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }}
+    />
+  );
+}
+
+function ScaleLegendItem({ color, label, value }: { color: string; label: string; value: number }) {
+  return (
+    <span className="flex items-center gap-1 font-semibold">
+      <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+      <span className="text-[var(--color-muted)]">{label}</span>
+      <span>₹{value.toFixed(2)}</span>
+    </span>
   );
 }
 
@@ -688,6 +761,7 @@ function BestCallCard({
           {effStop !== latest.stop && <span className="opacity-60"> (was ₹{latest.stop})</span>}
         </span>
       </div>
+      <PriceScale entry={latest} current={latest.closed ? null : liveLtp} />
       {rebound && <ReboundStrengthCard rebound={rebound} />}
       {!latest.closed && (
         <div className="px-4 pb-3 flex items-center justify-between gap-2">

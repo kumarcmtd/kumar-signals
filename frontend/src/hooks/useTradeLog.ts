@@ -74,6 +74,7 @@ export function openNewEntry(proj: ProjLike, now: number, meta?: TradeLogEntry["
     closedAt: null,
     meta,
     decision,
+    highWaterMark: proj.entry,
   };
 }
 
@@ -104,19 +105,23 @@ export function advanceOpenEntry(entry: TradeLogEntry, liveLtp: number | null, n
     entry.targetsHit[2] || aboveNow[2],
   ];
 
+  const priorHigh = entry.highWaterMark ?? entry.entry;
+  const highWaterMark = Math.max(priorHigh, liveLtp);
+  const highChanged = highWaterMark !== priorHigh;
+
   if (targetsHit[2]) {
     if (entry.status === "target3_hit") return entry;
-    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status: "target3_hit", closed: true, closedAt: entry.closedAt ?? now };
+    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status: "target3_hit", closed: true, closedAt: entry.closedAt ?? now };
   }
 
   const effectiveStop = targetsHit[1] ? entry.targets[0] : targetsHit[0] ? entry.entry : entry.stop;
   if (liveLtp <= effectiveStop) {
     const status: TradeLogEntry["status"] = targetsHit[1] ? "stopped_after_t1" : targetsHit[0] ? "stopped_breakeven" : "sl_hit";
-    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status, closed: true, closedAt: now };
+    return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status, closed: true, closedAt: now };
   }
 
-  if (!stateChanged) return entry;
-  return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, status: "running" };
+  if (!stateChanged && !highChanged) return entry;
+  return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status: "running" };
 }
 
 // Pure reducer over one timeframe's trade log: advances the currently open

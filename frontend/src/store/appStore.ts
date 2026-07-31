@@ -52,6 +52,15 @@ export interface TradeLogEntry {
   // as of the last poll -- lets advanceOpenEntry tell a genuine new touch
   // (crossing up from below) apart from "still sitting above from before."
   targetAboveState?: [boolean, boolean, boolean];
+  // Highest live premium seen since this entry opened -- a call can run up
+  // most of the way to a target and pull back WITHOUT ever crossing that
+  // target's exact level, which targetsHit/targetTouches has no way to show
+  // (they only fire at the target price itself). This is the number a price
+  // scale needs to answer "how close did it actually get before pulling
+  // back," independent of whether any target line was crossed. Optional so
+  // entries persisted before this field existed just start tracking from
+  // whatever price is live the next time they're advanced.
+  highWaterMark?: number;
 }
 
 // One line per fired alert, newest first. The engine that produces these
