@@ -525,19 +525,43 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
 
   return (
     <div className="mx-4 mb-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
-      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-4">Price Scale</p>
-      <div className="relative h-2.5 rounded-full mx-2.5" style={{ background: "linear-gradient(90deg,#FCA5A5,#FDE68A,#86EFAC)" }}>
-        {entry.targets.map((t, i) => (
-          <div
-            key={i}
-            className="absolute top-1/2 w-[2px] h-3.5 -translate-y-1/2 -translate-x-1/2 bg-white/80 border-x border-[var(--color-border)]"
-            style={{ left: `${pct(t)}%` }}
-          />
-        ))}
-        <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
-        <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
-        {showPeak && <ScaleDot pct={pct(peak)} color="#16A34A" />}
-        {showNow && <ScaleDot pct={pct(current!)} color="#F59E0B" pulse />}
+      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-1">Price Scale</p>
+      <div className="mx-2.5">
+        {/* Target labels sit in their own row above the bar -- 🎯1/🎯2/🎯3 at
+            the exact same horizontal position their tick mark has below. */}
+        <div className="relative h-4">
+          {entry.targets.map((t, i) => (
+            <span key={i} className="absolute -translate-x-1/2 text-[10px] font-bold whitespace-nowrap" style={{ left: `${pct(t)}%`, color: "var(--color-muted)" }}>
+              🎯{i + 1}
+            </span>
+          ))}
+        </div>
+        {/* The live price floats ABOVE the bar with a blinking ring, on its
+            own row, so it never visually merges with the Peak dot sitting
+            on the bar right below it (they're often the exact same spot). */}
+        {showNow && (
+          <div className="relative h-6">
+            <div className="absolute -translate-x-1/2 flex flex-col items-center" style={{ left: `${pct(current!)}%` }}>
+              <span className="relative flex items-center justify-center w-4 h-4">
+                <span className="absolute inline-flex w-full h-full rounded-full animate-ping" style={{ background: "#F59E0B", opacity: 0.6 }} />
+                <span className="relative inline-flex w-2.5 h-2.5 rounded-full border-2 border-white" style={{ background: "#F59E0B", boxShadow: "0 1px 3px rgba(0,0,0,.3)" }} />
+              </span>
+              <span className="w-[2px] h-2" style={{ background: "#F59E0B" }} />
+            </div>
+          </div>
+        )}
+        <div className="relative h-2.5 rounded-full" style={{ background: "linear-gradient(90deg,#FCA5A5,#FDE68A,#86EFAC)" }}>
+          {entry.targets.map((t, i) => (
+            <div
+              key={i}
+              className="absolute top-1/2 w-[2px] h-3.5 -translate-y-1/2 -translate-x-1/2 bg-white/80 border-x border-[var(--color-border)]"
+              style={{ left: `${pct(t)}%` }}
+            />
+          ))}
+          <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
+          <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
+          {showPeak && <ScaleDot pct={pct(peak)} color="#16A34A" />}
+        </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px]">
         <ScaleLegendItem color="#DC2626" label="SL" value={entry.stop} />
@@ -554,11 +578,11 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
   );
 }
 
-function ScaleDot({ pct, color, pulse }: { pct: number; color: string; pulse?: boolean }) {
+function ScaleDot({ pct, color }: { pct: number; color: string }) {
   return (
     <div
-      className={`absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white ${pulse ? "animate-pulse" : ""}`}
-      style={{ left: `${pct}%`, background: color, zIndex: pulse ? 3 : 2, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }}
+      className="absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white"
+      style={{ left: `${pct}%`, background: color, zIndex: 2, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }}
     />
   );
 }
