@@ -25,7 +25,24 @@ function mergeEntryLists(local: TradeLogEntry[], server: TradeLogEntry[]): Trade
     const existing = byId.get(e.id);
     if (!existing || !existing.closed || e.closed) byId.set(e.id, e);
   }
-  const merged = Array.from(byId.values()).sort((a, b) => a.openedAt - b.openedAt);
+  let merged = Array.from(byId.values()).sort((a, b) => a.openedAt - b.openedAt);
+
+  // Two independent clients sharing this one login-less trade log (two tabs,
+  // phone + PWA, or just two visitors) can each detect the same qualifying
+  // signal before either has seen the other's write, opening their own entry
+  // with a different id for what's really one real-world signal. Every page
+  // that reads this log assumes at most one currently-open entry per key
+  // (the whole premise of "single highest-confidence pick per instrument"),
+  // so collapse any extra concurrently-open entries down to the single
+  // earliest one and drop the rest -- they're duplicate detections, not
+  // separate trades, so counting them as real closed trades later would
+  // corrupt the accuracy/track-record stats.
+  const openEntries = merged.filter((e) => !e.closed);
+  if (openEntries.length > 1) {
+    const keepId = openEntries.reduce((earliest, e) => (e.openedAt < earliest.openedAt ? e : earliest)).id;
+    merged = merged.filter((e) => e.closed || e.id === keepId);
+  }
+
   return merged.length > MAX_HISTORY ? merged.slice(merged.length - MAX_HISTORY) : merged;
 }
 
