@@ -561,7 +561,7 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
           ))}
           <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
           <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
-          {showPeak && <ScaleDot pct={pct(peak)} color="#CA8A04" />}
+          {showPeak && <ScaleDot pct={pct(peak)} color="#CA8A04" label="M" />}
         </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px]">
@@ -579,12 +579,25 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
   );
 }
 
-function ScaleDot({ pct, color }: { pct: number; color: string }) {
+function ScaleDot({ pct, color, label }: { pct: number; color: string; label?: string }) {
   return (
     <div
-      className="absolute top-1/2 w-3.5 h-3.5 rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white"
-      style={{ left: `${pct}%`, background: color, zIndex: 2, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }}
-    />
+      className="absolute top-1/2 flex items-center justify-center rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white"
+      style={{
+        left: `${pct}%`,
+        background: color,
+        zIndex: 2,
+        boxShadow: "0 1px 3px rgba(0,0,0,.25)",
+        width: label ? 16 : 14,
+        height: label ? 16 : 14,
+      }}
+    >
+      {label && (
+        <span className="text-[8px] font-black leading-none text-white" style={{ textShadow: "0 1px 1px rgba(0,0,0,.35)" }}>
+          {label}
+        </span>
+      )}
+    </div>
   );
 }
 
