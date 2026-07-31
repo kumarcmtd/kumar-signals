@@ -11,6 +11,7 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
 import { checkReboundStrength, type ReboundTier } from "../utils/reboundStrength";
+import { checkVolumeSupport, type VolumeSupportTier } from "../utils/volumeSupport";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
@@ -475,6 +476,36 @@ const REBOUND_STYLE: Record<ReboundTier, { bg: string; border: string; text: str
   weak: { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C" },
 };
 
+const VOLUME_STYLE: Record<VolumeSupportTier, { bg: string; border: string; text: string }> = {
+  strong: { bg: "#DCFCE7", border: "#86EFAC", text: "#15803D" },
+  moderate: { bg: "#FEF3C7", border: "#FCD34D", text: "#B45309" },
+  weak: { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C" },
+};
+
+// Always shown (unlike Rebound Strength, which only fires when underwater) --
+// answers "is real buying/selling actually behind this move" every time the
+// card is open, since that question matters whether the trade is comfortably
+// in profit or not.
+function VolumeSupportCard({ volume }: { volume: ReturnType<typeof checkVolumeSupport> }) {
+  if (!volume) return null;
+  const style = VOLUME_STYLE[volume.tier];
+  return (
+    <div className="mx-4 mb-3 rounded-xl px-3 py-2.5" style={{ background: style.bg, border: `1px solid ${style.border}` }}>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-black" style={{ color: style.text }}>
+          {volume.label}
+        </p>
+        <p className="text-[10px] font-bold" style={{ color: style.text }}>
+          {volume.bias}x
+        </p>
+      </div>
+      <p className="text-[10px] mt-1" style={{ color: style.text, opacity: 0.85 }}>
+        {volume.note}
+      </p>
+    </div>
+  );
+}
+
 
 // Shown only when the trade is currently underwater (premium between entry
 // and stop) but hasn't been stopped out -- re-reads the underlying's own
@@ -775,6 +806,7 @@ function BestCallCard({
   // call's own original direction rather than leaving it a guess.
   const inBetween = !latest.closed && liveLtp !== null && liveLtp < latest.entry && liveLtp > effStop;
   const rebound = inBetween ? checkReboundStrength(data.underlyingCandles, direction) : null;
+  const volumeSupport = !latest.closed ? checkVolumeSupport(data.underlyingCandles, direction) : null;
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
   const legFloor = latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry;
   const potential = calculatePotentialLeft(latest.entry, latest.stop, nextTarget, liveLtp ?? latest.entry);
@@ -903,6 +935,7 @@ function BestCallCard({
       <PriceScale entry={latest} current={latest.closed ? null : liveLtp} />
       <ProfitEstimate trade={latest} current={latest.closed ? null : liveLtp} lotSize={LOT_SIZE[symbol]} />
       {rebound && <ReboundStrengthCard rebound={rebound} />}
+      <VolumeSupportCard volume={volumeSupport} />
       {!latest.closed && (
         <div className="px-4 pb-3 flex items-center justify-between gap-2">
           <p className="text-[10px] text-[var(--color-muted)]">Next target ₹{nextTarget}</p>
