@@ -11,6 +11,7 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
 import { checkReboundStrength, type ReboundTier } from "../utils/reboundStrength";
+import { evaluateEntryTiming, type EntryTimingTier } from "../utils/entryTiming";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
 import type { Candle } from "../types";
 
@@ -473,6 +474,34 @@ const REBOUND_STYLE: Record<ReboundTier, { bg: string; border: string; text: str
   weak: { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C" },
 };
 
+const ENTRY_TIMING_STYLE: Record<EntryTimingTier, { bg: string; text: string }> = {
+  excellent: { bg: "#DCFCE7", text: "#15803D" },
+  good: { bg: "#DCFCE7", text: "#15803D" },
+  fair: { bg: "#FEF3C7", text: "#B45309" },
+  late: { bg: "#FEE2E2", text: "#B91C1C" },
+  past_target: { bg: "#FEE2E2", text: "#B91C1C" },
+  underwater: { bg: "#FEF3C7", text: "#B45309" },
+  past_stop: { bg: "#FEE2E2", text: "#B91C1C" },
+};
+
+// Answers "should I enter at THIS price, right now" -- distinct from every
+// other number on the card, which describes the call itself, not whether
+// this particular moment is a good time to act on it. Placed right under
+// Current Premium since that's the number this verdict is actually about.
+function EntryTimingBadge({ verdict }: { verdict: ReturnType<typeof evaluateEntryTiming> }) {
+  const style = ENTRY_TIMING_STYLE[verdict.tier];
+  return (
+    <div className="mt-1 rounded-lg px-2 py-1.5 max-w-[160px]" style={{ background: style.bg }}>
+      <p className="text-[10px] font-black leading-tight" style={{ color: style.text }}>
+        {verdict.label}
+      </p>
+      <p className="text-[9px] leading-snug mt-0.5" style={{ color: style.text, opacity: 0.85 }}>
+        {verdict.note}
+      </p>
+    </div>
+  );
+}
+
 // Shown only when the trade is currently underwater (premium between entry
 // and stop) but hasn't been stopped out -- re-reads the underlying's own
 // current indicators against the call's original direction so "does this
@@ -773,7 +802,9 @@ function BestCallCard({
   const inBetween = !latest.closed && liveLtp !== null && liveLtp < latest.entry && liveLtp > effStop;
   const rebound = inBetween ? checkReboundStrength(data.underlyingCandles, direction) : null;
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
+  const legFloor = latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry;
   const potential = calculatePotentialLeft(latest.entry, latest.stop, nextTarget, liveLtp ?? latest.entry);
+  const entryTiming = !latest.closed && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
   const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
   const biasColor = direction === "bullish" ? "var(--color-buy)" : "var(--color-sell)";
 
@@ -813,6 +844,7 @@ function BestCallCard({
             ₹{liveLtp ?? latest.entry}
           </p>
           <p className="text-[10px] text-[var(--color-muted)]">Current premium</p>
+          {entryTiming && <EntryTimingBadge verdict={entryTiming} />}
         </div>
       </div>
 
