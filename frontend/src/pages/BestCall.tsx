@@ -559,8 +559,8 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
               style={{ left: `${pct(t)}%` }}
             />
           ))}
-          <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
-          <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
+          <ScaleDot pct={pct(entry.stop)} color="#DC2626" label="SL" />
+          <ScaleDot pct={pct(entry.entry)} color="#2563EB" label="B" />
           {showPeak && <ScaleDot pct={pct(peak)} color="#CA8A04" label="M" />}
         </div>
       </div>
@@ -580,6 +580,7 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
 }
 
 function ScaleDot({ pct, color, label }: { pct: number; color: string; label?: string }) {
+  const wide = (label?.length ?? 0) > 1;
   return (
     <div
       className="absolute top-1/2 flex items-center justify-center rounded-full -translate-y-1/2 -translate-x-1/2 border-2 border-white"
@@ -588,12 +589,12 @@ function ScaleDot({ pct, color, label }: { pct: number; color: string; label?: s
         background: color,
         zIndex: 2,
         boxShadow: "0 1px 3px rgba(0,0,0,.25)",
-        width: label ? 16 : 14,
+        width: wide ? 22 : label ? 16 : 14,
         height: label ? 16 : 14,
       }}
     >
       {label && (
-        <span className="text-[8px] font-black leading-none text-white" style={{ textShadow: "0 1px 1px rgba(0,0,0,.35)" }}>
+        <span className="text-[7px] font-black leading-none text-white whitespace-nowrap" style={{ textShadow: "0 1px 1px rgba(0,0,0,.35)" }}>
           {label}
         </span>
       )}
