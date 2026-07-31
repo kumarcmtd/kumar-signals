@@ -794,7 +794,7 @@ function BestCallCard({
   });
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-hidden" style={{ border: `2px solid ${SOURCE_COLOR[source]}` }}>
       <div className="flex items-center justify-between px-4 pt-3.5 text-[11px] text-[var(--color-muted)]">
         <span>
           Created on: {new Date(latest.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).toUpperCase()} at ₹{latest.entry}
