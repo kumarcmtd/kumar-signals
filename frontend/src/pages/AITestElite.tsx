@@ -10,6 +10,8 @@ import { findEliteSignal } from "../utils/eliteSignal";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { CircularGauge } from "../components/CircularGauge";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
@@ -342,6 +344,8 @@ function EliteCard({
   const rl = riskLabel(elite.analysis.categories?.volatility.score ?? 50);
   const nextTarget = latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0];
   const effStop = effectiveStopFor(latest);
+  const legFloor = latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry;
+  const entryTiming = liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
 
   return (
     <GlassCard glow={elite.analysis.bias === "bullish" ? "#00E676" : "#FF4D4F"}>
@@ -437,6 +441,7 @@ function EliteCard({
           {liveLtp !== null && (
             <p className="text-[10px] text-[#9AA4B2] mt-2">Current premium: ₹{liveLtp}</p>
           )}
+          {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="dark" className="mt-2" />}
           <button
             onClick={() => setChatKey(chatOpen ? null : trackingKey)}
             className="w-full flex items-center justify-center gap-1.5 mt-3 py-2.5 rounded-xl text-xs font-bold border"

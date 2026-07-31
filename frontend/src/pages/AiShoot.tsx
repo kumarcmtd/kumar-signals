@@ -6,6 +6,8 @@ import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog"
 import { useHitScoreSuite } from "../hooks/useHitScoreSuite";
 import { scanForHitScoreCalls, HIT_SCORE_MIN, type HitScoreCandidate } from "../utils/hitScoreEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
@@ -74,6 +76,9 @@ function hitScoreColor(score: number): string {
 function ShootTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
   const effStop = effectiveStopFor(entry);
+  const nextTarget = entry.targetsHit[1] ? entry.targets[2] : entry.targetsHit[0] ? entry.targets[1] : entry.targets[0];
+  const legFloor = entry.targetsHit[1] ? entry.targets[1] : entry.targetsHit[0] ? entry.targets[0] : entry.entry;
+  const entryTiming = !dulled && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
   return (
     <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-50 bg-slate-50 border-slate-200" : "bg-white border-slate-200"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -102,6 +107,7 @@ function ShootTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: 
         </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-slate-400 mt-1">Current premium: ₹{liveLtp}</p>}
+      {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="light" className="mt-1.5" />}
     </div>
   );
 }
@@ -123,6 +129,12 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
   const latest = log[log.length - 1];
   const openTrade = latest && !latest.closed ? latest : undefined;
   const liveLtp = openTrade ? liveLtpFor(options, openTrade.strike, openTrade.optSide) : null;
+  const heroNextTarget = latest ? (latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0]) : null;
+  const heroLegFloor = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : null;
+  const heroEntryTiming =
+    liveLtp !== null && heroNextTarget !== null && heroLegFloor !== null && latest
+      ? evaluateEntryTiming(heroLegFloor, heroNextTarget, effectiveStopFor(latest), liveLtp)
+      : null;
 
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
@@ -158,6 +170,7 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
           <MiniStat label="Target 3" value={latest ? `₹${latest.targets[2]}` : "—"} color="#10B981" />
           <MiniStat label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#0EA5E9" />
         </div>
+        {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="light" />}
 
         <div className="space-y-1.5">
           <p className="text-[10px] font-bold uppercase text-slate-400">Why this made the cut</p>

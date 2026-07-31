@@ -5,6 +5,8 @@ import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog"
 import { useDirectionalGateSuite, type GateTimeframeResult } from "../hooks/useDirectionalGateSuite";
 import { projectGatePremium, type GateDirection, type GatePremiumProjection } from "../utils/directionalGateEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 
@@ -54,6 +56,9 @@ function pseudoAnalysisFor(r: GateTimeframeResult, optSide: "CE" | "PE", directi
 function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
   const dulled = entry.closed;
   const effStop = effectiveStopFor(entry);
+  const nextTarget = entry.targetsHit[1] ? entry.targets[2] : entry.targetsHit[0] ? entry.targets[1] : entry.targets[0];
+  const legFloor = entry.targetsHit[1] ? entry.targets[1] : entry.targetsHit[0] ? entry.targets[0] : entry.entry;
+  const entryTiming = !dulled && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
   return (
     <div className={`rounded-lg border px-2.5 py-2 transition-opacity ${dulled ? "opacity-40 bg-white/[0.02] border-white/5" : "bg-white/5 border-white/10"}`}>
       <div className="flex items-center justify-between gap-2">
@@ -76,6 +81,7 @@ function TradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: numbe
         </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
+      {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="dark" className="mt-1.5" />}
     </div>
   );
 }

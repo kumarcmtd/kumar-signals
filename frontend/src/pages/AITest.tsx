@@ -11,6 +11,8 @@ import { summarizeTradeLogsByDay, rankSignalsByWinRate } from "../utils/tradeLog
 import { exitPriceFor } from "../utils/tradeLogPnl";
 import { formatTipCard } from "../utils/tipFormat";
 import { RefreshBar } from "../components/RefreshBar";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
@@ -610,6 +612,9 @@ function fmtLogTime(ms: number): string {
 function TradeLogLine({ entry, liveLtp, onOpen }: { entry: TradeLogEntry; liveLtp: number | null; onOpen: () => void }) {
   const dulled = entry.closed;
   const effStop = effectiveStopFor(entry);
+  const nextTarget = entry.targetsHit[1] ? entry.targets[2] : entry.targetsHit[0] ? entry.targets[1] : entry.targets[0];
+  const legFloor = entry.targetsHit[1] ? entry.targets[1] : entry.targetsHit[0] ? entry.targets[0] : entry.entry;
+  const entryTiming = !dulled && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
   return (
     <button
       onClick={onOpen}
@@ -638,6 +643,7 @@ function TradeLogLine({ entry, liveLtp, onOpen }: { entry: TradeLogEntry; liveLt
         </span>
       </div>
       {!dulled && liveLtp !== null && <p className="text-[10px] text-white/40 mt-1">Current premium: ₹{liveLtp}</p>}
+      {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="dark" className="mt-1.5" />}
     </button>
   );
 }

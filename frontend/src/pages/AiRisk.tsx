@@ -9,6 +9,8 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { formatTipCard } from "../utils/tipFormat";
 import type { Decision6 } from "../utils/timeframeEngine";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -340,6 +342,24 @@ function CandidateCard({
   const biasColor = bullish ? "var(--color-buy)" : "var(--color-sell)";
   const liveLtp = latest && !latest.closed ? liveLtpFor(options, latest.strike, latest.optSide) : null;
   const effStop = latest ? effectiveStopFor(latest) : null;
+  const nextTarget = latest
+    ? latest.targetsHit[1]
+      ? latest.targets[2]
+      : latest.targetsHit[0]
+        ? latest.targets[1]
+        : latest.targets[0]
+    : null;
+  const legFloor = latest
+    ? latest.targetsHit[1]
+      ? latest.targets[1]
+      : latest.targetsHit[0]
+        ? latest.targets[0]
+        : latest.entry
+    : null;
+  const entryTiming =
+    liveLtp !== null && nextTarget !== null && legFloor !== null && effStop !== null
+      ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp)
+      : null;
 
   const tip =
     latest &&
@@ -409,6 +429,8 @@ function CandidateCard({
             {latest.closed && <span className="ml-auto font-bold">{latest.status.replace(/_/g, " ")}</span>}
           </div>
         )}
+
+        {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="light" />}
 
         {tip && (
           <button

@@ -12,6 +12,8 @@ import { flattenClosedTrades, computePerformanceStats } from "../utils/tradeLogP
 import { computeIndicatorSnapshot, cci } from "../utils/indicators";
 import { formatTipCard } from "../utils/tipFormat";
 import { CircularGauge } from "../components/CircularGauge";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
+import { evaluateEntryTiming } from "../utils/entryTiming";
 import { TradeChart } from "../components/TradeChart";
 import { TradingViewWidget } from "../components/TradingViewWidget";
 import { Link } from "react-router-dom";
@@ -172,6 +174,12 @@ export function AITestPro() {
   const heroEntry = heroLog[heroLog.length - 1];
   const heroLive = heroEntry ? liveLtpFor(hero!.options, heroEntry.strike, heroEntry.optSide) : null;
   const heroEffStop = heroEntry ? effectiveStopFor(heroEntry) : null;
+  const heroNextTarget = heroEntry ? (heroEntry.targetsHit[1] ? heroEntry.targets[2] : heroEntry.targetsHit[0] ? heroEntry.targets[1] : heroEntry.targets[0]) : null;
+  const heroLegFloor = heroEntry ? (heroEntry.targetsHit[1] ? heroEntry.targets[1] : heroEntry.targetsHit[0] ? heroEntry.targets[0] : heroEntry.entry) : null;
+  const heroEntryTiming =
+    heroLive !== null && heroNextTarget !== null && heroLegFloor !== null && heroEffStop !== null
+      ? evaluateEntryTiming(heroLegFloor, heroNextTarget, heroEffStop, heroLive)
+      : null;
 
   const priceCard = prices?.find((p) => p.symbol === symbol);
   const c15 = useCandles(symbol, "15");
@@ -355,6 +363,7 @@ export function AITestPro() {
                   <ProgressTrack entry={heroEntry.entry} stop={heroEffStop ?? heroEntry.stop} target={heroEntry.targets[0]} current={heroLive} />
                 </div>
               )}
+              {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="dark" className="mt-2" />}
             </div>
           </div>
         )}

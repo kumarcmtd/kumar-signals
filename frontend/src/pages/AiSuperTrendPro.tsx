@@ -9,6 +9,8 @@ import { TradingViewWidget } from "../components/TradingViewWidget";
 import type { TradableSymbol } from "../hooks/useBestCall";
 import { TIMEFRAME_OPTIONS, effectiveStopForSetup, type MarketStatusLabel, type RiskLevel, type VolatilityLevel } from "../utils/superTrendProEngine";
 import { flattenClosedSuperTrend, computeSuperTrendPerformance, exitPriceForSuperTrend } from "../utils/superTrendProStats";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -325,6 +327,14 @@ function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnT
   const trailingStop = openEntry ? effectiveStopForSetup({ entry, targets, stopLoss: stop }, targetsHit) : setup.trailingStop;
   const rr = Math.abs(targets[0] - entry) / Math.abs(entry - stop);
 
+  const direction = openEntry?.direction ?? setup.direction;
+  const dirSign = direction === "bullish" ? 1 : -1;
+  const legIdx = targetsHit.findIndex((hit) => !hit);
+  const nextTargetIdx = legIdx === -1 ? targets.length - 1 : legIdx;
+  const nextTarget = targets[nextTargetIdx];
+  const legFloor = nextTargetIdx === 0 ? entry : targets[nextTargetIdx - 1];
+  const entryTiming = evaluateEntryTiming(dirSign * legFloor, dirSign * nextTarget, dirSign * trailingStop, dirSign * snapshot.lastPrice);
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-2 mb-3">
@@ -348,6 +358,7 @@ function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnT
           </span>
         ))}
       </div>
+      <EntryTimingBadge verdict={entryTiming} theme="dark" className="mt-2.5" />
       {!openEntry && (
         <p className="text-[10px] text-[#9AA4B2] mt-2">
           This is a live projection recomputed every poll -- it becomes a tracked trade the moment this reading holds as Strong

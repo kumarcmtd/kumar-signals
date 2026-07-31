@@ -26,6 +26,8 @@ import { useMarketStatus, usePortfolio, useOptionsAnalytics, useKumarAiAnalyze }
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { rankSignalsByWinRate } from "../utils/tradeLogStats";
+import { evaluateEntryTiming } from "../utils/entryTiming";
+import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import { useKumarAISuite, KUMAR_AI_TIMEFRAMES, type KumarAiTimeframeSnapshot, type KumarAiTradableSymbol } from "../hooks/useKumarAISuite";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";
@@ -717,6 +719,17 @@ export function KumarAI() {
           const log = kumarAiTradeLogs[`${kumarAiKeyPrefix(symbol)}-${snap.tf}`] ?? [];
           const openLogEntry = log.length && !log[log.length - 1].closed ? log[log.length - 1] : undefined;
           const openLogLiveLtp = openLogEntry ? liveLtpFor(current.options, openLogEntry.strike, openLogEntry.optSide) : null;
+          // Only meaningful once a specific instance is frozen ("Ask AI Why"
+          // tapped) -- liveProj's own "entry" is just the current live premium
+          // recalculated every poll, so there's no original commitment price
+          // to measure progress against until sig exists.
+          const [sigT1Hit, sigT2Hit] = sig && liveLtp !== null ? sigTargetsHit(sig, liveLtp) : [false, false];
+          const sigNextTarget = sig ? (sigT2Hit ? sig.targets[2] : sigT1Hit ? sig.targets[1] : sig.targets[0]) : null;
+          const sigLegFloor = sig ? (sigT2Hit ? sig.targets[1] : sigT1Hit ? sig.targets[0] : sig.entry) : null;
+          const entryTiming =
+            sig && liveLtp !== null && sigNextTarget !== null && sigLegFloor !== null
+              ? evaluateEntryTiming(sigLegFloor, sigNextTarget, sigEffectiveStop(sig, liveLtp), liveLtp)
+              : null;
 
           return (
             <section key={snap.tf} className="rounded-2xl overflow-hidden backdrop-blur-xl" style={{ background: "var(--ka-card)", border: "1px solid var(--ka-border)" }}>
@@ -779,6 +792,7 @@ export function KumarAI() {
                     <Stat label="Time Generated" value={sig ? new Date(sig.generatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"} />
                     <Stat label="Signal Expiry" value={sig ? fmtCountdown(sig.expiresAt - now) : "—"} />
                   </div>
+                  {entryTiming && <EntryTimingBadge verdict={entryTiming} theme={isDark ? "dark" : "light"} />}
 
                   {/* Trade log -- when this timeframe's call was actually given
                       and, once closed, when it closed and the real result.
@@ -795,7 +809,7 @@ export function KumarAI() {
                         .reverse()
                         .slice(0, 5)
                         .map((entry) => (
-                          <KumarTradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openLogEntry?.id ? openLogLiveLtp : null} />
+                          <KumarTradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openLogEntry?.id ? openLogLiveLtp : null} isDark={isDark} />
                         ))}
                     </div>
                   )}
@@ -978,9 +992,12 @@ export function KumarAI() {
   );
 }
 
-function KumarTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: number | null }) {
+function KumarTradeLogLine({ entry, liveLtp, isDark }: { entry: TradeLogEntry; liveLtp: number | null; isDark: boolean }) {
   const dulled = entry.closed;
   const effStop = effectiveStopFor(entry);
+  const nextTarget = entry.targetsHit[1] ? entry.targets[2] : entry.targetsHit[0] ? entry.targets[1] : entry.targets[0];
+  const legFloor = entry.targetsHit[1] ? entry.targets[1] : entry.targetsHit[0] ? entry.targets[0] : entry.entry;
+  const entryTiming = !dulled && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
   return (
     <div className="rounded-lg px-2.5 py-2 transition-opacity" style={{ opacity: dulled ? 0.6 : 1, background: "var(--ka-card-strong)", border: "1px solid var(--ka-border)" }}>
       <div className="flex items-center justify-between gap-2">
@@ -1011,6 +1028,7 @@ function KumarTradeLogLine({ entry, liveLtp }: { entry: TradeLogEntry; liveLtp: 
           Current premium: ₹{liveLtp}
         </p>
       )}
+      {entryTiming && <EntryTimingBadge verdict={entryTiming} theme={isDark ? "dark" : "light"} className="mt-1.5" />}
     </div>
   );
 }
