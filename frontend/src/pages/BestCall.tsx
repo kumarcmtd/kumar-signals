@@ -561,13 +561,13 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
           ))}
           <ScaleDot pct={pct(entry.stop)} color="#DC2626" />
           <ScaleDot pct={pct(entry.entry)} color="#2563EB" />
-          {showPeak && <ScaleDot pct={pct(peak)} color="#16A34A" />}
+          {showPeak && <ScaleDot pct={pct(peak)} color="#CA8A04" />}
         </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px]">
         <ScaleLegendItem color="#DC2626" label="SL" value={entry.stop} />
         <ScaleLegendItem color="#2563EB" label="Entry" value={entry.entry} />
-        {showPeak && <ScaleLegendItem color="#16A34A" label="Peak" value={peak} />}
+        {showPeak && <ScaleLegendItem color="#CA8A04" label="Peak" value={peak} />}
         {showNow && <ScaleLegendItem color="#F59E0B" label="Now" value={current!} />}
       </div>
       {pulledBack && (
