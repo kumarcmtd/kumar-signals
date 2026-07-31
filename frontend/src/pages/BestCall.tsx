@@ -563,6 +563,17 @@ function PriceScale({ entry, current }: { entry: TradeLogEntry; current?: number
           <ScaleDot pct={pct(entry.entry)} color="#2563EB" label="B" />
           {showPeak && <ScaleDot pct={pct(peak)} color="#CA8A04" label="M" />}
         </div>
+        {/* The peak's own rupee value, right under the M dot -- the legend
+            row below already has it, but this is the number the "M" marker
+            is actually pointing at, so it belongs right next to the dot
+            itself rather than making someone look elsewhere for it. */}
+        {showPeak && (
+          <div className="relative h-4">
+            <span className="absolute -translate-x-1/2 text-[10px] font-black whitespace-nowrap" style={{ left: `${pct(peak)}%`, color: "#CA8A04" }}>
+              ₹{peak.toFixed(2)}
+            </span>
+          </div>
+        )}
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px]">
         <ScaleLegendItem color="#DC2626" label="SL" value={entry.stop} />
