@@ -12,6 +12,7 @@ import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { type BestCallPick, type BestCallSource } from "../utils/bestCallSelector";
 import { checkReboundStrength, type ReboundTier } from "../utils/reboundStrength";
 import { checkVolumeSupport, type VolumeSupportTier } from "../utils/volumeSupport";
+import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
@@ -125,9 +126,27 @@ export function BestCall() {
     for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith("BEST-")) out[k] = v;
     return out;
   }, [tradeLogs]);
-  const realized = useMemo(() => flattenClosedTrades(bestTradeLogsOnly), [bestTradeLogsOnly]);
+  // Two clients sharing this one login-less trade log can each open their
+  // own duplicate entry for the same real signal before syncing -- the sync
+  // merge now drops the loser going forward, but a browser that hasn't
+  // reloaded since can still be holding stale duplicates locally. Re-deriving
+  // the same verdict here means accuracy/track-record are always correct
+  // regardless of reload timing, and Call History can show the user exactly
+  // which entry is the one actually being counted instead of asking them to
+  // trust an invisible background fix.
+  const verifiedIdsByKey = useMemo(() => {
+    const out: Record<string, Set<string>> = {};
+    for (const [k, v] of Object.entries(bestTradeLogsOnly)) out[k] = verifiedEntryIds(v);
+    return out;
+  }, [bestTradeLogsOnly]);
+  const verifiedTradeLogs = useMemo(() => {
+    const out: Record<string, TradeLogEntry[]> = {};
+    for (const [k, v] of Object.entries(bestTradeLogsOnly)) out[k] = v.filter((e) => verifiedIdsByKey[k]?.has(e.id));
+    return out;
+  }, [bestTradeLogsOnly, verifiedIdsByKey]);
+  const realized = useMemo(() => flattenClosedTrades(verifiedTradeLogs), [verifiedTradeLogs]);
   const perf = useMemo(() => computePerformanceStats(realized), [realized]);
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(bestTradeLogsOnly), [bestTradeLogsOnly]);
+  const dayStats = useMemo(() => summarizeTradeLogsByDay(verifiedTradeLogs), [verifiedTradeLogs]);
 
   const bySource = useMemo(() => {
     const sources: BestCallSource[] = ["AI Elite", "Directional Gate", "Kimi Playbook"];
@@ -144,13 +163,13 @@ export function BestCall() {
   // time + price it was called, and (once closed) the exact time + price the
   // target/breakeven/stop rule that closed it actually acted on.
   const allCalls = useMemo(() => {
-    const out: { symbol: TradableSymbol; entry: TradeLogEntry }[] = [];
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry; verified: boolean }[] = [];
     for (const [k, v] of Object.entries(bestTradeLogsOnly)) {
       const symbol = k.replace("BEST-", "") as TradableSymbol;
-      for (const entry of v) out.push({ symbol, entry });
+      for (const entry of v) out.push({ symbol, entry, verified: verifiedIdsByKey[k]?.has(entry.id) ?? true });
     }
     return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
-  }, [bestTradeLogsOnly]);
+  }, [bestTradeLogsOnly, verifiedIdsByKey]);
 
   // A call must keep showing up top for as long as it's still RUNNING, even
   // if this particular poll's fresh re-scan doesn't currently re-detect the
@@ -245,8 +264,8 @@ export function BestCall() {
             whichever target/breakeven/stop rule actually closed it.
           </p>
           <div className="space-y-2">
-            {allCalls.map(({ symbol, entry }) => (
-              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} onOpen={() => setDetail({ symbol, entry })} />
+            {allCalls.map(({ symbol, entry, verified }) => (
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} verified={verified} onOpen={() => setDetail({ symbol, entry })} />
             ))}
           </div>
         </div>
@@ -293,7 +312,7 @@ function fmtWhen(ms: number): string {
   return new Date(ms).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-function CallHistoryRow({ symbol, entry, onOpen }: { symbol: TradableSymbol; entry: TradeLogEntry; onOpen: () => void }) {
+function CallHistoryRow({ symbol, entry, verified, onOpen }: { symbol: TradableSymbol; entry: TradeLogEntry; verified: boolean; onOpen: () => void }) {
   const exit = entry.closed ? exitPriceFor(entry) : null;
   const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
   const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
@@ -301,7 +320,11 @@ function CallHistoryRow({ symbol, entry, onOpen }: { symbol: TradableSymbol; ent
   const effStop = effectiveStopFor(entry);
 
   return (
-    <button onClick={onOpen} className="w-full text-left rounded-xl border border-[var(--color-border)] px-3 py-2.5 active:bg-[var(--color-surface-soft)]">
+    <button
+      onClick={onOpen}
+      className="w-full text-left rounded-xl border px-3 py-2.5 active:bg-[var(--color-surface-soft)]"
+      style={{ borderColor: verified ? "var(--color-border)" : "#FCA5A5", opacity: verified ? 1 : 0.6 }}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs font-bold truncate">
@@ -317,6 +340,15 @@ function CallHistoryRow({ symbol, entry, onOpen }: { symbol: TradableSymbol; ent
               </>
             )}
           </p>
+          {verified ? (
+            <span className="inline-block mt-1 text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ background: "#DCFCE7", color: "#15803D" }}>
+              ✓ Verified
+            </span>
+          ) : (
+            <span className="inline-block mt-1 text-[9px] font-black px-1.5 py-0.5 rounded-full" style={{ background: "#FEE2E2", color: "#B91C1C" }}>
+              Duplicate — excluded from accuracy
+            </span>
+          )}
         </div>
         <div className="text-right shrink-0 flex items-center gap-1">
           <div>

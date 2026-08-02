@@ -1,6 +1,7 @@
 import { useAppStore, type TradeLogEntry } from "./store/appStore";
 import { api } from "./api/client";
 import { MAX_HISTORY } from "./hooks/useTradeLog";
+import { dedupeOverlappingEntries } from "./utils/dedupeTradeLog";
 
 // This app has no login, so trade/signal history has exactly one shared
 // home on the server (same trust level as every other endpoint here) rather
@@ -28,35 +29,6 @@ function mergeEntryLists(local: TradeLogEntry[], server: TradeLogEntry[]): Trade
   const merged = Array.from(byId.values()).sort((a, b) => a.openedAt - b.openedAt);
   const deduped = dedupeOverlappingEntries(merged);
   return deduped.length > MAX_HISTORY ? deduped.slice(deduped.length - MAX_HISTORY) : deduped;
-}
-
-// Two independent clients sharing this one login-less trade log (two tabs,
-// phone + PWA, or just two visitors) can each independently detect the SAME
-// real-world signal within moments of each other and each open their own
-// entry with a different id -- if neither has synced the other's write yet,
-// both entries run to their own close (each reading live premium off its
-// own poll, so possibly slightly different exit price/time), landing as two
-// separate CLOSED rows for one real call by the time they finally merge.
-// A genuine, legitimate re-trigger of the same strike (this trade closes,
-// and the underlying still qualifies so a fresh one opens right away) never
-// overlaps in time -- the new entry's openedAt is always >= the previous
-// entry's closedAt. So for the same strike+side, entries whose
-// [openedAt, closedAt] windows genuinely overlap can only be duplicate
-// detections of one real signal, never two real separate trades -- collapse
-// each such cluster down to the single earliest-opened entry (the true
-// first sighting) and drop the rest, so reports/accuracy only ever count
-// one row per real call -- exactly whichever one actually showed on the
-// card, not every duplicate detection of it.
-function dedupeOverlappingEntries(sorted: TradeLogEntry[]): TradeLogEntry[] {
-  const out: TradeLogEntry[] = [];
-  for (const e of sorted) {
-    const last = out[out.length - 1];
-    const sameLeg = last && last.strike === e.strike && last.optSide === e.optSide;
-    const lastEnd = last ? (last.closed ? (last.closedAt ?? last.openedAt) : Infinity) : -Infinity;
-    if (sameLeg && e.openedAt < lastEnd) continue;
-    out.push(e);
-  }
-  return out;
 }
 
 function mergeTradeLogs(local: Record<string, TradeLogEntry[]>, server: Record<string, TradeLogEntry[]>): Record<string, TradeLogEntry[]> {
