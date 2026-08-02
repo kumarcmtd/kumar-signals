@@ -18,6 +18,58 @@ export interface Env {
   AI: Ai;
 }
 
+// The TradingView widget (frontend/src/components/TradingViewWidget.tsx) is
+// the only third-party origin this app ever loads anything from -- its
+// script dynamically creates its own embed iframe/data connections on
+// whichever tradingview.com subdomain it currently uses internally, which
+// isn't pinned down in their public docs, so this allows the whole domain
+// rather than guessing a specific subdomain and having it silently break.
+// Every other resource (JS bundle, CSS, fonts, images, API calls) is
+// same-origin. Everything below is additive to what Workers Assets already
+// serves, applied to every response this Worker returns.
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self' https://s3.tradingview.com",
+  // React sets color/layout via the inline `style` DOM attribute on
+  // thousands of elements throughout this app -- CSP has no nonce/hash
+  // mechanism for the style="" attribute itself (only for <style> blocks),
+  // so avoiding 'unsafe-inline' here would mean rewriting every dynamic
+  // color in the app into static stylesheet classes, a large UI-risking
+  // change well beyond a headers hardening pass. script-src (the actual
+  // XSS vector) stays fully locked down with no 'unsafe-inline'/'unsafe-eval'.
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: https://*.tradingview.com",
+  "font-src 'self' data:",
+  "connect-src 'self' https://*.tradingview.com wss://*.tradingview.com",
+  "frame-src https://*.tradingview.com",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "upgrade-insecure-requests",
+].join("; ");
+
+const SECURITY_HEADERS: Record<string, string> = {
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), accelerometer=(), gyroscope=(), magnetometer=()",
+  "Content-Security-Policy": CONTENT_SECURITY_POLICY,
+};
+
+// Applied to every response this Worker returns -- API JSON, the SPA's
+// index.html, and every static asset -- so there's exactly one place that
+// defines this app's security posture instead of it depending on every
+// individual route remembering to set headers correctly.
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 const UPSTOX_SEARCH_URL = "https://api.upstox.com/v2/instruments/search";
 const UPSTOX_HIST_URL = "https://api.upstox.com/v2/historical-candle";
 const UPSTOX_INTRADAY_URL = "https://api.upstox.com/v2/historical-candle/intraday";
@@ -1613,39 +1665,6 @@ async function computeKumarAiAnalysis(env: Env, body: KumarAiAnalyzeRequest): Pr
   }
 }
 
-// Temporary diagnostic route: runs the actual production getOptionChain()
-// (contract discovery + market-quote reconstruction, now that /v2/option/chain
-// is confirmed broken for MCX) and returns a compact summary -- row count and
-// a sample ATM-ish row -- so the real result can be eyeballed without
-// re-dumping the entire 100+ strike raw contract list every time.
-async function debugOptionChain(token: string, symbol: Symbol) {
-  const fut = await getNearestFuture(token, symbol);
-  if (!fut) return { error: `No instrument found for ${symbol}` };
-
-  const candles = await getHistoricalCandles(token, fut.instrument_key);
-  const spot = candles && candles.length ? candles[candles.length - 1].close : null;
-
-  const rawExpiries = await getOptionExpiries(token, fut.instrument_key);
-  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot);
-  const chainRes = { chain, error };
-
-  return {
-    symbol,
-    futuresInstrumentKey: fut.instrument_key,
-    futuresTradingSymbol: fut.trading_symbol,
-    futuresExpiry: fut.expiry,
-    rawExpiries,
-    optionFuturesInstrumentKey: optionFut.instrument_key,
-    optionFuturesTradingSymbol: optionFut.trading_symbol,
-    usedFallbackFuture: optionFut.instrument_key !== fut.instrument_key,
-    resolvedOptionExpiry: optionExpiry,
-    spot,
-    error: chainRes.error ?? null,
-    rowCount: chainRes.chain?.length ?? 0,
-    sampleRows: chainRes.chain?.slice(0, 5) ?? [],
-  };
-}
-
 // ---- Best Call background push notifications (ntfy.sh) ----
 // A Cron Trigger (see wrangler.jsonc) calls runBestCallNotificationCheck on a
 // schedule, independent of anyone having the app open -- unlike the
@@ -1778,8 +1797,7 @@ async function requireToken(env: Env): Promise<string | Response> {
   return token;
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
@@ -1790,14 +1808,6 @@ export default {
 
         if (url.pathname === "/api/global-markets") {
           return json(await computeGlobalMarkets());
-        }
-
-        if (url.pathname === "/api/debug/option-chain") {
-          const token = await requireToken(env);
-          if (token instanceof Response) return token;
-          const symbol = (url.searchParams.get("symbol") || "CRUDEOIL") as Symbol;
-          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
-          return json(await debugOptionChain(token, symbol));
         }
 
         if (url.pathname === "/api/prices") {
@@ -1937,7 +1947,12 @@ export default {
 
         return json({ error: "Not found" }, 404);
       } catch (err: any) {
-        return json({ error: err.message }, 500);
+        // Full detail (including anything a stack trace would show) goes to
+        // Cloudflare's own logs (wrangler tail / dashboard) only -- the
+        // client only ever sees a short, capped message, never a trace.
+        console.error("API error:", err);
+        const message = typeof err?.message === "string" && err.message.length > 0 ? err.message.slice(0, 300) : "Internal server error";
+        return json({ error: message }, 500);
       }
     }
 
@@ -1949,6 +1964,15 @@ export default {
       return env.ASSETS.fetch(indexRequest);
     }
     return assetResponse;
+}
+
+export default {
+  // Every response this Worker can return -- API JSON, index.html, and every
+  // static asset -- passes through withSecurityHeaders exactly once here,
+  // so no individual route can accidentally ship without the app's security
+  // headers by forgetting to set them itself.
+  async fetch(request: Request, env: Env): Promise<Response> {
+    return withSecurityHeaders(await handleRequest(request, env));
   },
 
   // Cloudflare Cron Trigger (see wrangler.jsonc "triggers.crons") -- runs

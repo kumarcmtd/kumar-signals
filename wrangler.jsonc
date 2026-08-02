@@ -8,9 +8,17 @@
     { "binding": "COMMODITY_KV", "id": "ee2c93e58b91477d8950796f0e51697f" }
   ],
   "ai": { "binding": "AI" },
+  // run_worker_first: by default Cloudflare serves any request matching a
+  // static file directly from the Assets binding, bypassing this Worker's
+  // fetch() entirely -- which would mean the security headers set in
+  // worker.ts's withSecurityHeaders never reach static pages/assets at all.
+  // Routing every request through fetch() first (which still just calls
+  // env.ASSETS.fetch() itself for the actual file) is what makes the
+  // headers land on every response, HTML or otherwise.
   "assets": {
     "directory": "./frontend/dist",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "run_worker_first": true
   },
   // Drives the Best Call background push check (scheduled() in worker.ts) --
   // independent of any browser tab being open. Every 5 minutes during market
