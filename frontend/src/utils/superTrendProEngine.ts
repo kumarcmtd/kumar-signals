@@ -556,14 +556,13 @@ export const HIGHER_TF: Record<string, string> = {
   "1D": "1D",
 };
 
+// Restricted to the 4 timeframes that actually give this engine's ADX/trend
+// checks enough bar history to mean something -- 1/3/5/10 minute bars were
+// too noisy for a "Strong Buy/Sell" call to hold up, and Daily has too few
+// live signals per day to be useful here.
 export const TIMEFRAME_OPTIONS: { value: string; label: string }[] = [
-  { value: "1", label: "1 Minute" },
-  { value: "3", label: "3 Minute" },
-  { value: "5", label: "5 Minute" },
-  { value: "10", label: "10 Minute" },
   { value: "15", label: "15 Minute" },
   { value: "30", label: "30 Minute" },
   { value: "60", label: "1 Hour" },
   { value: "240", label: "4 Hour" },
-  { value: "1D", label: "Daily" },
 ];

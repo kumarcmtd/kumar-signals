@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, AlertTriangle, Layers, Sparkles, TrendingDown, TrendingUp, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Layers, Sparkles, TrendingDown, TrendingUp, Wallet, Zap } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 import { useMarketStatus } from "../api/hooks";
 import { useSuperTrendPro } from "../hooks/useSuperTrendPro";
@@ -16,17 +16,24 @@ const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const TV_SYMBOL: Record<TradableSymbol, string> = { CRUDEOIL: "MCX:CRUDEOIL1!", NATURALGAS: "MCX:NATURALGAS1!" };
 const TV_INTERVAL: Record<string, string> = { "1D": "D" };
+// Same MCX contract lot sizes used everywhere else in this app that quotes a
+// per-lot investment (Best Call's option premium calculator) -- futures and
+// options on the same underlying share one exchange-standardized lot size.
+const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
+const ALLOWED_TFS = new Set(TIMEFRAME_OPTIONS.map((tf) => tf.value));
+const INR = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const PRESET_AMOUNTS = [50000, 100000, 200000, 500000];
 
 const STATUS_COLOR: Record<MarketStatusLabel, string> = {
-  "Strong Buy": "#00E676",
-  Buy: "#00E676",
-  Bullish: "#7BE0A8",
-  Wait: "#FFC107",
-  Range: "#9AA4B2",
-  Neutral: "#9AA4B2",
-  "Weak Sell": "#FF9A8B",
-  Sell: "#FF4D4F",
-  "Strong Sell": "#FF4D4F",
+  "Strong Buy": "#16A34A",
+  Buy: "#16A34A",
+  Bullish: "#4ADE80",
+  Wait: "#D97706",
+  Range: "#64748B",
+  Neutral: "#64748B",
+  "Weak Sell": "#FB923C",
+  Sell: "#DC2626",
+  "Strong Sell": "#DC2626",
 };
 
 const RISK_SCORE: Record<RiskLevel, number> = { "Very Low": 12, Low: 30, Medium: 55, High: 78, "Very High": 95 };
@@ -49,7 +56,11 @@ export function AiSuperTrendPro() {
   const superTrendLogs = useAppStore((s) => s.superTrendLogs);
   const symbolLogs = useMemo(() => {
     const out: Record<string, typeof log> = {};
-    for (const [k, v] of Object.entries(superTrendLogs)) if (k.startsWith(`${symbol}-`)) out[k] = v;
+    for (const [k, v] of Object.entries(superTrendLogs)) {
+      if (!k.startsWith(`${symbol}-`)) continue;
+      const tf = k.slice(symbol.length + 1);
+      if (ALLOWED_TFS.has(tf)) out[k] = v;
+    }
     return out;
   }, [superTrendLogs, symbol]);
   const realized = useMemo(() => flattenClosedSuperTrend(symbolLogs), [symbolLogs]);
@@ -63,47 +74,61 @@ export function AiSuperTrendPro() {
   const priceLines = useMemo(() => {
     if (!openEntry) return [];
     return [
-      { price: openEntry.entry, color: "#00C2FF", title: "Entry" },
-      { price: openEntry.stop, color: "#FF4D4F", title: "SL" },
-      ...openEntry.targets.map((t, i) => ({ price: t, color: "#00E676", title: `T${i + 1}` })),
+      { price: openEntry.entry, color: "#2563EB", title: "Entry" },
+      { price: openEntry.stop, color: "#DC2626", title: "SL" },
+      ...openEntry.targets.map((t, i) => ({ price: t, color: "#16A34A", title: `T${i + 1}` })),
     ];
   }, [openEntry]);
 
   return (
-    <div className="-mx-4 -mt-4 px-4 pt-4 pb-24 min-h-screen text-white space-y-4" style={{ background: "linear-gradient(180deg,#09090F,#0D0E16 40%,#09090F)" }}>
-      <GlassCard glow="#7C4DFF">
+    <div className="space-y-4">
+      <div
+        className="rounded-2xl p-4 text-white"
+        style={{ background: "linear-gradient(135deg,#7C3AED,#2563EB 55%,#0EA5E9)", boxShadow: "0 8px 24px rgba(37,99,235,.25)" }}
+      >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xl font-black flex items-center gap-2">
-              <Zap size={20} style={{ color: "#7C4DFF" }} />
+              <Zap size={20} />
               AI SuperTrend Pro
             </p>
-            <p className="text-xs text-[#9AA4B2] mt-0.5">Institutional-style multi-indicator analysis for MCX Natural Gas &amp; Crude Oil</p>
+            <p className="text-xs text-white/80 mt-0.5">Institutional-style multi-indicator analysis for MCX Natural Gas &amp; Crude Oil</p>
           </div>
-          <Badge dot color={market?.isOpen ? "#00E676" : "#FF4D4F"} label={market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"} />
+          <span className="flex items-center gap-1.5 text-[9px] font-bold px-2 py-1 rounded-full bg-white/15 shrink-0">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: market?.isOpen ? "#4ADE80" : "#FCA5A5" }} />
+            {market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"}
+          </span>
         </div>
-      </GlassCard>
+      </div>
 
       <div className="flex gap-2">
         {SYMBOLS.map((s) => (
           <button
             key={s}
             onClick={() => setSymbol(s)}
-            className="flex-1 rounded-xl py-2.5 text-sm font-bold transition-colors"
-            style={symbol === s ? { background: "linear-gradient(135deg,#7C4DFF,#00C2FF)", color: "#fff" } : { background: "#181A24", border: "1px solid rgba(255,255,255,.08)", color: "#9AA4B2" }}
+            className="flex-1 rounded-xl py-2.5 text-sm font-bold transition-colors border"
+            style={
+              symbol === s
+                ? { background: "linear-gradient(135deg,#7C3AED,#2563EB)", color: "#fff", borderColor: "transparent" }
+                : { background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-muted)" }
+            }
           >
             {DISPLAY_NAME[s]}
           </button>
         ))}
       </div>
 
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+      <div className="flex gap-1.5">
         {TIMEFRAME_OPTIONS.map((tf) => (
           <button
             key={tf.value}
             onClick={() => setTimeframe(tf.value)}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-bold border"
-            style={timeframe === tf.value ? { background: "#181A24", borderColor: "#00C2FF66", color: "#00C2FF" } : { background: "#12131C", borderColor: "rgba(255,255,255,.08)", color: "#9AA4B2" }}
+            className="flex-1 rounded-lg px-2 py-1.5 text-[11px] font-bold border"
+            style={
+              timeframe === tf.value
+                ? { background: "#EFF6FF", borderColor: "#2563EB", color: "#2563EB" }
+                : { background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-muted)" }
+            }
           >
             {tf.label}
           </button>
@@ -111,98 +136,104 @@ export function AiSuperTrendPro() {
       </div>
 
       {candlesError && (
-        <GlassCard>
+        <div className="card p-4">
           <div className="flex items-start gap-2">
-            <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: "#FFC107" }} />
-            <p className="text-sm text-[#9AA4B2]">{candlesError}. This is a normal gap right after market open or on a very new timeframe -- check back shortly.</p>
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: "#D97706" }} />
+            <p className="text-sm text-[var(--color-muted)]">{candlesError}. This is a normal gap right after market open or on a very new timeframe -- check back shortly.</p>
           </div>
-        </GlassCard>
+        </div>
       )}
 
       {!candlesError && !snapshot && (
-        <GlassCard>
-          <p className="text-sm text-[#9AA4B2] text-center py-4">{candlesLoading ? "Loading market data…" : `Not enough bars yet on this timeframe (have ${candles.length}, need 60+).`}</p>
-        </GlassCard>
+        <div className="card p-4">
+          <p className="text-sm text-[var(--color-muted)] text-center py-4">{candlesLoading ? "Loading market data…" : `Not enough bars yet on this timeframe (have ${candles.length}, need 60+).`}</p>
+        </div>
       )}
 
       {snapshot && (
         <>
-          <GlassCard glow={STATUS_COLOR[snapshot.marketStatus]}>
+          <div className="card p-4" style={{ border: `1px solid ${STATUS_COLOR[snapshot.marketStatus]}55` }}>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-2xl font-black" style={{ color: STATUS_COLOR[snapshot.marketStatus] }}>
                   {snapshot.marketStatus.toUpperCase()}
                 </p>
-                <p className="text-xs text-[#9AA4B2] mt-0.5">
+                <p className="text-xs text-[var(--color-muted)] mt-0.5">
                   Trend strength (ADX) {fmt(snapshot.trendStrength, 1)} · As of {snapshot.asOf} IST
                 </p>
               </div>
-              {snapshot.trend === "bullish" ? <TrendingUp size={28} style={{ color: STATUS_COLOR[snapshot.marketStatus] }} /> : snapshot.trend === "bearish" ? <TrendingDown size={28} style={{ color: STATUS_COLOR[snapshot.marketStatus] }} /> : <Activity size={28} style={{ color: "#9AA4B2" }} />}
+              {snapshot.trend === "bullish" ? <TrendingUp size={28} style={{ color: STATUS_COLOR[snapshot.marketStatus] }} /> : snapshot.trend === "bearish" ? <TrendingDown size={28} style={{ color: STATUS_COLOR[snapshot.marketStatus] }} /> : <Activity size={28} style={{ color: "var(--color-muted)" }} />}
             </div>
             <p className="text-lg font-bold mt-2">₹{snapshot.lastPrice.toFixed(2)}</p>
-          </GlassCard>
+          </div>
 
-          <GlassCard title="AI Confidence Engine">
+          <SectionCard title="AI Confidence Engine">
             <div className="grid grid-cols-3 gap-2 mb-3">
-              <ProbBar label="BUY" pct={snapshot.confidence.buyPct} color="#00E676" />
-              <ProbBar label="WAIT" pct={snapshot.confidence.waitPct} color="#FFC107" />
-              <ProbBar label="SELL" pct={snapshot.confidence.sellPct} color="#FF4D4F" />
+              <ProbBar label="BUY" pct={snapshot.confidence.buyPct} color="#16A34A" />
+              <ProbBar label="WAIT" pct={snapshot.confidence.waitPct} color="#D97706" />
+              <ProbBar label="SELL" pct={snapshot.confidence.sellPct} color="#DC2626" />
             </div>
             <div className="flex items-center justify-between text-xs">
-              <span className="text-[#9AA4B2]">Trade Quality (factor agreement)</span>
+              <span className="text-[var(--color-muted)]">Trade Quality (factor agreement)</span>
               <span className="font-bold">{snapshot.confidence.tradeQuality}%</span>
             </div>
             <details className="mt-2">
-              <summary className="text-[11px] text-[#9AA4B2] cursor-pointer">Weighted breakdown ({snapshot.confidence.votes.length} factors)</summary>
+              <summary className="text-[11px] text-[var(--color-muted)] cursor-pointer">Weighted breakdown ({snapshot.confidence.votes.length} factors)</summary>
               <div className="mt-2 space-y-1.5">
                 {snapshot.confidence.votes.map((v) => (
                   <div key={v.label} className="flex items-center justify-between text-[11px]">
                     <span className="flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: v.vote > 0 ? "#00E676" : v.vote < 0 ? "#FF4D4F" : "#9AA4B2" }} />
-                      {v.label} <span className="text-[#9AA4B2]">({v.weight}%)</span>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: v.vote > 0 ? "#16A34A" : v.vote < 0 ? "#DC2626" : "var(--color-muted)" }} />
+                      {v.label} <span className="text-[var(--color-muted)]">({v.weight}%)</span>
                     </span>
-                    <span className="text-[#9AA4B2] text-right ml-2">{v.note}</span>
+                    <span className="text-[var(--color-muted)] text-right ml-2">{v.note}</span>
                   </div>
                 ))}
               </div>
             </details>
-          </GlassCard>
+          </SectionCard>
 
           {snapshot.tradeSetup && (
-            <GlassCard title={openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"} glow={snapshot.tradeSetup.direction === "bullish" ? "#00E676" : "#FF4D4F"}>
-              <TradeSetupBody snapshot={snapshot} openEntry={openEntry} />
-            </GlassCard>
+            <div className="card overflow-hidden" style={{ border: `2px solid ${snapshot.tradeSetup.direction === "bullish" ? "#16A34A" : "#DC2626"}` }}>
+              <div className="p-4">
+                <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-3 flex items-center gap-1.5">
+                  <Layers size={12} />
+                  {openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"}
+                </p>
+                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} />
+              </div>
+            </div>
           )}
 
-          <GlassCard title="AI Explanation Panel">
+          <SectionCard title="AI Explanation Panel">
             <p className="text-sm font-bold mb-2">
               Why {snapshot.marketStatus}: Risk {snapshot.riskLevel}, Trade Quality {snapshot.confidence.tradeQuality}%
             </p>
             {snapshot.supportingReasons.length > 0 && (
               <div className="mb-2">
-                <p className="text-[10px] font-bold uppercase text-[#00E676] mb-1">Supporting</p>
+                <p className="text-[10px] font-bold uppercase text-[#16A34A] mb-1">Supporting</p>
                 {snapshot.supportingReasons.map((r, i) => (
-                  <p key={i} className="text-[11px] text-[#9AA4B2] flex items-start gap-1.5">
-                    <span style={{ color: "#00E676" }}>+</span> {r}
+                  <p key={i} className="text-[11px] text-[var(--color-muted)] flex items-start gap-1.5">
+                    <span style={{ color: "#16A34A" }}>+</span> {r}
                   </p>
                 ))}
               </div>
             )}
             {snapshot.opposingReasons.length > 0 && (
               <div>
-                <p className="text-[10px] font-bold uppercase text-[#FF4D4F] mb-1">Opposing</p>
+                <p className="text-[10px] font-bold uppercase text-[#DC2626] mb-1">Opposing</p>
                 {snapshot.opposingReasons.map((r, i) => (
-                  <p key={i} className="text-[11px] text-[#9AA4B2] flex items-start gap-1.5">
-                    <span style={{ color: "#FF4D4F" }}>−</span> {r}
+                  <p key={i} className="text-[11px] text-[var(--color-muted)] flex items-start gap-1.5">
+                    <span style={{ color: "#DC2626" }}>−</span> {r}
                   </p>
                 ))}
               </div>
             )}
-          </GlassCard>
+          </SectionCard>
 
-          <GlassCard title="Professional Dashboard">
+          <SectionCard title="Professional Dashboard">
             <div className="grid grid-cols-2 gap-2">
-              <Stat label="Trend" value={snapshot.trend} color={snapshot.trend === "bullish" ? "#00E676" : snapshot.trend === "bearish" ? "#FF4D4F" : "#9AA4B2"} />
+              <Stat label="Trend" value={snapshot.trend} color={snapshot.trend === "bullish" ? "#16A34A" : snapshot.trend === "bearish" ? "#DC2626" : "var(--color-muted)"} />
               <Stat label="SuperTrend" value={snapshot.superTrend ? `${snapshot.superTrend.direction} ₹${snapshot.superTrend.value.toFixed(2)}` : "—"} />
               <Stat label="EMA Status" value={snapshot.emaStack.stacked === "neutral" ? "Mixed" : snapshot.emaStack.stacked} />
               <Stat label="VWAP" value={snapshot.vwap !== null ? `₹${snapshot.vwap.toFixed(2)}` : "—"} />
@@ -220,49 +251,49 @@ export function AiSuperTrendPro() {
               <Stat label="Support" value={snapshot.sr.support !== null ? `₹${snapshot.sr.support.toFixed(2)}` : "—"} />
               <Stat label="Resistance" value={snapshot.sr.resistance !== null ? `₹${snapshot.sr.resistance.toFixed(2)}` : "—"} />
               <Stat label="Fibonacci 50%" value={snapshot.fibonacci ? `₹${snapshot.fibonacci.levels["50"].toFixed(2)}` : "—"} />
-              <Stat label="Higher Timeframe Trend" value={snapshot.higherTfTrend ?? "—"} color={snapshot.higherTfTrend === "bullish" ? "#00E676" : snapshot.higherTfTrend === "bearish" ? "#FF4D4F" : undefined} />
+              <Stat label="Higher Timeframe Trend" value={snapshot.higherTfTrend ?? "—"} color={snapshot.higherTfTrend === "bullish" ? "#16A34A" : snapshot.higherTfTrend === "bearish" ? "#DC2626" : undefined} />
               <Stat label="Market Structure" value={snapshot.structure.label ?? "—"} />
               <Stat label="Volatility" value={snapshot.volatilityLevel} />
               <Stat label="Confidence Score" value={`${Math.max(snapshot.confidence.buyPct, snapshot.confidence.sellPct)}%`} />
               <Stat label="Signal Quality" value={`${snapshot.confidence.tradeQuality}%`} />
             </div>
-          </GlassCard>
+          </SectionCard>
 
-          <GlassCard title="Chart">
-            <TradingViewWidget key={`${symbol}-tv`} symbol={TV_SYMBOL[symbol]} interval={TV_INTERVAL[timeframe] ?? timeframe} height={240} />
-            <p className="text-[10px] text-[#9AA4B2] mt-3 mb-1.5">Annotated (entry/SL/targets from the tracked trade, if one is open):</p>
-            <TradeChart candles={candles} priceLines={priceLines} height={220} />
-          </GlassCard>
+          <SectionCard title="Chart">
+            <TradingViewWidget key={`${symbol}-tv`} symbol={TV_SYMBOL[symbol]} interval={TV_INTERVAL[timeframe] ?? timeframe} height={240} theme="light" />
+            <p className="text-[10px] text-[var(--color-muted)] mt-3 mb-1.5">Annotated (entry/SL/targets from the tracked trade, if one is open):</p>
+            <TradeChart candles={candles} priceLines={priceLines} height={220} theme="light" />
+          </SectionCard>
 
-          <GlassCard title="Risk &amp; Volatility">
+          <SectionCard title="Risk &amp; Volatility">
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col items-center">
-                <CircularGauge value={RISK_SCORE[snapshot.riskLevel]} size={92} label="Risk" sublabel={snapshot.riskLevel} />
+                <CircularGauge value={RISK_SCORE[snapshot.riskLevel]} size={92} label="Risk" sublabel={snapshot.riskLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" />
               </div>
               <div className="flex flex-col items-center">
-                <CircularGauge value={VOL_SCORE[snapshot.volatilityLevel]} size={92} label="Volatility" sublabel={snapshot.volatilityLevel} />
+                <CircularGauge value={VOL_SCORE[snapshot.volatilityLevel]} size={92} label="Volatility" sublabel={snapshot.volatilityLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" />
               </div>
             </div>
-          </GlassCard>
+          </SectionCard>
 
-          <GlassCard title="Smart Suggestions">
+          <SectionCard title="Smart Suggestions">
             <div className="space-y-1.5">
               {snapshot.smartSuggestions.map((s, i) => (
-                <p key={i} className="text-xs text-[#9AA4B2] flex items-start gap-1.5">
-                  <Sparkles size={12} className="shrink-0 mt-0.5" style={{ color: "#7C4DFF" }} />
+                <p key={i} className="text-xs text-[var(--color-muted)] flex items-start gap-1.5">
+                  <Sparkles size={12} className="shrink-0 mt-0.5" style={{ color: "#7C3AED" }} />
                   {s}
                 </p>
               ))}
             </div>
-          </GlassCard>
+          </SectionCard>
         </>
       )}
 
-      <GlassCard title="Performance Analytics">
+      <SectionCard title="Performance Analytics">
         <div className="grid grid-cols-3 gap-2">
           <Stat label="Today's Trades" value={String(perf.todayTotal)} />
-          <Stat label="Winning" value={String(perf.todayWins)} color="#00E676" />
-          <Stat label="Losing" value={String(perf.todayLosses)} color="#FF4D4F" />
+          <Stat label="Winning" value={String(perf.todayWins)} color="#16A34A" />
+          <Stat label="Losing" value={String(perf.todayLosses)} color="#DC2626" />
           <Stat label="Accuracy" value={perf.winRatePct !== null ? `${perf.winRatePct}%` : "—"} />
           <Stat label="Avg RR" value={perf.avgRR !== null ? `1:${perf.avgRR}` : "—"} />
           <Stat label="Avg Confidence" value={perf.avgConfidence !== null ? `${perf.avgConfidence}%` : "—"} />
@@ -270,21 +301,26 @@ export function AiSuperTrendPro() {
           <Stat label="Target Hit %" value={perf.targetHitPct !== null ? `${perf.targetHitPct}%` : "—"} />
           <Stat label="Stop Loss %" value={perf.stopLossPct !== null ? `${perf.stopLossPct}%` : "—"} />
         </div>
-        <p className="text-[10px] text-[#9AA4B2] mt-3">
+        <p className="text-[10px] text-[var(--color-muted)] mt-3">
           Only Strong Buy/Strong Sell signals (lower + higher timeframe agreeing) are tracked as real trades -- Buy/Bullish/Sell/Weak
           Sell/Wait/Range stay live on the dashboard but never count toward these numbers. Tracked only in this browser for now.
         </p>
-      </GlassCard>
+      </SectionCard>
 
       {allEntries.length > 0 && (
-        <GlassCard title="Trade History">
+        <SectionCard title="Trade History">
           <div className="space-y-2">
             {allEntries.slice(0, 15).map((e) => {
               const exit = e.closed ? exitPriceForSuperTrend(e) : null;
               const pnl = exit !== null ? Number(((e.direction === "bullish" ? 1 : -1) * (exit - e.entry)).toFixed(3)) : null;
-              const statusColor = !e.closed ? "#FFC107" : pnl !== null && pnl > 0 ? "#00E676" : pnl !== null && pnl < 0 ? "#FF4D4F" : "#9AA4B2";
+              const statusColor = !e.closed ? "#D97706" : pnl !== null && pnl > 0 ? "#16A34A" : pnl !== null && pnl < 0 ? "#DC2626" : "var(--color-muted)";
+              const effStop = effectiveStopForSetup({ entry: e.entry, targets: e.targets, stopLoss: e.stop }, e.targetsHit);
               return (
-                <div key={e.id} className="rounded-xl p-3" style={{ background: "#12131C", border: "1px solid rgba(255,255,255,.06)" }}>
+                <div
+                  key={e.id}
+                  className="rounded-xl p-3"
+                  style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)", borderLeft: `3px solid ${e.direction === "bullish" ? "#16A34A" : "#DC2626"}` }}
+                >
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-bold">
                       {DISPLAY_NAME[e.symbol as TradableSymbol] ?? e.symbol} · {e.timeframe === "1D" ? "Daily" : `${e.timeframe}m`} · {e.direction === "bullish" ? "BUY" : "SELL"}
@@ -293,24 +329,28 @@ export function AiSuperTrendPro() {
                       {e.closed ? e.status.replace(/_/g, " ") : "Running"}
                     </p>
                   </div>
-                  <p className="text-[10px] text-[#9AA4B2] mt-1">
+                  <p className="text-[10px] text-[var(--color-muted)] mt-1">
                     {fmtWhen(e.openedAt)} at ₹{e.entry.toFixed(2)} · Confidence {e.confidence}%{e.closed && exit !== null && <> · Closed at ₹{exit.toFixed(2)} ({pnl! >= 0 ? "+" : ""}{pnl})</>}
                   </p>
-                  <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5 text-[10px] text-[#9AA4B2]">
+                  <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1.5 text-[10px] text-[var(--color-muted)]">
                     {e.targets.map((t, i) => (
-                      <span key={i} className={e.targetsHit[i] ? "font-bold" : ""} style={{ color: e.targetsHit[i] ? "#00E676" : undefined }}>
+                      <span key={i} className={e.targetsHit[i] ? "font-bold" : ""} style={{ color: e.targetsHit[i] ? "#16A34A" : undefined }}>
                         T{i + 1} ₹{t.toFixed(2)}
                       </span>
                     ))}
+                    <span className="font-semibold" style={{ color: "#DC2626" }}>
+                      SL ₹{effStop.toFixed(2)}
+                      {Math.abs(effStop - e.stop) > 0.001 && <span className="opacity-70 font-normal"> (was ₹{e.stop.toFixed(2)})</span>}
+                    </span>
                   </div>
                 </div>
               );
             })}
           </div>
-        </GlassCard>
+        </SectionCard>
       )}
 
-      <p className="text-[10px] text-[#9AA4B2] leading-relaxed text-center px-4 pb-2">
+      <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2">
         Signals are generated using multiple technical indicators and rule-based AI scoring. They are designed to assist
         decision-making and do not guarantee profits. Always use proper risk management.
       </p>
@@ -318,7 +358,15 @@ export function AiSuperTrendPro() {
   );
 }
 
-function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnType<typeof useSuperTrendPro>["snapshot"]>; openEntry: ReturnType<typeof useSuperTrendPro>["log"][number] | null }) {
+function TradeSetupBody({
+  snapshot,
+  openEntry,
+  symbol,
+}: {
+  snapshot: NonNullable<ReturnType<typeof useSuperTrendPro>["snapshot"]>;
+  openEntry: ReturnType<typeof useSuperTrendPro>["log"][number] | null;
+  symbol: TradableSymbol;
+}) {
   const setup = snapshot.tradeSetup!;
   const entry = openEntry?.entry ?? setup.entry;
   const stop = openEntry?.stop ?? setup.stopLoss;
@@ -327,7 +375,11 @@ function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnT
   const trailingStop = openEntry ? effectiveStopForSetup({ entry, targets, stopLoss: stop }, targetsHit) : setup.trailingStop;
   const rr = Math.abs(targets[0] - entry) / Math.abs(entry - stop);
 
-  const direction = openEntry?.direction ?? setup.direction;
+  // TradeSetupBody only ever renders when snapshot.tradeSetup exists, and a
+  // tradeSetup is only ever created for a "bullish"/"bearish" tradeDirection
+  // (never "neutral") -- see computeSuperTrendPro's `if (tradeDirection...)`
+  // gate -- so this narrowing is always safe despite the wider Direction type.
+  const direction = (openEntry?.direction ?? setup.direction) as "bullish" | "bearish";
   const dirSign = direction === "bullish" ? 1 : -1;
   const legIdx = targetsHit.findIndex((hit) => !hit);
   const nextTargetIdx = legIdx === -1 ? targets.length - 1 : legIdx;
@@ -340,27 +392,35 @@ function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnT
       <div className="grid grid-cols-2 gap-2 mb-3">
         <Stat label="Entry" value={`₹${entry.toFixed(2)}`} />
         <Stat label="Current Price" value={`₹${snapshot.lastPrice.toFixed(2)}`} />
-        <Stat label="Stop Loss" value={`₹${stop.toFixed(2)}`} color="#FF4D4F" />
+        <Stat label="Stop Loss" value={`₹${stop.toFixed(2)}`} color="#DC2626" />
         <Stat label="ATR Stop" value={`₹${setup.atrStop.toFixed(2)}`} />
-        <Stat label="Trailing Stop" value={`₹${trailingStop.toFixed(2)}`} color="#FFC107" />
+        <Stat label="Trailing Stop" value={`₹${trailingStop.toFixed(2)}`} color="#D97706" />
         <Stat label="Risk : Reward" value={`1:${rr.toFixed(2)}`} />
-        <Stat label="Expected Profit" value={`+${Math.abs(targets[0] - entry).toFixed(2)}`} color="#00E676" />
-        <Stat label="Expected Loss" value={`-${Math.abs(entry - stop).toFixed(2)}`} color="#FF4D4F" />
+        <Stat label="Expected Profit" value={`+${Math.abs(targets[0] - entry).toFixed(2)}`} color="#16A34A" />
+        <Stat label="Expected Loss" value={`-${Math.abs(entry - stop).toFixed(2)}`} color="#DC2626" />
       </div>
       <div className="flex flex-wrap gap-2">
         {targets.map((t, i) => (
           <span
             key={i}
             className="text-[11px] px-2.5 py-1 rounded-full font-bold"
-            style={{ background: targetsHit[i] ? "#00E67622" : "#181A24", color: targetsHit[i] ? "#00E676" : "#9AA4B2", border: "1px solid rgba(255,255,255,.08)" }}
+            style={{ background: targetsHit[i] ? "#DCFCE7" : "var(--color-surface-soft)", color: targetsHit[i] ? "#15803D" : "var(--color-muted)", border: "1px solid var(--color-border)" }}
           >
             T{i + 1} ₹{t.toFixed(2)} {targetsHit[i] ? "✓" : ""}
           </span>
         ))}
       </div>
-      <EntryTimingBadge verdict={entryTiming} theme="dark" className="mt-2.5" />
-      {!openEntry && (
-        <p className="text-[10px] text-[#9AA4B2] mt-2">
+      <EntryTimingBadge verdict={entryTiming} theme="light" className="mt-2.5" />
+      {openEntry ? (
+        <FuturesProfitEstimate
+          entry={entry}
+          current={openEntry.closed ? exitPriceForSuperTrend(openEntry) : snapshot.lastPrice}
+          lotSize={LOT_SIZE[symbol]}
+          direction={direction}
+          closed={openEntry.closed}
+        />
+      ) : (
+        <p className="text-[10px] text-[var(--color-muted)] mt-2">
           This is a live projection recomputed every poll -- it becomes a tracked trade the moment this reading holds as Strong
           Buy/Strong Sell.
         </p>
@@ -369,14 +429,103 @@ function TradeSetupBody({ snapshot, openEntry }: { snapshot: NonNullable<ReturnT
   );
 }
 
-function GlassCard({ children, title, glow }: { children: React.ReactNode; title?: string; glow?: string }) {
+// Same "what would this be worth" convention Best Call already uses for
+// option premium (full notional, not real futures margin -- kept
+// consistent with the rest of the app), generalized here for a direction
+// that can go either way: a SELL/short profits when price falls, so the
+// P&L sign flips on direction rather than always assuming a long.
+function FuturesProfitEstimate({
+  entry,
+  current,
+  lotSize,
+  direction,
+  closed,
+}: {
+  entry: number;
+  current: number;
+  lotSize: number;
+  direction: "bullish" | "bearish";
+  closed: boolean;
+}) {
+  const [amount, setAmount] = useState(100000);
+  const costPerLot = entry * lotSize;
+  const lots = Math.floor(amount / costPerLot);
+  const dirSign = direction === "bullish" ? 1 : -1;
+  const invested = lots * costPerLot;
+  const worth = invested + lots * (current - entry) * dirSign * lotSize;
+  const inProfit = worth >= invested;
+  const pnlPct = invested > 0 ? Number((((worth - invested) / invested) * 100).toFixed(2)) : 0;
+
   return (
-    <section
-      className="rounded-2xl p-4 backdrop-blur-xl"
-      style={{ background: "#181A24", border: `1px solid ${glow ? `${glow}44` : "rgba(255,255,255,.08)"}`, boxShadow: glow ? `0 0 24px ${glow}22` : undefined }}
-    >
+    <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-2.5 flex items-center gap-1.5">
+        <Wallet size={12} />
+        {closed ? "What that investment would have made" : "What that investment is worth right now"}
+      </p>
+
+      <div className="flex items-center gap-2 mb-2.5">
+        <span className="text-xs text-[var(--color-muted)]">₹</span>
+        <input
+          type="number"
+          value={amount}
+          onChange={(ev) => setAmount(Math.max(0, Number(ev.target.value) || 0))}
+          className="flex-1 min-w-0 rounded-lg px-2.5 py-1.5 text-sm font-bold border"
+          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
+        />
+      </div>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {PRESET_AMOUNTS.map((p) => (
+          <button
+            key={p}
+            onClick={() => setAmount(p)}
+            className="text-[10px] px-2 py-1 rounded-full font-bold"
+            style={amount === p ? { background: "#2563EB", color: "#fff" } : { background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+          >
+            ₹{INR(p)}
+          </button>
+        ))}
+      </div>
+
+      {lots < 1 ? (
+        <p className="text-xs text-[var(--color-muted)]">
+          ₹{INR(amount)} isn't enough for even 1 lot at this entry — 1 lot of this contract needs ₹{INR(costPerLot)} ({lotSize} qty × ₹{entry.toFixed(2)}).
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] text-[var(--color-muted)] mb-2">
+            Buys {lots} lot{lots > 1 ? "s" : ""} ({lots * lotSize} qty) for ₹{INR(invested)} at the ₹{entry.toFixed(2)} entry.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
+              <p className="text-[9px] text-[var(--color-muted)]">Invested</p>
+              <p className="text-xs font-bold">₹{INR(invested)}</p>
+            </div>
+            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
+              <p className="text-[9px] text-[var(--color-muted)]">{closed ? "Exit value" : "Worth now"}</p>
+              <p className="text-xs font-bold">₹{INR(worth)}</p>
+            </div>
+          </div>
+          <div className="mt-2 rounded-lg px-2.5 py-2 text-center" style={{ background: inProfit ? "#DCFCE7" : "#FEE2E2" }}>
+            <p className="text-lg font-black" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
+              {inProfit ? "+" : ""}
+              ₹{INR(worth - invested)}
+            </p>
+            <p className="text-[10px]" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
+              {pnlPct >= 0 ? "+" : ""}
+              {pnlPct}% {closed ? "on that trade" : "right now"}
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function SectionCard({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <section className="card p-4">
       {title && (
-        <p className="text-xs font-bold uppercase text-[#9AA4B2] mb-3 flex items-center gap-1.5">
+        <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-3 flex items-center gap-1.5">
           <Layers size={12} />
           {title}
         </p>
@@ -386,20 +535,11 @@ function GlassCard({ children, title, glow }: { children: React.ReactNode; title
   );
 }
 
-function Badge({ dot, color, label }: { dot?: boolean; color?: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1.5 text-[9px] font-semibold px-2 py-1 rounded-full" style={{ background: "#181A24", border: "1px solid rgba(255,255,255,.08)" }}>
-      {dot && <span className="w-1.5 h-1.5 rounded-full" style={{ background: color ?? "#00C2FF" }} />}
-      <span style={{ color: color ?? "#9AA4B2" }}>{label}</span>
-    </span>
-  );
-}
-
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="rounded-xl px-2.5 py-2" style={{ background: "#12131C", border: "1px solid rgba(255,255,255,.06)" }}>
-      <p className="text-[9px] text-[#9AA4B2] uppercase">{label}</p>
-      <p className="text-xs font-bold mt-0.5" style={{ color: color ?? "#fff" }}>
+    <div className="rounded-xl px-2.5 py-2" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+      <p className="text-[9px] text-[var(--color-muted)] uppercase">{label}</p>
+      <p className="text-xs font-bold mt-0.5" style={{ color: color ?? "var(--color-ink)" }}>
         {value}
       </p>
     </div>
@@ -409,7 +549,7 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 function ProbBar({ label, pct, color }: { label: string; pct: number; color: string }) {
   return (
     <div className="flex flex-col items-center gap-1">
-      <div className="w-full h-16 rounded-lg overflow-hidden flex flex-col justify-end" style={{ background: "#12131C" }}>
+      <div className="w-full h-16 rounded-lg overflow-hidden flex flex-col justify-end" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
         <div style={{ height: `${pct}%`, background: color }} />
       </div>
       <p className="text-[10px] font-bold" style={{ color }}>

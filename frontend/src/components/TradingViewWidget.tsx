@@ -29,7 +29,7 @@ function loadTradingViewScript(): Promise<void> {
 // familiar market context only (see TradeChart.tsx for the annotated,
 // self-drawn version). Mount with a `key` prop that changes with the symbol
 // so React fully remounts instead of stacking widgets in the same div.
-export function TradingViewWidget({ symbol, interval = "15", height = 260 }: { symbol: string; interval?: string; height?: number }) {
+export function TradingViewWidget({ symbol, interval = "15", height = 260, theme = "dark" }: { symbol: string; interval?: string; height?: number; theme?: "dark" | "light" }) {
   const containerId = useRef(`tv_${Math.random().toString(36).slice(2)}`).current;
   const [failed, setFailed] = useState(false);
 
@@ -67,7 +67,11 @@ export function TradingViewWidget({ symbol, interval = "15", height = 260 }: { s
   }, [symbol, interval, containerId]);
 
   if (failed) {
-    return (
+    return theme === "light" ? (
+      <div className="rounded-2xl bg-[var(--color-surface-soft)] border border-[var(--color-border)] p-6 text-center text-sm text-[var(--color-muted)]">
+        Chart widget unavailable right now (TradingView's script didn't load or doesn't recognize this symbol).
+      </div>
+    ) : (
       <div className="rounded-2xl bg-[#181A24] border border-white/10 p-6 text-center text-sm text-[#9AA4B2]">
         Chart widget unavailable right now (TradingView's script didn't load or doesn't recognize this symbol).
       </div>

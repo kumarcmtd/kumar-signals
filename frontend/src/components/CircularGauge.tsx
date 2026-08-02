@@ -16,12 +16,16 @@ export function CircularGauge({
   label,
   sublabel,
   suffix = "",
+  trackColor = "rgba(255,255,255,.08)",
+  labelColor = "#9AA4B2",
 }: {
   value: number;
   size?: number;
   label?: string;
   sublabel?: string;
   suffix?: string;
+  trackColor?: string;
+  labelColor?: string;
 }) {
   const [animated, setAnimated] = useState(0);
   const target = Math.max(0, Math.min(100, value));
@@ -50,7 +54,7 @@ export function CircularGauge({
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,.08)" strokeWidth={stroke} fill="none" />
+        <circle cx={size / 2} cy={size / 2} r={radius} stroke={trackColor} strokeWidth={stroke} fill="none" />
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -70,8 +74,16 @@ export function CircularGauge({
           {Math.round(animated)}
           {suffix}
         </span>
-        {label && <span className="text-[9px] text-[#9AA4B2] font-semibold uppercase tracking-wide mt-0.5">{label}</span>}
-        {sublabel && <span className="text-[9px] text-[#9AA4B2]">{sublabel}</span>}
+        {label && (
+          <span className="text-[9px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: labelColor }}>
+            {label}
+          </span>
+        )}
+        {sublabel && (
+          <span className="text-[9px]" style={{ color: labelColor }}>
+            {sublabel}
+          </span>
+        )}
       </div>
     </div>
   );
