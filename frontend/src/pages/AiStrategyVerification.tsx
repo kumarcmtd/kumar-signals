@@ -3,6 +3,8 @@ import { ClipboardCheck, TrendingUp, TrendingDown, RefreshCcw } from "lucide-rea
 import type { TradableSymbol } from "../hooks/useBestCall";
 import { useStrategyVerification } from "../hooks/useStrategyVerification";
 import { StrategyCard } from "../components/StrategyCard";
+import { MarketDepthCard } from "../components/MarketDepthCard";
+import { MarketHealthCard } from "../components/MarketHealthCard";
 import type { OverallTier } from "../utils/strategyVerification";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -15,10 +17,14 @@ const TIER_VISUAL: Record<OverallTier, { ring: string; label: string; emoji: str
   avoid: { ring: "#DC2626", label: "REJECTED", emoji: "🔴", recBg: "#FEE2E2", recText: "#B91C1C", recLabel: "AVOID TRADE" },
 };
 
+// Matches the app's own definitive 4-recommendation output: Strong Buy/Sell,
+// Buy/Sell, Wait/Neutral, Strong Sell/Avoid -- "strong"/"good" get prefixed
+// with the call's own BUY/SELL side in the JSX below, so these labels stay
+// direction-agnostic.
 const DECISION_LABEL: Record<OverallTier, string> = {
   strong: "STRONG",
-  good: "GOOD",
-  wait: "WAIT",
+  good: "",
+  wait: "WAIT / NEUTRAL",
   avoid: "AVOID TRADE",
 };
 
@@ -61,7 +67,7 @@ function VerificationRing({ scorePct, tier }: { scorePct: number; tier: OverallT
 }
 
 function SymbolBody({ symbol }: { symbol: TradableSymbol }) {
-  const { latest, livePremium, underlyingPrice, candlesLoading, candlesError, result } = useStrategyVerification(symbol);
+  const { latest, livePremium, underlyingPrice, candlesLoading, candlesError, result, marketDepth } = useStrategyVerification(symbol);
 
   if (candlesError) {
     return (
@@ -140,15 +146,37 @@ function SymbolBody({ symbol }: { symbol: TradableSymbol }) {
         ))}
       </div>
 
+      <MarketDepthCard depth={marketDepth} />
+
+      <MarketHealthCard strategies={result.strategies} depth={marketDepth} direction={latest.optSide === "CE" ? "bullish" : "bearish"} />
+
       <div className="card p-4">
         <p className="text-xs font-bold mb-2">Overall AI Decision</p>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-3">
           <span className="text-sm font-black" style={{ color: visual.ring }}>
-            {latest.optSide === "CE" ? "BUY" : "SELL"} · {DECISION_LABEL[result.finalTier]}
+            {latest.optSide === "CE" ? "BUY" : "SELL"}
+            {DECISION_LABEL[result.finalTier] ? ` · ${DECISION_LABEL[result.finalTier]}` : ""}
           </span>
           <span className="text-sm font-black" style={{ color: visual.ring }}>
             {result.weightedScorePct}/100
           </span>
+        </div>
+        <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-1">Reason</p>
+        <div className="space-y-0.5">
+          {result.strategies
+            .filter((s) => s.tier === "pass")
+            .map((s) => (
+              <p key={s.key} className="text-[11px] text-[var(--color-buy)]">
+                • {s.name} Passed
+              </p>
+            ))}
+          {result.strategies
+            .filter((s) => s.tier === "fail")
+            .map((s) => (
+              <p key={s.key} className="text-[11px] text-[var(--color-sell)]">
+                • {s.name} Against This Call
+              </p>
+            ))}
         </div>
       </div>
 

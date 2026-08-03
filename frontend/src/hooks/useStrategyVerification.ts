@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
-import { usePortfolio } from "../api/hooks";
+import { usePortfolio, useMarketDepth } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useBestCallForSymbol, type TradableSymbol } from "./useBestCall";
 import { liveLtpFor, effectiveStopFor } from "./useTradeLog";
 import { evaluateStrategyVerification, type VerificationResult } from "../utils/strategyVerification";
+import { evaluateMarketDepth, type MarketDepthResult } from "../utils/marketDepthAnalysis";
+import type { MarketDepthSnapshot } from "../types";
 
 const REFRESH_MS = 5000;
 const MAX_SAMPLES = 12; // 1 minute of history at a 5s cadence
@@ -32,16 +34,31 @@ export function useStrategyVerification(symbol: TradableSymbol) {
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const latest: TradeLogEntry | undefined = tradeLogs[data.trackingKey]?.[tradeLogs[data.trackingKey].length - 1];
 
+  const { data: depthData } = useMarketDepth(symbol);
+
   const queryClient = useQueryClient();
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => {
       queryClient.invalidateQueries({ queryKey: ["options-analytics", symbol] });
       queryClient.invalidateQueries({ queryKey: ["candles", symbol, "15"] });
+      queryClient.invalidateQueries({ queryKey: ["depth", symbol] });
       setTick((t) => t + 1);
     }, REFRESH_MS);
     return () => clearInterval(id);
   }, [queryClient, symbol]);
+
+  // One snapshot back, used only to notice a wall that was large a moment
+  // ago and has since mostly vanished (a "possible order pulling" heuristic).
+  const prevDepthRef = useRef<MarketDepthSnapshot | null>(null);
+  const marketDepth: MarketDepthResult | null = useMemo(() => {
+    if (!depthData) return null;
+    return evaluateMarketDepth(depthData, prevDepthRef.current, data.underlyingCandles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depthData, data.underlyingCandles, tick]);
+  useEffect(() => {
+    if (depthData) prevDepthRef.current = depthData;
+  }, [depthData]);
 
   // Only a currently OPEN call is meaningful to verify in real time -- once
   // it's closed there's nothing live left to check against.
@@ -78,9 +95,10 @@ export function useStrategyVerification(symbol: TradableSymbol) {
       livePremium,
       premiumSamples: samplesRef.current.premium,
       oiSamples: samplesRef.current.oi,
+      marketDepth,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, underlyingPrice, data.underlyingCandles, livePremium, tick]);
+  }, [active, underlyingPrice, data.underlyingCandles, livePremium, marketDepth, tick]);
 
   return {
     latest: active,
@@ -91,5 +109,6 @@ export function useStrategyVerification(symbol: TradableSymbol) {
     candlesLoading: data.underlyingCandlesLoading,
     candlesError: data.underlyingCandlesError,
     result,
+    marketDepth,
   };
 }

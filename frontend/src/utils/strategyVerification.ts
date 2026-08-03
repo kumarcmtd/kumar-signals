@@ -1,5 +1,6 @@
 import type { Candle } from "../types";
 import { adx, atr, centralPivotRange, emaLast, macd, pivotPoints, rsi, superTrend, vwap } from "./indicators";
+import type { MarketDepthResult } from "./marketDepthAnalysis";
 
 // A completely separate, read-only verification layer on top of whatever
 // Best Call (or any other page) already generated -- this module never
@@ -44,6 +45,13 @@ export interface VerificationInput {
   // data that doesn't exist.
   premiumSamples: number[];
   oiSamples: (number | null)[];
+  // Market Depth & Smart Money is intentionally NOT one of the "major"
+  // override-gating checks below -- per its own spec, it must only ever
+  // nudge the existing weighted confidence, never independently force or
+  // block a BUY on its own. null when depth data isn't available (no L2
+  // entitlement, or not enough candles yet) -- shown as a neutral WAIT
+  // rather than treated as a failure of the trade itself.
+  marketDepth: MarketDepthResult | null;
 }
 
 const TIER_SCORE: Record<StrategyTier, number> = { pass: 100, wait: 50, fail: 0 };
@@ -327,8 +335,49 @@ function checkPremiumMomentum(premiumSamples: number[]): StrategyResult {
   return result("premiumMomentum", "Premium Momentum", 5, "wait", "Premium is moving sideways since this page opened.", "Premium Sideways -- no clear higher-high/higher-low pattern yet.");
 }
 
+// 13. Market Depth & Smart Money -- purely a confidence nudge, deliberately
+// excluded from the "major" override-gating list below so it can never
+// singlehandedly force a STRONG BUY or an AVOID the way SuperTrend/EMA/
+// VWAP/ADX can.
+function checkMarketDepth(direction: CallDirection, depth: MarketDepthResult | null): StrategyResult {
+  if (!depth) {
+    return result("marketDepth", "Market Depth & Smart Money", 10, "wait", "Order book depth isn't available right now.", "Either this account doesn't have Level 2 depth entitlement for MCX, or there isn't enough data yet.");
+  }
+  const aligned = direction === "bullish" ? depth.tier === "bullish" : depth.tier === "bearish";
+  const opposed = direction === "bullish" ? depth.tier === "bearish" : depth.tier === "bullish";
+  const cautionFlags = depth.smartMoney.filter((f) => f.kind === "caution").map((f) => f.label);
+  if (aligned) {
+    return result(
+      "marketDepth",
+      "Market Depth & Smart Money",
+      10,
+      "pass",
+      `Order book is ${depth.tier} (${depth.reason}), matching this call.`,
+      `Buy ${depth.buyPct}% / Sell ${depth.sellPct}%, imbalance ${depth.imbalance >= 0 ? "+" : ""}${depth.imbalance}. ${cautionFlags.length ? cautionFlags.join("; ") : "No unusual walls detected."}`
+    );
+  }
+  if (opposed) {
+    return result(
+      "marketDepth",
+      "Market Depth & Smart Money",
+      10,
+      "fail",
+      `Order book is ${depth.tier} (${depth.reason}) -- against this call.`,
+      `Buy ${depth.buyPct}% / Sell ${depth.sellPct}%, imbalance ${depth.imbalance >= 0 ? "+" : ""}${depth.imbalance}. ${cautionFlags.length ? cautionFlags.join("; ") : ""}`
+    );
+  }
+  return result(
+    "marketDepth",
+    "Market Depth & Smart Money",
+    10,
+    "wait",
+    `Order book is neutral (${depth.reason}) -- no clear edge either way.`,
+    `Buy ${depth.buyPct}% / Sell ${depth.sellPct}%, imbalance ${depth.imbalance >= 0 ? "+" : ""}${depth.imbalance}.`
+  );
+}
+
 export function evaluateStrategyVerification(input: VerificationInput): VerificationResult {
-  const { direction, candles, liveUnderlyingPrice, entry, effectiveStop, livePremium, premiumSamples, oiSamples } = input;
+  const { direction, candles, liveUnderlyingPrice, entry, effectiveStop, livePremium, premiumSamples, oiSamples, marketDepth } = input;
 
   const strategies: StrategyResult[] = [
     checkDoubleSuperTrend(candles, direction),
@@ -343,6 +392,7 @@ export function evaluateStrategyVerification(input: VerificationInput): Verifica
     checkAtrStop(candles, entry, effectiveStop),
     checkOpenInterest(premiumSamples, oiSamples),
     checkPremiumMomentum(premiumSamples),
+    checkMarketDepth(direction, marketDepth),
   ];
 
   const totalWeight = strategies.reduce((s, r) => s + r.weightPct, 0);

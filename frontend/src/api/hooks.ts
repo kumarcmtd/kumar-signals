@@ -86,6 +86,18 @@ export function useOptionsAnalytics(symbol: InstrumentSymbol) {
   });
 }
 
+// Level 2 market depth for the underlying future -- used by AI Strategy
+// Verification's Market Depth & Smart Money card. A short refetch interval
+// since a stale order-book snapshot is actively misleading, not just less
+// current; the page's own 5s tick also force-refreshes this same key.
+export function useMarketDepth(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["depth", symbol],
+    queryFn: () => api.depth(symbol),
+    refetchInterval: 5_000,
+  });
+}
+
 export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],

@@ -103,6 +103,26 @@ export interface OptionsAnalytics {
   error?: string;
 }
 
+export interface DepthLevel {
+  price: number;
+  quantity: number;
+  orders: number;
+}
+
+export interface MarketDepthSnapshot {
+  tradingSymbol: string;
+  bestBid: number | null;
+  bestAsk: number | null;
+  buyDepth: DepthLevel[];
+  sellDepth: DepthLevel[];
+  totalBuyQuantity: number;
+  totalSellQuantity: number;
+  volume: number | null;
+  averagePrice: number | null;
+  asOf: string;
+  error?: string;
+}
+
 export interface IndicatorSnapshot {
   ema9: number | null;
   ema20: number | null;

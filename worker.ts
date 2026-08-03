@@ -1264,6 +1264,79 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
   return results;
 }
 
+// ---- Market depth (Level 2 order book) for the underlying future ----
+// Reuses the exact same /v2/market-quote/quotes endpoint the option chain
+// already calls (see getOptionChain above) -- Upstox's full quote response
+// already includes a `depth` object (5 bid/ask levels) alongside the
+// last_price/oi/volume fields this file was already reading, so this is one
+// more read of an endpoint already in use, not a new upstream integration.
+// Some accounts/plans may not carry L2 depth entitlement for MCX -- returns
+// { error } rather than fabricating levels when Upstox sends none back, so
+// the frontend can show an honest "unavailable" state instead of fake data.
+interface DepthLevel {
+  price: number;
+  quantity: number;
+  orders: number;
+}
+
+interface MarketDepthSnapshot {
+  tradingSymbol: string;
+  bestBid: number | null;
+  bestAsk: number | null;
+  buyDepth: DepthLevel[];
+  sellDepth: DepthLevel[];
+  totalBuyQuantity: number;
+  totalSellQuantity: number;
+  volume: number | null;
+  averagePrice: number | null;
+  asOf: string;
+}
+
+async function getFuturesDepth(token: string, instrumentKey: string, tradingSymbol: string): Promise<MarketDepthSnapshot | { error: string }> {
+  const usp = new URLSearchParams({ instrument_key: instrumentKey });
+  const res = await fetch(`https://api.upstox.com/v2/market-quote/quotes?${usp.toString()}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+  });
+  let json: any;
+  try {
+    json = await res.json();
+  } catch {
+    return { error: `Depth request failed (HTTP ${res.status} ${res.statusText}): response was not valid JSON` };
+  }
+  if (json.errors && json.errors.length) {
+    const msg = json.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
+    return { error: `Upstox rejected the depth request (HTTP ${res.status}): ${msg}` };
+  }
+  if (json.status !== "success" || !json.data) return { error: `Upstox returned no quote data for this instrument (HTTP ${res.status})` };
+  const quote: any = Object.values(json.data)[0];
+  if (!quote) return { error: "No quote returned for this instrument" };
+  const depth = quote.depth;
+  if (!depth || !Array.isArray(depth.buy) || !Array.isArray(depth.sell) || (!depth.buy.length && !depth.sell.length)) {
+    return { error: "This account doesn't appear to have Level 2 market depth entitlement for MCX -- Upstox returned no depth levels" };
+  }
+  const toLevels = (levels: any[]): DepthLevel[] => levels.filter((l) => l && l.price).map((l) => ({ price: l.price, quantity: l.quantity ?? 0, orders: l.orders ?? 0 }));
+  const buyDepth = toLevels(depth.buy);
+  const sellDepth = toLevels(depth.sell);
+  return {
+    tradingSymbol,
+    bestBid: buyDepth[0]?.price ?? null,
+    bestAsk: sellDepth[0]?.price ?? null,
+    buyDepth,
+    sellDepth,
+    totalBuyQuantity: quote.total_buy_quantity ?? buyDepth.reduce((s, l) => s + l.quantity, 0),
+    totalSellQuantity: quote.total_sell_quantity ?? sellDepth.reduce((s, l) => s + l.quantity, 0),
+    volume: quote.volume ?? null,
+    averagePrice: quote.average_price ?? null,
+    asOf: new Date().toISOString(),
+  };
+}
+
+async function computeMarketDepth(token: string, symbol: Symbol): Promise<MarketDepthSnapshot | { error: string }> {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: "No instrument found" };
+  return getFuturesDepth(token, fut.instrument_key, fut.trading_symbol);
+}
+
 interface OptionLegAnalytics {
   ltp: number | null;
   oi: number | null;
@@ -1873,6 +1946,15 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
             .map((s) => Number(s))
             .filter((n) => Number.isFinite(n));
           return json(await computeOptionsAnalytics(token, symbol, pinnedStrikes));
+        }
+
+        const depthMatch = url.pathname.match(/^\/api\/depth\/([A-Z]+)$/);
+        if (depthMatch) {
+          const symbol = depthMatch[1] as Symbol;
+          if (!ALL_SYMBOLS.includes(symbol)) return json({ error: "Unsupported symbol" }, 400);
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          return json(await computeMarketDepth(token, symbol));
         }
 
         if (url.pathname === "/api/notify/topic") {
