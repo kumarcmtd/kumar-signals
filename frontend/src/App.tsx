@@ -23,6 +23,7 @@ import { BestCall } from "./pages/BestCall";
 import { AiRisk } from "./pages/AiRisk";
 import { AiSuperTrendPro } from "./pages/AiSuperTrendPro";
 import { AiStrategyVerification } from "./pages/AiStrategyVerification";
+import { AiVerifyPro } from "./pages/AiVerifyPro";
 
 function App() {
   return (
@@ -52,6 +53,7 @@ function App() {
           <Route path="/ai-risk" element={<AiRisk />} />
           <Route path="/ai-supertrend-pro" element={<AiSuperTrendPro />} />
           <Route path="/ai-strategy-verification" element={<AiStrategyVerification />} />
+          <Route path="/ai-verify-pro" element={<AiVerifyPro />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>

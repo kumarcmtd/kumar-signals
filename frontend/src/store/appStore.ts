@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { InstrumentSymbol, Direction } from "../types";
 import type { Decision6 } from "../utils/timeframeEngine";
+import type { StrategyTier } from "../utils/strategyVerification";
 
 export type Timeframe = "5" | "15" | "30" | "1D";
 
@@ -125,6 +126,21 @@ export interface SuperTrendLogEntry {
 
 const MAX_SUPERTREND_HISTORY = 100;
 
+// AI Verify Pro's own "self-learning" track record -- track-only, never
+// auto-adjusts any engine's weights. Frozen once per trade the moment it's
+// first verified (never overwritten on later 5s ticks), keyed by the SAME
+// TradeLogEntry.id Best Call already uses for that call, so it can later be
+// joined against tradeLogs' own win/loss outcome (flattenClosedTrades) to
+// build a real "when THIS check passed, we won X% of the time" report. Local
+// only -- persisted via this store's existing persist() below, not synced to
+// the cross-device KV backend the trade logs use.
+export interface VerifyProSnapshot {
+  checks: Record<string, StrategyTier>;
+  tradeGrade: string;
+  weightedScorePct: number;
+  capturedAt: number;
+}
+
 interface AppState {
   selectedInstrument: InstrumentSymbol;
   setSelectedInstrument: (symbol: InstrumentSymbol) => void;
@@ -160,6 +176,9 @@ interface AppState {
 
   superTrendLogs: Record<string, SuperTrendLogEntry[]>;
   setSuperTrendLog: (key: string, entries: SuperTrendLogEntry[]) => void;
+
+  verifyProSnapshots: Record<string, VerifyProSnapshot>;
+  recordVerifyProSnapshot: (id: string, snapshot: VerifyProSnapshot) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -211,6 +230,10 @@ export const useAppStore = create<AppState>()(
             [key]: entries.length > MAX_SUPERTREND_HISTORY ? entries.slice(entries.length - MAX_SUPERTREND_HISTORY) : entries,
           },
         })),
+
+      verifyProSnapshots: {},
+      recordVerifyProSnapshot: (id, snapshot) =>
+        set((s) => (s.verifyProSnapshots[id] ? s : { verifyProSnapshots: { ...s.verifyProSnapshots, [id]: snapshot } })),
     }),
     {
       name: "kumar-signals-pro-store",

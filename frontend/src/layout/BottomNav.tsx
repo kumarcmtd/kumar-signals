@@ -1,10 +1,11 @@
 import { NavLink } from "react-router-dom";
-import { FlaskConical, Crown, ShieldCheck, BarChart3, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown, Rocket, LineChart, Calculator, NotebookText, Bell, Settings, GraduationCap, Crosshair, Flame, Zap, ClipboardCheck } from "lucide-react";
+import { FlaskConical, Crown, ShieldCheck, BarChart3, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown, Rocket, LineChart, Calculator, NotebookText, Bell, Settings, GraduationCap, Crosshair, Flame, Zap, ClipboardCheck, BadgeCheck } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 
 const items = [
   { to: "/", label: "AI-Shoot", icon: Rocket, end: true },
   { to: "/best-call", label: "Best Call", icon: Crosshair },
+  { to: "/ai-verify-pro", label: "Verify Pro", icon: BadgeCheck },
   { to: "/ai-strategy-verification", label: "AI Verify", icon: ClipboardCheck },
   { to: "/ai-risk", label: "AI-Risk", icon: Flame },
   { to: "/ai-supertrend-pro", label: "SuperTrend Pro", icon: Zap },
