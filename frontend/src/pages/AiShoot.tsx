@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers } from "lucide-react";
+import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers, Eye } from "lucide-react";
 import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useHitScoreSuite } from "../hooks/useHitScoreSuite";
-import { scanForHitScoreCalls, HIT_SCORE_MIN, type HitScoreCandidate } from "../utils/hitScoreEngine";
+import { scanForHitScoreCalls, scanForNearMisses, HIT_SCORE_MIN, type HitScoreCandidate, type NearMissCandidate } from "../utils/hitScoreEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
@@ -210,6 +210,28 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
   );
 }
 
+// Watchlist-only -- these never open a trade log entry, never get an
+// entry/stop/target. They exist purely so the page doesn't look empty/dead
+// while nothing has cleared the (deliberately extreme) live-call bar yet.
+function NearMissRow({ candidate }: { candidate: NearMissCandidate }) {
+  const bullish = candidate.analysis.bias === "bullish";
+  const accent = bullish ? "#10B981" : "#EF4444";
+  return (
+    <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+          {bullish ? <TrendingUp size={13} style={{ color: accent }} /> : <TrendingDown size={13} style={{ color: accent }} />}
+          {DISPLAY_NAME[candidate.symbol as TradableSymbol]} · {candidate.analysis.label} · {candidate.analysis.optSide ?? ""}
+        </p>
+        <span className="text-sm font-black shrink-0 px-2 py-0.5 rounded-full text-white" style={{ background: accent }}>
+          {candidate.hitScore}
+        </span>
+      </div>
+      <p className="text-[10px] text-slate-400 mt-1.5">{candidate.reasons.join(" · ")}</p>
+    </div>
+  );
+}
+
 function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="rounded-xl bg-slate-50 border border-slate-100 px-2.5 py-2">
@@ -236,6 +258,14 @@ export function AiShoot() {
       ...naturalGas.entries.map((e) => ({ symbol: "NATURALGAS", analysis: e.analysis, candles: e.candles })),
     ];
     return scanForHitScoreCalls(entries);
+  }, [crudeOil.entries, naturalGas.entries]);
+
+  const nearMisses = useMemo(() => {
+    const entries = [
+      ...crudeOil.entries.map((e) => ({ symbol: "CRUDEOIL", analysis: e.analysis, candles: e.candles })),
+      ...naturalGas.entries.map((e) => ({ symbol: "NATURALGAS", analysis: e.analysis, candles: e.candles })),
+    ];
+    return scanForNearMisses(entries);
   }, [crudeOil.entries, naturalGas.entries]);
 
   const keyPrefix = "SHOOT";
@@ -330,6 +360,20 @@ export function AiShoot() {
             <ShootCallCard key={`${call.symbol}-${call.analysis.tf}`} call={call} tradeLogs={tradeLogs} options={board[call.symbol as TradableSymbol].options} keyPrefix={keyPrefix} />
           ))}
         </div>
+      )}
+
+      {nearMisses.length > 0 && (
+        <section className="rounded-3xl bg-white shadow-md p-4 space-y-2.5">
+          <p className="text-xs font-bold uppercase text-slate-500 flex items-center gap-1.5">
+            <Eye size={13} className="text-indigo-500" /> Near Miss Watchlist
+          </p>
+          <p className="text-[10px] text-slate-400">
+            Setups scoring {"< " + HIT_SCORE_MIN} but at least building -- informational only, these never open a trade log entry or get an entry/stop/target.
+          </p>
+          {nearMisses.map((c) => (
+            <NearMissRow key={`${c.symbol}-${c.analysis.tf}`} candidate={c} />
+          ))}
+        </section>
       )}
 
       {/* DAY-WISE TRADE LOG */}
