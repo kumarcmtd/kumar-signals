@@ -1,4 +1,4 @@
-import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult } from "../types";
+import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse } from "../types";
 import type { TradeLogEntry } from "../store/appStore";
 
 async function getJSON<T>(path: string): Promise<T> {
@@ -35,6 +35,7 @@ export const api = {
   optionsAnalytics: (symbol: InstrumentSymbol, pinnedStrikes: number[] = []) =>
     getJSON<OptionsAnalytics>(`/options/${symbol}${pinnedStrikes.length ? `?strikes=${pinnedStrikes.join(",")}` : ""}`),
   depth: (symbol: InstrumentSymbol) => getJSON<MarketDepthSnapshot>(`/depth/${symbol}`),
+  newsTrade: () => getJSON<NewsTradeApiResponse>("/news-trade"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),

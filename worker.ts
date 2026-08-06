@@ -11,11 +11,18 @@ import { findEliteSignal } from "./frontend/src/utils/eliteSignal";
 import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEngine";
 import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
+import { scoreArticles, scoreEiaChange, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult } from "./frontend/src/utils/newsScoring";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
   ASSETS: Fetcher;
   AI: Ai;
+  // All three optional -- News Based Trade AI degrades gracefully per
+  // source when a key isn't configured (see fetchEnergyNews/fetchEiaData/
+  // fetchEconCalendar below), never fabricating data to fill the gap.
+  NEWSAPI_KEY?: string;
+  EIA_API_KEY?: string;
+  FRED_API_KEY?: string;
 }
 
 // The TradingView widget (frontend/src/components/TradingViewWidget.tsx) is
@@ -1264,6 +1271,139 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
   return results;
 }
 
+// ---- News Based Trade AI: news + EIA inventory/storage + econ calendar ----
+// Three independent third-party integrations, each gated behind its own
+// optional secret (see Env) and each failing gracefully to { available:
+// false, error } rather than fabricating data when a key is missing, the
+// upstream call fails, or the response shape doesn't match what's expected.
+// Series/release IDs below are EIA's and FRED's own documented identifiers
+// for weekly crude stocks, weekly Lower-48 gas storage, and the handful of
+// macro releases this page cares about -- verify against a live key once
+// configured, since this sandbox has no network path to test them directly.
+
+const ENERGY_NEWS_QUERY =
+  '(crude OR "oil price" OR OPEC OR "natural gas" OR "Henry Hub" OR WTI OR Brent OR "Strait of Hormuz" OR "Red Sea" OR pipeline OR refinery OR "EIA storage" OR "EIA inventory") AND (oil OR gas OR energy OR crude)';
+
+interface NewsFetchResult {
+  available: boolean;
+  articles: ScoredNewsArticle[];
+  error?: string;
+}
+
+async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
+  if (!env.NEWSAPI_KEY) return { available: false, articles: [], error: "NEWSAPI_KEY not configured" };
+  try {
+    const usp = new URLSearchParams({
+      q: ENERGY_NEWS_QUERY,
+      language: "en",
+      sortBy: "publishedAt",
+      pageSize: "40",
+    });
+    const res = await fetch(`https://newsapi.org/v2/everything?${usp.toString()}`, {
+      headers: { "X-Api-Key": env.NEWSAPI_KEY, "User-Agent": "KumarSignalsPro/1.0" },
+    });
+    if (!res.ok) return { available: false, articles: [], error: `NewsAPI returned ${res.status}` };
+    const json: any = await res.json();
+    const raw: RawNewsArticle[] = (json?.articles ?? [])
+      .filter((a: any) => a?.title && a.title !== "[Removed]")
+      .map((a: any) => ({
+        headline: a.title as string,
+        summary: (a.description ?? "") as string,
+        source: (a.source?.name ?? "Unknown") as string,
+        publishedAt: (a.publishedAt ?? new Date().toISOString()) as string,
+        url: (a.url ?? "") as string,
+      }));
+    return { available: true, articles: scoreArticles(raw) };
+  } catch (e: any) {
+    return { available: false, articles: [], error: e.message ?? "News fetch failed" };
+  }
+}
+
+interface EiaFetchResult {
+  available: boolean;
+  crude: EiaScoreResult | null;
+  ngStorage: EiaScoreResult | null;
+  error?: string;
+}
+
+async function fetchEiaSeries(apiKey: string, path: string, seriesId: string): Promise<{ period: string; value: number }[]> {
+  const usp = new URLSearchParams({
+    api_key: apiKey,
+    frequency: "weekly",
+    "data[0]": "value",
+    "facets[series][]": seriesId,
+    "sort[0][column]": "period",
+    "sort[0][direction]": "desc",
+    length: "2",
+  });
+  const res = await fetch(`https://api.eia.gov/v2/${path}/data/?${usp.toString()}`);
+  if (!res.ok) throw new Error(`EIA returned ${res.status}`);
+  const json: any = await res.json();
+  const rows = json?.response?.data ?? [];
+  return rows.map((r: any) => ({ period: r.period, value: Number(r.value) })).filter((r: any) => Number.isFinite(r.value));
+}
+
+async function fetchEiaData(env: Env): Promise<EiaFetchResult> {
+  if (!env.EIA_API_KEY) return { available: false, crude: null, ngStorage: null, error: "EIA_API_KEY not configured" };
+  try {
+    const [crudeRows, ngRows] = await Promise.all([
+      fetchEiaSeries(env.EIA_API_KEY, "petroleum/stoc/wstk", "WCESTUS1"),
+      fetchEiaSeries(env.EIA_API_KEY, "natural-gas/stor/wkly", "NW2_EPG0_SWO_R48_BCF"),
+    ]);
+    const crude = crudeRows.length >= 2 ? scoreEiaChange("crude_inventory", crudeRows[0].value - crudeRows[1].value) : null;
+    const ngStorage = ngRows.length >= 2 ? scoreEiaChange("ng_storage", ngRows[0].value - ngRows[1].value) : null;
+    return { available: crude !== null || ngStorage !== null, crude, ngStorage };
+  } catch (e: any) {
+    return { available: false, crude: null, ngStorage: null, error: e.message ?? "EIA fetch failed" };
+  }
+}
+
+interface EconCalendarEvent {
+  name: string;
+  date: string;
+}
+
+interface CalendarFetchResult {
+  available: boolean;
+  events: EconCalendarEvent[];
+  error?: string;
+}
+
+const FRED_RELEASES: { name: string; releaseId: number }[] = [
+  { name: "CPI (Inflation)", releaseId: 10 },
+  { name: "Employment Situation (Jobs Report)", releaseId: 50 },
+  { name: "PPI", releaseId: 46 },
+  { name: "GDP", releaseId: 53 },
+];
+
+async function fetchEconCalendar(env: Env): Promise<CalendarFetchResult> {
+  if (!env.FRED_API_KEY) return { available: false, events: [], error: "FRED_API_KEY not configured" };
+  try {
+    const now = new Date().toISOString().slice(0, 10);
+    const results = await Promise.all(
+      FRED_RELEASES.map(async (rel) => {
+        const usp = new URLSearchParams({
+          release_id: String(rel.releaseId),
+          api_key: env.FRED_API_KEY as string,
+          file_type: "json",
+          realtime_start: now,
+          sort_order: "asc",
+          limit: "1",
+        });
+        const res = await fetch(`https://api.stlouisfed.org/fred/release/dates?${usp.toString()}`);
+        if (!res.ok) return null;
+        const json: any = await res.json();
+        const next = json?.release_dates?.[0]?.date;
+        return next ? { name: rel.name, date: next as string } : null;
+      })
+    );
+    const events = results.filter((e): e is EconCalendarEvent => e !== null).sort((a, b) => a.date.localeCompare(b.date));
+    return { available: true, events };
+  } catch (e: any) {
+    return { available: false, events: [], error: e.message ?? "Economic calendar fetch failed" };
+  }
+}
+
 // ---- Market depth (Level 2 order book) for the underlying future ----
 // Reuses the exact same /v2/market-quote/quotes endpoint the option chain
 // already calls (see getOptionChain above) -- Upstox's full quote response
@@ -1966,6 +2106,11 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           const token = await requireToken(env);
           if (token instanceof Response) return token;
           return json(await computeMarketDepth(token, symbol));
+        }
+
+        if (url.pathname === "/api/news-trade") {
+          const [news, eia, calendar] = await Promise.all([fetchEnergyNews(env), fetchEiaData(env), fetchEconCalendar(env)]);
+          return json({ news, eia, calendar, fetchedAt: new Date().toISOString() });
         }
 
         if (url.pathname === "/api/notify/topic") {

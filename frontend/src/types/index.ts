@@ -1,3 +1,5 @@
+import type { ScoredNewsArticle, EiaScoreResult } from "../utils/newsScoring";
+
 export type InstrumentSymbol = "CRUDEOIL" | "NATURALGAS" | "GOLD" | "SILVER";
 
 export type Direction = "bullish" | "bearish" | "neutral";
@@ -121,6 +123,41 @@ export interface MarketDepthSnapshot {
   averagePrice: number | null;
   asOf: string;
   error?: string;
+}
+
+// News Based Trade AI's wire format -- ScoredNewsArticle/EiaScoreResult are
+// imported straight from the same pure module worker.ts uses to build this
+// exact response, so the frontend's expected shape can never silently drift
+// from what the backend actually sends.
+export interface NewsFetchResponse {
+  available: boolean;
+  articles: ScoredNewsArticle[];
+  error?: string;
+}
+
+export interface EiaFetchResponse {
+  available: boolean;
+  crude: EiaScoreResult | null;
+  ngStorage: EiaScoreResult | null;
+  error?: string;
+}
+
+export interface EconCalendarEvent {
+  name: string;
+  date: string;
+}
+
+export interface CalendarFetchResponse {
+  available: boolean;
+  events: EconCalendarEvent[];
+  error?: string;
+}
+
+export interface NewsTradeApiResponse {
+  news: NewsFetchResponse;
+  eia: EiaFetchResponse;
+  calendar: CalendarFetchResponse;
+  fetchedAt: string;
 }
 
 export interface IndicatorSnapshot {

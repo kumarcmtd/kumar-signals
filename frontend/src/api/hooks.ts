@@ -98,6 +98,18 @@ export function useMarketDepth(symbol: InstrumentSymbol) {
   });
 }
 
+// News Based Trade AI's feed -- symbol-agnostic (both Crude and NG read the
+// same response, filtered client-side by newsTradeEngine.ts), so this is
+// ONE shared query rather than one per symbol. News doesn't need Market
+// Depth's 5s cadence -- a 60s refetch is plenty for headline-driven data.
+export function useNewsTrade() {
+  return useQuery({
+    queryKey: ["news-trade"],
+    queryFn: api.newsTrade,
+    refetchInterval: 60_000,
+  });
+}
+
 export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],
