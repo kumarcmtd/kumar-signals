@@ -1480,6 +1480,12 @@ async function createPortfolioTrade(env: Env, body: Partial<PortfolioTrade>): Pr
   if (typeof body.quantity !== "number" || body.quantity <= 0) throw new Error("quantity is required");
   if (typeof body.lotSize !== "number" || body.lotSize <= 0) throw new Error("lotSize is required");
 
+  // Logging a trade that's already closed (e.g. importing real broker
+  // history) needs entry AND exit set in the same call -- the existing
+  // OPEN-then-PATCH-to-close flow always stamps exitDate as "now", which is
+  // wrong for a trade that actually closed days ago.
+  const hasExit = typeof body.exitPrice === "number";
+
   const trade: PortfolioTrade = {
     id: crypto.randomUUID(),
     symbol: body.symbol as Symbol,
@@ -1491,13 +1497,18 @@ async function createPortfolioTrade(env: Env, body: Partial<PortfolioTrade>): Pr
     stopLoss: body.stopLoss,
     target: body.target,
     entryDate: body.entryDate ?? new Date().toISOString(),
-    status: "OPEN",
+    status: hasExit ? "CLOSED" : "OPEN",
     notes: body.notes,
     mistakes: body.mistakes,
     lessons: body.lessons,
     emotion: body.emotion,
     source: body.source ?? "manual",
   };
+  if (hasExit) {
+    trade.exitPrice = body.exitPrice;
+    trade.exitDate = body.exitDate ?? new Date().toISOString();
+    trade.pnl = computePnl(trade);
+  }
 
   const trades = await getPortfolioTrades(env);
   trades.unshift(trade);

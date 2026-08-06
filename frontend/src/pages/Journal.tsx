@@ -289,6 +289,15 @@ function JournalField({ label, defaultValue, onSave }: { label: string; defaultV
   );
 }
 
+// Local "YYYY-MM-DD" (as an <input type="date"> gives) -> a real ISO
+// instant. Defaults to noon local time when only a date is picked, since a
+// historical trade being logged after the fact never has a real timestamp
+// to recover -- noon avoids the date accidentally rolling to the day before
+// once converted to UTC for storage.
+function dateInputToISO(dateStr: string): string {
+  return new Date(`${dateStr}T12:00:00`).toISOString();
+}
+
 function TradeForm({
   onSubmit,
   submitting,
@@ -305,6 +314,10 @@ function TradeForm({
   const [stopLoss, setStopLoss] = useState("");
   const [target, setTarget] = useState("");
   const [quantity, setQuantity] = useState("1");
+  const [entryDate, setEntryDate] = useState("");
+  const [alreadyClosed, setAlreadyClosed] = useState(false);
+  const [exitPrice, setExitPrice] = useState("");
+  const [exitDate, setExitDate] = useState("");
 
   return (
     <div className="card p-4 space-y-3">
@@ -336,10 +349,23 @@ function TradeForm({
         <LabeledInput label="Stop-loss" value={stopLoss} onChange={setStopLoss} />
         <LabeledInput label="Target" value={target} onChange={setTarget} />
         <LabeledInput label="Quantity (lots)" value={quantity} onChange={setQuantity} />
+        <LabeledDateInput label="Entry date (optional)" value={entryDate} onChange={setEntryDate} />
       </div>
+
+      <label className="flex items-center gap-2 text-xs font-bold pt-1">
+        <input type="checkbox" checked={alreadyClosed} onChange={(e) => setAlreadyClosed(e.target.checked)} className="w-4 h-4" />
+        Log as an already-closed trade (e.g. importing real broker history)
+      </label>
+      {alreadyClosed && (
+        <div className="grid grid-cols-2 gap-2 rounded-xl bg-[var(--color-surface-soft)] p-2.5">
+          <LabeledInput label="Exit price" value={exitPrice} onChange={setExitPrice} />
+          <LabeledDateInput label="Exit date" value={exitDate} onChange={setExitDate} />
+        </div>
+      )}
+
       {error && <p className="text-xs text-[var(--color-sell)]">{error.message}</p>}
       <button
-        disabled={submitting}
+        disabled={submitting || (alreadyClosed && !exitPrice)}
         onClick={() =>
           onSubmit({
             symbol,
@@ -350,6 +376,9 @@ function TradeForm({
             target: target ? Number(target) : undefined,
             quantity: Number(quantity) || 1,
             lotSize: LOT_SIZE[symbol],
+            entryDate: entryDate ? dateInputToISO(entryDate) : undefined,
+            exitPrice: alreadyClosed && exitPrice ? Number(exitPrice) : undefined,
+            exitDate: alreadyClosed && exitDate ? dateInputToISO(exitDate) : undefined,
           })
         }
         className="w-full py-2 rounded-xl text-sm font-bold bg-[var(--color-buy)] text-white disabled:opacity-60"
@@ -366,6 +395,20 @@ function LabeledInput({ label, value, onChange }: { label: string; value: string
       <span className="text-[var(--color-muted)]">{label}</span>
       <input
         type="number"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
+      />
+    </label>
+  );
+}
+
+function LabeledDateInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="block text-xs">
+      <span className="text-[var(--color-muted)]">{label}</span>
+      <input
+        type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-lg border border-[var(--color-border)] px-2 py-1.5 text-sm"
