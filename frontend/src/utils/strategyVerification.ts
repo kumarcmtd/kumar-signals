@@ -467,10 +467,12 @@ export function evaluateStrategyVerification(input: VerificationInput): Verifica
     downgrade("good", "STRONG requires SuperTrend, EMA200, VWAP, and ADX to all PASS.");
   }
 
-  const adxValue = adx(candles);
-  if (adxValue !== null && adxValue < 20) {
-    downgrade("wait", `ADX ${adxValue.toFixed(1)} is below 20 -- maximum recommendation is WAIT.`);
-  }
+  // A standalone "ADX<20 forces WAIT" override used to sit here on top of
+  // checkAdx() already scoring ADX<20 as a "fail" in the weighted average
+  // above -- double-punishing the same reading, and letting one soft
+  // trend-strength blip cap an otherwise strong, real move (e.g. a fresh
+  // breakout ADX hasn't caught up to yet) straight to WAIT regardless of
+  // everything else. checkAdx()'s own weighted vote already covers this.
 
   const srResult = strategies.find((s) => s.key === "sr");
   if (srResult?.tier === "wait") {

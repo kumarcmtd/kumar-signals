@@ -80,12 +80,12 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
       </div>
 
       {result.hardRejectionReasons.length > 0 && (
-        <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: "#FEE2E2", border: "1px solid #FCA5A5" }}>
-          <p className="text-[9px] font-bold uppercase mb-1" style={{ color: "#B91C1C" }}>
-            Hard Rejection Rules Triggered
+        <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: "#FEF3C7", border: "1px solid #FCD34D" }}>
+          <p className="text-[9px] font-bold uppercase mb-1" style={{ color: "#B45309" }}>
+            Caution Flags -- Points Docked From The Score
           </p>
           {result.hardRejectionReasons.map((r, i) => (
-            <p key={i} className="text-[11px]" style={{ color: "#991B1B" }}>
+            <p key={i} className="text-[11px]" style={{ color: "#92400E" }}>
               • {r}
             </p>
           ))}

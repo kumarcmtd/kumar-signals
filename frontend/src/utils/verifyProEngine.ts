@@ -187,8 +187,7 @@ function computeRiskPlan(entry: number, stop: number, targets: [number, number, 
   return { stopLoss: stop, targets: [targets[0], targets[1], targets[2], target4], riskRewardRatio: rr, riskRewardLabel: rrLabel };
 }
 
-function gradeFor(scorePct: number, failCount: number, majorAllPass: boolean, hardRejected: boolean): TradeGrade {
-  if (hardRejected) return "REJECT";
+function gradeFor(scorePct: number, failCount: number, majorAllPass: boolean): TradeGrade {
   if (scorePct >= 90 && failCount === 0 && majorAllPass) return "S+";
   if (scorePct >= 85 && failCount <= 1 && majorAllPass) return "S";
   if (scorePct >= 75 && failCount <= 2) return "A+";
@@ -274,7 +273,7 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
     bucket.weight += c.weightPct;
     categoryTotals.set(category, bucket);
   }
-  const weightedScorePct = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
+  const rawScorePct = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
 
   const categoryScores: CategoryScore[] = (Object.keys(CATEGORY_LABEL) as ConfidenceCategory[]).map((category) => {
     const bucket = categoryTotals.get(category);
@@ -289,38 +288,61 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
   const adxValue = adx(candles);
   const rsiValue = rsi(candles.map((c) => c.close));
 
-  // ---- Hard rejection rules -- any ONE of these forces NO TRADE. ----
-  const hardRejectionReasons: string[] = [];
+  // ---- Caution flags -- each one DOCKS points off the score instead of
+  // unilaterally overriding the verdict to REJECT on its own. The old
+  // design let any ONE of these force NO TRADE regardless of how strong
+  // every other check read -- which meant a single noisy, single-instant
+  // condition (a fast SuperTrend flip on one pullback candle, a 200-EMA
+  // still lagging a fresh breakout, one thin-volume bar inside an
+  // otherwise strong rally) could reject a call that was demonstrably
+  // working (already past Target 1, live premium climbing). A real trade
+  // getting rejected outright by one blip, while everything else about it
+  // was fine, is exactly the "missed the opportunity" complaint this
+  // engine exists to avoid. Now the verdict comes from the SAME weighted
+  // score the grade and win probability are both built from, so multiple
+  // real cautions stacking up together can still (correctly) sink a weak
+  // setup to REJECT -- but one isolated flag on an otherwise strong
+  // picture only nudges the grade down a notch, not straight to zero.
+  const cautionFlags: { reason: string; penalty: number }[] = [];
   const supertrendCheck = checks.find((c) => c.key === "supertrend");
   const ema200Check = checks.find((c) => c.key === "ema200");
   const srCheck = checks.find((c) => c.key === "sr");
   const volumeCheck = checks.find((c) => c.key === "volume");
 
-  if (supertrendCheck?.tier === "fail") hardRejectionReasons.push("SuperTrend is against this call.");
-  if (ema200Check?.tier === "fail") hardRejectionReasons.push("Higher-timeframe (EMA200) trend is against this call.");
-  if (adxValue !== null && adxValue < 20) hardRejectionReasons.push(`ADX ${adxValue.toFixed(1)} is below 20 -- no tradeable trend.`);
-  if (risk.riskRewardRatio !== null && risk.riskRewardRatio < 1.5) hardRejectionReasons.push(`Risk:Reward is only 1:${risk.riskRewardRatio.toFixed(1)} -- below the 1:1.5 minimum.`);
-  if (srCheck?.tier === "wait") hardRejectionReasons.push("Price is sitting right on a major support/resistance level.");
-  if (marketDepth && marketDepth.liquidityScore < 3) hardRejectionReasons.push("Order book liquidity is too thin to trade cleanly.");
-  if (volumeCheck?.tier === "fail") hardRejectionReasons.push("Volume is too thin -- weak participation.");
-  if (marketDepth && marketDepth.spreadPct !== null && marketDepth.spreadPct > 0.15) hardRejectionReasons.push(`Spread (${marketDepth.spreadPct.toFixed(2)}%) is too wide.`);
-  if (regime.regime === "false_breakout") hardRejectionReasons.push("Market just printed a false breakout.");
-  if (direction === "bullish" && smc.flags.some((f) => f.key === "sweepHigh")) hardRejectionReasons.push("A liquidity sweep against this call was just detected.");
-  if (direction === "bearish" && smc.flags.some((f) => f.key === "sweepLow")) hardRejectionReasons.push("A liquidity sweep against this call was just detected.");
-  if (regime.regime === "sideways" && (adxValue === null || adxValue < 18)) hardRejectionReasons.push("Sideways market with weak momentum.");
-  if (direction === "bullish" && smc.flags.some((f) => f.key === "instSell")) hardRejectionReasons.push("Institutional selling detected against this BUY call.");
-  if (direction === "bearish" && smc.flags.some((f) => f.key === "instBuy")) hardRejectionReasons.push("Institutional buying detected against this SELL call.");
+  if (supertrendCheck?.tier === "fail") cautionFlags.push({ reason: "SuperTrend is against this call.", penalty: 15 });
+  if (ema200Check?.tier === "fail") cautionFlags.push({ reason: "Higher-timeframe (EMA200) trend is against this call.", penalty: 12 });
+  if (adxValue !== null && adxValue < 20) cautionFlags.push({ reason: `ADX ${adxValue.toFixed(1)} is below 20 -- trend isn't fully confirmed yet.`, penalty: 10 });
+  if (risk.riskRewardRatio !== null && risk.riskRewardRatio < 1.5) cautionFlags.push({ reason: `Risk:Reward is only 1:${risk.riskRewardRatio.toFixed(1)} -- below the 1:1.5 target.`, penalty: 12 });
+  if (srCheck?.tier === "wait") cautionFlags.push({ reason: "Price is still testing a major support/resistance level.", penalty: 6 });
+  if (marketDepth && marketDepth.liquidityScore < 3) cautionFlags.push({ reason: "Order book liquidity is thin.", penalty: 15 });
+  if (volumeCheck?.tier === "fail") cautionFlags.push({ reason: "Volume is thin on the latest bar -- weak participation right now.", penalty: 8 });
+  if (marketDepth && marketDepth.spreadPct !== null && marketDepth.spreadPct > 0.15) cautionFlags.push({ reason: `Spread (${marketDepth.spreadPct.toFixed(2)}%) is wide.`, penalty: 10 });
+  if (regime.regime === "false_breakout") cautionFlags.push({ reason: "Market just printed a false breakout.", penalty: 15 });
+  if (direction === "bullish" && smc.flags.some((f) => f.key === "sweepHigh")) cautionFlags.push({ reason: "A liquidity sweep against this call was just detected.", penalty: 10 });
+  if (direction === "bearish" && smc.flags.some((f) => f.key === "sweepLow")) cautionFlags.push({ reason: "A liquidity sweep against this call was just detected.", penalty: 10 });
+  if (regime.regime === "sideways" && (adxValue === null || adxValue < 18)) cautionFlags.push({ reason: "Sideways market with weak momentum.", penalty: 12 });
+  if (direction === "bullish" && smc.flags.some((f) => f.key === "instSell")) cautionFlags.push({ reason: "Institutional selling detected against this BUY call.", penalty: 10 });
+  if (direction === "bearish" && smc.flags.some((f) => f.key === "instBuy")) cautionFlags.push({ reason: "Institutional buying detected against this SELL call.", penalty: 10 });
 
-  const hardRejected = hardRejectionReasons.length > 0;
-  const tradeGrade = gradeFor(weightedScorePct, failCount, majorAllPass, hardRejected);
+  const totalPenalty = cautionFlags.reduce((s, f) => s + f.penalty, 0);
+  const weightedScorePct = Math.max(0, Math.min(100, rawScorePct - totalPenalty));
+  const hardRejectionReasons = cautionFlags.map((f) => f.reason);
+
+  const tradeGrade = gradeFor(weightedScorePct, failCount, majorAllPass);
   const finalAction = GRADE_ACTION[tradeGrade];
 
-  // Winning Probability is a heuristic estimate derived from the confidence
-  // score, NOT a calibrated machine-learning output -- this app has no
-  // trained model. It intentionally sits a little below raw confidence, the
-  // way an experienced desk trader discounts a clean setup for the market's
-  // inherent uncertainty.
-  const winningProbabilityPct = hardRejected ? Math.max(5, Math.round(weightedScorePct * 0.3)) : Math.max(5, Math.min(97, Math.round(20 + weightedScorePct * 0.75)));
+  // Winning Probability is a heuristic estimate derived from the SAME
+  // final (post-caution) confidence score, NOT a calibrated machine-
+  // learning output -- this app has no trained model. It intentionally
+  // sits a little below raw confidence, the way an experienced desk
+  // trader discounts a clean setup for the market's inherent uncertainty.
+  // Deriving both numbers from one consistent score (plain proportional,
+  // no separate floor/offset) means confidence and win probability can no
+  // longer contradict each other the way a 78% score next to a 23% win
+  // probability used to -- and a genuinely weak, low-scoring setup now
+  // reads as a genuinely low win probability instead of being propped up
+  // by a flat +20 floor.
+  const winningProbabilityPct = Math.max(5, Math.min(97, Math.round(weightedScorePct * 0.9)));
 
   const riskLevel = riskLevelFor(regime, failCount, risk.riskRewardRatio, marketDepth);
 
@@ -353,7 +375,7 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
     { step: 4, title: "Smart Money Analysis", text: flow ? `${flow.deltaLabel}. Smart Money category score ${smartMoneyCat.scorePct}%.` : `Smart Money category score ${smartMoneyCat.scorePct}%.` },
     { step: 5, title: "Risk Analysis", text: `Risk:Reward ${risk.riskRewardLabel}, Risk Level ${riskLevel}. Risk category score ${riskCat.scorePct}%.` },
     { step: 6, title: "Probability Calculation", text: `Weighted confidence ${weightedScorePct}%, estimated win probability ${winningProbabilityPct}%.` },
-    { step: 7, title: "Final Decision", text: `${tradeGrade} grade -> ${finalAction}${hardRejected ? ` (${hardRejectionReasons.length} hard rejection${hardRejectionReasons.length > 1 ? "s" : ""})` : ""}.` },
+    { step: 7, title: "Final Decision", text: `${tradeGrade} grade -> ${finalAction}${cautionFlags.length ? ` (${totalPenalty} pts docked for ${cautionFlags.length} caution flag${cautionFlags.length > 1 ? "s" : ""})` : ""}.` },
   ];
 
   return {
