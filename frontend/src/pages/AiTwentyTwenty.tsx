@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
 import { Target, TrendingUp, TrendingDown, Gauge, ListChecks, RefreshCcw, Copy, Info, X, ChevronRight, ChevronDown, MessageCircle, CandlestickChart } from "lucide-react";
-import { useMarketStatus, usePortfolio, useCreateTrade, useSignal } from "../api/hooks";
-import { computePortfolioSummary } from "../utils/portfolioStats";
+import { useMarketStatus, useCreateTrade, useSignal } from "../api/hooks";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
-import { useHitScoreSuite, type HitScoreTimeframeEntry } from "../hooks/useHitScoreSuite";
-import { scanForAiTwenty, projectPremium20, LOT_SIZE, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
+import { useImmediateSuite } from "../hooks/useImmediateSuite";
+import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
@@ -17,7 +16,7 @@ import { checkVolumeSupport } from "../utils/volumeSupport";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
-import type { OptionsAnalytics } from "../types";
+import type { OptionsAnalytics, Candle } from "../types";
 
 // Same password-gated manual override Best Call already uses for its own
 // Force Stop button -- reused verbatim rather than inventing a second one.
@@ -26,6 +25,11 @@ const FORCE_STOP_PASSWORD = "SHANVI";
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const keyPrefix = "TWENTY20";
+// A candidate no longer belongs to any one candle timeframe (see
+// aiTwentyTwentyEngine.ts's analyzeImmediate) -- this fixed pseudo-tf keeps
+// every existing trade-log key ("TWENTY20-<SYMBOL>-<TF>") and its Call
+// History/Track Record/detail-modal plumbing working unchanged.
+const LIVE_TF = "LIVE";
 
 const STATUS_LABEL: Record<TradeLogStatus, string> = {
   running: "Running",
@@ -143,14 +147,14 @@ function TwentyCandidateCard({
   candidate: AiTwentyCandidate;
   tradeLogs: Record<string, TradeLogEntry[]>;
   options: OptionsAnalytics | undefined;
-  candles: ReturnType<typeof useHitScoreSuite>["entries"][number]["candles"];
+  candles: Candle[];
   expiry: string | undefined;
   loggedKey: string | null;
   setLoggedKey: (k: string | null) => void;
   copiedKey: string | null;
   setCopiedKey: (k: string | null) => void;
   createTrade: ReturnType<typeof useCreateTrade>;
-  onOpenDetail: (symbol: TradableSymbol, tf: string, entry: TradeLogEntry) => void;
+  onOpenDetail: (symbol: TradableSymbol, entry: TradeLogEntry) => void;
 }) {
   const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const [chatOpen, setChatOpen] = useState(false);
@@ -158,7 +162,7 @@ function TwentyCandidateCard({
   const bullish = candidate.analysis.bias === "bullish";
   const accent = bullish ? "#0EA5E9" : "#F43F5E";
   const symbolKey = candidate.symbol as TradableSymbol;
-  const tradeLogKey = `${keyPrefix}-${symbolKey}-${candidate.analysis.tf}`;
+  const tradeLogKey = `${keyPrefix}-${symbolKey}-${LIVE_TF}`;
   const log = tradeLogs[tradeLogKey] ?? [];
   const latest = log[log.length - 1];
   const openTrade = latest && !latest.closed ? latest : undefined;
@@ -216,7 +220,7 @@ function TwentyCandidateCard({
       <div className="p-4 flex items-start justify-between gap-3" style={{ background: bullish ? "linear-gradient(135deg,#EFF6FF,#FFFFFF)" : "linear-gradient(135deg,#FFF1F2,#FFFFFF)" }}>
         <div>
           <p className="text-[10px] font-bold uppercase text-slate-400">
-            {DISPLAY_NAME[symbolKey]} · {candidate.analysis.label}
+            {DISPLAY_NAME[symbolKey]} · Live Momentum
           </p>
           <p className="text-lg font-black flex items-center gap-1.5" style={{ color: accent }}>
             {bullish ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
@@ -305,12 +309,11 @@ function TwentyCandidateCard({
 
         {categories && (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase text-slate-400">Why this qualified</p>
+            <p className="text-[10px] font-bold uppercase text-slate-400">Why this qualified (live, not tied to any candle timeframe)</p>
             <CategoryBar label="Trend" score={bullish ? categories.trend.score : 100 - categories.trend.score} />
             <CategoryBar label="Momentum" score={bullish ? categories.momentum.score : 100 - categories.momentum.score} />
             <CategoryBar label="Price Action" score={bullish ? categories.priceAction.score : 100 - categories.priceAction.score} />
-            <CategoryBar label="Volume" score={bullish ? categories.volume.score : 100 - categories.volume.score} />
-            <CategoryBar label="Support/Resistance" score={bullish ? categories.supportResistance.score : 100 - categories.supportResistance.score} />
+            <CategoryBar label="Live Premium" score={bullish ? categories.premiumMomentum.score : 100 - categories.premiumMomentum.score} />
           </div>
         )}
         <p className="text-[11px] text-slate-500 flex items-start gap-1.5">
@@ -340,7 +343,7 @@ function TwentyCandidateCard({
               )}
             </div>
             {[...log].reverse().map((entry) => (
-              <button key={entry.id} onClick={() => onOpenDetail(symbolKey, candidate.analysis.tf, entry)} className="w-full text-left">
+              <button key={entry.id} onClick={() => onOpenDetail(symbolKey, entry)} className="w-full text-left">
                 <TwentyTradeLogLine entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
               </button>
             ))}
@@ -481,7 +484,7 @@ function CallDetailModal({
 }: {
   symbol: TradableSymbol;
   entry: TradeLogEntry;
-  candles: ReturnType<typeof useHitScoreSuite>["entries"][number]["candles"];
+  candles: Candle[];
   candlesLoading: boolean;
   onClose: () => void;
 }) {
@@ -550,46 +553,57 @@ function CallDetailModal({
 
 export function AiTwentyTwenty() {
   const { data: market } = useMarketStatus();
-  const { data: trades } = usePortfolio();
   const createTrade = useCreateTrade();
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ symbol: TradableSymbol; tf: string; entry: TradeLogEntry } | null>(null);
-  const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
+  const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
 
-  const crudeOil = useHitScoreSuite("CRUDEOIL", journalSummary.winRate);
-  const naturalGas = useHitScoreSuite("NATURALGAS", journalSummary.winRate);
-  const board: Record<TradableSymbol, ReturnType<typeof useHitScoreSuite>> = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas };
+  const crudeOil = useImmediateSuite("CRUDEOIL");
+  const naturalGas = useImmediateSuite("NATURALGAS");
+  const board: Record<TradableSymbol, ReturnType<typeof useImmediateSuite>> = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas };
   const { data: crudeSignal } = useSignal("CRUDEOIL");
   const { data: gasSignal } = useSignal("NATURALGAS");
   const expiryBySymbol: Record<TradableSymbol, string | undefined> = { CRUDEOIL: crudeSignal?.expiry, NATURALGAS: gasSignal?.expiry };
 
-  const candidates = useMemo(() => {
-    const entries = [
-      ...crudeOil.entries.map((e) => ({ symbol: "CRUDEOIL", analysis: e.analysis })),
-      ...naturalGas.entries.map((e) => ({ symbol: "NATURALGAS", analysis: e.analysis })),
-    ];
-    return scanForAiTwenty(entries);
-  }, [crudeOil.entries, naturalGas.entries]);
+  // No candle timeframe to bucket by anymore -- one live read per symbol,
+  // built straight from fast candles + the option's own live premium
+  // momentum (see analyzeImmediate / useImmediateSuite).
+  const crudeAnalysis = useMemo(() => analyzeImmediate(crudeOil.candles, crudeOil.ceMomentumPct, crudeOil.peMomentumPct), [crudeOil.candles, crudeOil.ceMomentumPct, crudeOil.peMomentumPct]);
+  const gasAnalysis = useMemo(() => analyzeImmediate(naturalGas.candles, naturalGas.ceMomentumPct, naturalGas.peMomentumPct), [naturalGas.candles, naturalGas.ceMomentumPct, naturalGas.peMomentumPct]);
+
+  const candidates = useMemo(
+    () =>
+      scanForAiTwenty([
+        { symbol: "CRUDEOIL", analysis: crudeAnalysis },
+        { symbol: "NATURALGAS", analysis: gasAnalysis },
+      ]),
+    [crudeAnalysis, gasAnalysis]
+  );
 
   const crudeOilAnalyses = useMemo(
-    () =>
-      crudeOil.entries.map((e): { tf: string; decision: Decision6; insufficient: string | null; optSide: "CE" | "PE" | null } => {
-        const qualifies = candidates.some((c) => c.symbol === "CRUDEOIL" && c.analysis.tf === e.tf);
-        return { tf: e.tf, decision: qualifies ? (e.analysis.bias === "bullish" ? "STRONG BUY" : "STRONG SELL") : "WAIT", insufficient: e.analysis.insufficient, optSide: e.analysis.optSide };
-      }),
-    [crudeOil.entries, candidates]
+    () => [
+      {
+        tf: LIVE_TF,
+        decision: (candidates.some((c) => c.symbol === "CRUDEOIL") ? (crudeAnalysis.bias === "bullish" ? "STRONG BUY" : "STRONG SELL") : "WAIT") as Decision6,
+        insufficient: crudeAnalysis.insufficient,
+        optSide: crudeAnalysis.optSide,
+      },
+    ],
+    [crudeAnalysis, candidates]
   );
   const naturalGasAnalyses = useMemo(
-    () =>
-      naturalGas.entries.map((e): { tf: string; decision: Decision6; insufficient: string | null; optSide: "CE" | "PE" | null } => {
-        const qualifies = candidates.some((c) => c.symbol === "NATURALGAS" && c.analysis.tf === e.tf);
-        return { tf: e.tf, decision: qualifies ? (e.analysis.bias === "bullish" ? "STRONG BUY" : "STRONG SELL") : "WAIT", insufficient: e.analysis.insufficient, optSide: e.analysis.optSide };
-      }),
-    [naturalGas.entries, candidates]
+    () => [
+      {
+        tf: LIVE_TF,
+        decision: (candidates.some((c) => c.symbol === "NATURALGAS") ? (gasAnalysis.bias === "bullish" ? "STRONG BUY" : "STRONG SELL") : "WAIT") as Decision6,
+        insufficient: gasAnalysis.insufficient,
+        optSide: gasAnalysis.optSide,
+      },
+    ],
+    [gasAnalysis, candidates]
   );
-  const crudeOilProjections = useMemo(() => crudeOil.entries.map((e) => projectPremium20(e.analysis, crudeOil.options)), [crudeOil.entries, crudeOil.options]);
-  const naturalGasProjections = useMemo(() => naturalGas.entries.map((e) => projectPremium20(e.analysis, naturalGas.options)), [naturalGas.entries, naturalGas.options]);
+  const crudeOilProjections = useMemo(() => [projectPremium20(crudeAnalysis, crudeOil.options)], [crudeAnalysis, crudeOil.options]);
+  const naturalGasProjections = useMemo(() => [projectPremium20(gasAnalysis, naturalGas.options)], [gasAnalysis, naturalGas.options]);
 
   useTradeLog("CRUDEOIL", crudeOilAnalyses, crudeOilProjections, crudeOil.options, `${keyPrefix}-CRUDEOIL`);
   const tradeLogs = useTradeLog("NATURALGAS", naturalGasAnalyses, naturalGasProjections, naturalGas.options, `${keyPrefix}-NATURALGAS`);
@@ -620,15 +634,15 @@ export function AiTwentyTwenty() {
 
   // Every Ai20-20 call ever made (open or closed), newest first.
   const allCalls = useMemo(() => {
-    const out: { symbol: TradableSymbol; tf: string; entry: TradeLogEntry; verified: boolean }[] = [];
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry; verified: boolean }[] = [];
     for (const [k, v] of Object.entries(twentyTradeLogsOnly)) {
-      const { symbol, tf } = parseTwentyKey(k);
-      for (const entry of v) out.push({ symbol, tf, entry, verified: verifiedIdsByKey[k]?.has(entry.id) ?? true });
+      const { symbol } = parseTwentyKey(k);
+      for (const entry of v) out.push({ symbol, entry, verified: verifiedIdsByKey[k]?.has(entry.id) ?? true });
     }
     return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
   }, [twentyTradeLogsOnly, verifiedIdsByKey]);
 
-  const candlesFor = (symbol: TradableSymbol, tf: string) => board[symbol].entries.find((e: HitScoreTimeframeEntry) => e.tf === tf)?.candles ?? [];
+  const candlesFor = (symbol: TradableSymbol) => board[symbol].candles;
 
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 
@@ -640,10 +654,10 @@ export function AiTwentyTwenty() {
           <h1 className="text-2xl font-black bg-gradient-to-r from-sky-500 via-cyan-500 to-emerald-500 bg-clip-text text-transparent">Ai20-20</h1>
         </div>
         <p className="text-[11px] text-slate-500 px-4">
-          Best Call and AI Verify Pro are deliberately strict and go quiet once a call closes or runs past its move -- Ai20-20 fills that gap. A modest, flat <span className="font-bold text-slate-700">₹2000-per-lot profit target</span> is
-          "enough" here (that's 20 points for Crude Oil's own lot size, a smaller move for Natural Gas's much bigger lot size): any clean directional read (at most one minor caution) across either
-          market and all four timeframes qualifies, so this page fires far more often. Ai20-20 is a fully independent scanner with its own trade log -- it never mirrors Best Call's own picks or hits, since the two run different engines and can
-          (and often do) disagree on the same moment.
+          Best Call and AI Verify Pro are deliberately strict and go quiet once a call closes or runs past its move -- Ai20-20 fills that gap. This isn't tied to any 15m/1H/4H candle closing: it reads fast (5-minute) price action AND the
+          option's own live premium movement, refreshed roughly every 8 seconds, so a call can qualify the moment real momentum shows up. A modest, flat <span className="font-bold text-slate-700">₹2000-per-lot profit target</span> is "enough"
+          here (that's 20 points for Crude Oil's own lot size, a smaller move for Natural Gas's much bigger lot size). Ai20-20 is a fully independent scanner with its own trade log -- it never mirrors Best Call's own picks or hits, since the
+          two run different engines and can (and often do) disagree on the same moment.
         </p>
         <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full ${market?.isOpen ? "bg-emerald-500" : "bg-rose-500"}`} />
@@ -653,7 +667,7 @@ export function AiTwentyTwenty() {
 
       <div className="grid grid-cols-3 gap-2">
         <StatTile label="Markets Scanned" value="2" gradient="linear-gradient(135deg,#0EA5E9,#06B6D4)" />
-        <StatTile label="Timeframes Scanned" value="4" gradient="linear-gradient(135deg,#06B6D4,#10B981)" />
+        <StatTile label="Live Refresh" value="~8s" gradient="linear-gradient(135deg,#06B6D4,#10B981)" />
         <StatTile label="Qualifying Now" value={String(candidates.length)} gradient="linear-gradient(135deg,#6366F1,#0EA5E9)" />
       </div>
 
@@ -668,24 +682,24 @@ export function AiTwentyTwenty() {
         <section className="rounded-3xl bg-white shadow-md p-8 text-center space-y-2">
           <Gauge size={28} className="mx-auto text-sky-400 animate-pulse" />
           <p className="text-base font-black text-slate-700">No Quick Win Setup Right Now</p>
-          <p className="text-xs text-slate-500 px-4">Still scanning both markets across all four timeframes (15m/30m/1H/4H) every poll — nothing has a clean directional read yet. Check back shortly.</p>
+          <p className="text-xs text-slate-500 px-4">Still scanning both markets' live premium and fast price action roughly every 8 seconds — nothing has a clean directional read yet. Check back shortly.</p>
         </section>
       ) : (
         <div className="space-y-3">
           {candidates.map((c) => (
             <TwentyCandidateCard
-              key={`${c.symbol}-${c.analysis.tf}`}
+              key={c.symbol}
               candidate={c}
               tradeLogs={tradeLogs}
               options={board[c.symbol as TradableSymbol].options}
-              candles={candlesFor(c.symbol as TradableSymbol, c.analysis.tf)}
+              candles={candlesFor(c.symbol as TradableSymbol)}
               expiry={expiryBySymbol[c.symbol as TradableSymbol]}
               loggedKey={loggedKey}
               setLoggedKey={setLoggedKey}
               copiedKey={copiedKey}
               setCopiedKey={setCopiedKey}
               createTrade={createTrade}
-              onOpenDetail={(symbol, tf, entry) => setDetail({ symbol, tf, entry })}
+              onOpenDetail={(symbol, entry) => setDetail({ symbol, entry })}
             />
           ))}
         </div>
@@ -708,8 +722,8 @@ export function AiTwentyTwenty() {
           </p>
           <p className="text-[10px] text-slate-400 mb-3">Every Ai20-20 call ever made, newest first — exact time/price called, and once closed, exact time/price of whichever target/breakeven/stop rule actually closed it.</p>
           <div className="space-y-2">
-            {allCalls.map(({ symbol, tf, entry, verified }) => (
-              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} verified={verified} onOpen={() => setDetail({ symbol, tf, entry })} />
+            {allCalls.map(({ symbol, entry, verified }) => (
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} verified={verified} onOpen={() => setDetail({ symbol, entry })} />
             ))}
           </div>
         </div>
@@ -720,7 +734,7 @@ export function AiTwentyTwenty() {
         <p className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1.5">
           <Target size={13} className="text-sky-500" /> Day-wise Trade Log — Both Symbols
         </p>
-        <p className="text-[10px] text-slate-400 mb-3">One MCX session = 9:00am – 11:55pm IST. Counts every closed trade across both markets and all four timeframes.</p>
+        <p className="text-[10px] text-slate-400 mb-3">One MCX session = 9:00am – 11:55pm IST. Counts every closed trade across both markets.</p>
         {dayStats.length === 0 ? (
           <p className="text-xs text-slate-400 text-center py-3">No trades have closed yet — this fills in as calls run their course.</p>
         ) : (
@@ -758,7 +772,7 @@ export function AiTwentyTwenty() {
         <CallDetailModal
           symbol={detail.symbol}
           entry={detail.entry}
-          candles={candlesFor(detail.symbol, detail.tf)}
+          candles={candlesFor(detail.symbol)}
           candlesLoading={board[detail.symbol].loading}
           onClose={() => setDetail(null)}
         />
