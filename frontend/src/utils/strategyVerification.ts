@@ -236,18 +236,59 @@ function checkCpr(candles: Candle[], direction: CallDirection, price: number): S
 }
 
 // 9. Support/Resistance -- entry shouldn't be sitting right on top of the
-// level working against it. No fail case is defined for this one -- only
-// "too close, wait" or "clear, pass".
+// level working against it. Proximity ALONE can't tell a live breakout
+// (price closing progressively through the level, exactly what a real move
+// looks like in its first few candles) apart from genuine indecision or an
+// outright rejection -- and a plain "too close = wait" check used to flag
+// "wait" for both, which meant it kept holding a call back through the
+// entire real move instead of confirming it the moment price actually broke
+// through. Reading the last few CLOSES (not just the current live tick)
+// resolves that ambiguity: closes already clear of the level in the call's
+// favor is a confirmed break (pass); closes turning back across the level
+// after testing it is a real rejection (fail, new for this check); only a
+// level still being tested with no resolution either way stays "wait".
 function checkSupportResistance(candles: Candle[], direction: CallDirection, price: number): StrategyResult {
-  if (candles.length < 2) {
-    return result("sr", "Support/Resistance", 10, "wait", "Not enough candles yet to compute pivot levels.", "Needs at least 2 bars.");
+  if (candles.length < 3) {
+    return result("sr", "Support/Resistance", 10, "wait", "Not enough candles yet to compute pivot levels.", "Needs at least 3 bars.");
   }
   const piv = pivotPoints(candles[candles.length - 2]);
   const level = direction === "bullish" ? piv.r1 : piv.s1;
   const levelName = direction === "bullish" ? "Resistance (R1)" : "Support (S1)";
   const distPct = Math.abs(pct(price, level));
+
+  const recentCloses = candles.slice(-3).map((c) => c.close);
+  const clearedLevel = direction === "bullish" ? recentCloses.every((c) => c > level) : recentCloses.every((c) => c < level);
+  const rejectedLevel = direction === "bullish" ? recentCloses[recentCloses.length - 1] < level && recentCloses[0] >= level : recentCloses[recentCloses.length - 1] > level && recentCloses[0] <= level;
+
+  if (clearedLevel) {
+    return result(
+      "sr",
+      "Support/Resistance",
+      10,
+      "pass",
+      `Price has closed through ${levelName} (₹${level.toFixed(2)}) on the last few candles -- a confirmed break, not just a touch.`,
+      `The last ${recentCloses.length} closes are all on the favorable side of ${levelName} (₹${level.toFixed(2)}).`
+    );
+  }
+  if (rejectedLevel) {
+    return result(
+      "sr",
+      "Support/Resistance",
+      10,
+      "fail",
+      `Price tested ${levelName} (₹${level.toFixed(2)}) and got turned back -- a real rejection.`,
+      `Price closed back across ${levelName} (₹${level.toFixed(2)}) after approaching it, against this call's direction.`
+    );
+  }
   if (distPct < 0.3) {
-    return result("sr", "Support/Resistance", 10, "wait", `Price is sitting right on ${levelName} (₹${level.toFixed(2)}) -- too close to enter cleanly.`, `Price (₹${price.toFixed(2)}) is within 0.3% of ${levelName} (₹${level.toFixed(2)}).`);
+    return result(
+      "sr",
+      "Support/Resistance",
+      10,
+      "wait",
+      `Price is testing ${levelName} (₹${level.toFixed(2)}) right now -- no confirmed break or rejection yet.`,
+      `Price (₹${price.toFixed(2)}) is within 0.3% of ${levelName} (₹${level.toFixed(2)}), still being decided.`
+    );
   }
   return result("sr", "Support/Resistance", 10, "pass", `Price is clear of ${levelName} (₹${level.toFixed(2)}) by ${distPct.toFixed(1)}%.`, `Price (₹${price.toFixed(2)}) is a clear ${distPct.toFixed(1)}% away from ${levelName} (₹${level.toFixed(2)}).`);
 }
