@@ -46,7 +46,15 @@ const T1_POINTS = 20;
 const T2_POINTS = 32;
 const T3_POINTS = 45;
 const STOP_POINTS = 12;
-const MIN_ENTRY_PREMIUM = 15; // below this, a flat 12pt stop risks too much of the premium to be sensible
+// Natural Gas premiums routinely sit around ₹9-18 (well under a flat 15
+// floor this was originally set at) -- that floor silently produced
+// candidates with no viable entry/stop/targets at all: the card would show
+// as qualified with every numeric field blank, since scanForAiTwenty's own
+// qualification never checked whether a projection could actually be
+// built. entry*0.5 below already keeps the stop from going negative or
+// absurd for a cheap premium, so this only needs to guard against a
+// near-zero premium where percentage math gets unstable.
+const MIN_ENTRY_PREMIUM = 3;
 
 export function projectPremium20(analysis: TimeframeAnalysis, options: OptionsAnalytics | undefined): AiTwentyPremium | null {
   if (!options || options.error || !analysis.optSide) return null;
