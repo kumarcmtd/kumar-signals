@@ -94,13 +94,13 @@ export function AiVerifyPro() {
     <div className="space-y-4">
       <div
         className="rounded-2xl p-4 text-white"
-        style={{ background: "linear-gradient(135deg,#0F172A,#1E3A5F 55%,#0F172A)", boxShadow: "0 8px 24px rgba(15,23,42,.35)" }}
+        style={{ background: "linear-gradient(135deg,#7C3AED,#2563EB 55%,#0EA5E9)", boxShadow: "0 8px 24px rgba(37,99,235,.35)" }}
       >
         <p className="text-xl font-black flex items-center gap-2">
           <ShieldCheck size={20} />
           AI Verify Pro
         </p>
-        <p className="text-xs text-white/70 mt-0.5">Final approval engine -- reviews every Best Call before it's tradeable. One decision, in under 5 seconds.</p>
+        <p className="text-xs text-white/80 mt-0.5">Final approval engine -- reviews every Best Call before it's tradeable. One decision, in under 5 seconds.</p>
       </div>
 
       <div className="flex gap-2">
@@ -111,7 +111,7 @@ export function AiVerifyPro() {
             className="flex-1 rounded-xl py-2.5 text-sm font-bold border transition-colors"
             style={
               symbol === s
-                ? { background: "linear-gradient(135deg,#0F172A,#1E3A5F)", color: "#fff", borderColor: "transparent" }
+                ? { background: "linear-gradient(135deg,#7C3AED,#2563EB)", color: "#fff", borderColor: "transparent" }
                 : { background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-muted)" }
             }
           >

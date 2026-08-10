@@ -2,20 +2,20 @@ import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import type { VerifyProResult, TradeGrade, FinalAction } from "../utils/verifyProEngine";
 
 const GRADE_COLOR: Record<TradeGrade, string> = {
-  "S+": "#FBBF24",
-  S: "#34D399",
-  "A+": "#4ADE80",
-  A: "#A3E635",
-  B: "#FBBF24",
-  C: "#FB923C",
-  REJECT: "#F87171",
+  "S+": "#D97706",
+  S: "#059669",
+  "A+": "#16A34A",
+  A: "#65A30D",
+  B: "#D97706",
+  C: "#EA580C",
+  REJECT: "#DC2626",
 };
 
-const ACTION_VISUAL: Record<FinalAction, { bg: string; text: string; emoji: string; approval: string; Icon: typeof CheckCircle2 }> = {
-  "STRONG BUY": { bg: "#065F46", text: "#6EE7B7", emoji: "🟢", approval: "APPROVED", Icon: CheckCircle2 },
-  BUY: { bg: "#065F46", text: "#6EE7B7", emoji: "🟢", approval: "APPROVED", Icon: CheckCircle2 },
-  WAIT: { bg: "#78350F", text: "#FCD34D", emoji: "🟡", approval: "WAIT", Icon: AlertTriangle },
-  "NO TRADE": { bg: "#7F1D1D", text: "#FCA5A5", emoji: "⚫", approval: "REJECTED", Icon: XCircle },
+const ACTION_VISUAL: Record<FinalAction, { bg: string; border: string; text: string; emoji: string; approval: string; Icon: typeof CheckCircle2 }> = {
+  "STRONG BUY": { bg: "#DCFCE7", border: "#86EFAC", text: "#15803D", emoji: "🟢", approval: "APPROVED", Icon: CheckCircle2 },
+  BUY: { bg: "#DCFCE7", border: "#86EFAC", text: "#15803D", emoji: "🟢", approval: "APPROVED", Icon: CheckCircle2 },
+  WAIT: { bg: "#FEF3C7", border: "#FCD34D", text: "#B45309", emoji: "🟡", approval: "WAIT", Icon: AlertTriangle },
+  "NO TRADE": { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C", emoji: "🔴", approval: "REJECTED", Icon: XCircle },
 };
 
 export function VerifyProDecisionCard({ result, label, entry }: { result: VerifyProResult; label: string; entry: number }) {
@@ -23,13 +23,13 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
   const gradeColor = GRADE_COLOR[result.tradeGrade];
 
   return (
-    <div className="rounded-3xl p-5 text-white" style={{ background: "linear-gradient(160deg,#0F172A,#1E293B 60%,#111827)", boxShadow: "0 12px 32px rgba(15,23,42,.45)" }}>
+    <div className="rounded-3xl p-5 bg-white shadow-md border-l-8" style={{ borderColor: gradeColor }}>
       <div className="flex items-center justify-between mb-4">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-white/50 font-bold">AI Verify Pro</p>
+          <p className="text-[10px] uppercase tracking-widest text-[var(--color-muted)] font-bold">AI Verify Pro</p>
           <p className="text-sm font-black">{label}</p>
         </div>
-        <span className="text-2xl font-black px-3 py-1 rounded-xl" style={{ background: `${gradeColor}22`, color: gradeColor, border: `1px solid ${gradeColor}55` }}>
+        <span className="text-2xl font-black px-3 py-1 rounded-xl" style={{ background: `${gradeColor}1A`, color: gradeColor, border: `1px solid ${gradeColor}55` }}>
           {result.tradeGrade}
         </span>
       </div>
@@ -47,7 +47,7 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
         <MiniRow label="Reversal Risk" value={result.reversalProbability} />
       </div>
 
-      <div className="rounded-2xl p-3 mb-4" style={{ background: "rgba(255,255,255,.06)" }}>
+      <div className="rounded-2xl p-3 mb-4" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
         <div className="grid grid-cols-3 gap-2 text-center mb-2">
           <MiniRow label="Entry" value={`₹${entry.toFixed(2)}`} />
           <MiniRow label="Stop Loss" value={`₹${result.risk.stopLoss.toFixed(2)}`} />
@@ -55,19 +55,21 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
         </div>
         <div className="grid grid-cols-4 gap-1.5 text-center">
           {result.risk.targets.map((t, i) => (
-            <div key={i} className="rounded-lg py-1.5" style={{ background: "rgba(255,255,255,.06)" }}>
-              <p className="text-[8px] text-white/50 uppercase">T{i + 1}</p>
-              <p className="text-[11px] font-bold">₹{t.toFixed(2)}</p>
+            <div key={i} className="rounded-lg py-1.5 bg-white border border-[var(--color-border)]">
+              <p className="text-[8px] text-[var(--color-muted)] uppercase">T{i + 1}</p>
+              <p className="text-[11px] font-bold" style={{ color: "var(--color-buy)" }}>
+                ₹{t.toFixed(2)}
+              </p>
             </div>
           ))}
         </div>
       </div>
 
-      <div className="rounded-2xl p-3.5 flex items-center justify-between" style={{ background: action.bg }}>
+      <div className="rounded-2xl p-3.5 flex items-center justify-between" style={{ background: action.bg, border: `1px solid ${action.border}` }}>
         <div className="flex items-center gap-2">
           <action.Icon size={20} style={{ color: action.text }} />
           <div>
-            <p className="text-[9px] uppercase tracking-wide font-bold" style={{ color: action.text, opacity: 0.8 }}>
+            <p className="text-[9px] uppercase tracking-wide font-bold" style={{ color: action.text, opacity: 0.85 }}>
               Institutional Approval: {action.approval}
             </p>
             <p className="text-base font-black" style={{ color: action.text }}>
@@ -78,10 +80,12 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
       </div>
 
       {result.hardRejectionReasons.length > 0 && (
-        <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: "rgba(248,113,113,.12)", border: "1px solid rgba(248,113,113,.3)" }}>
-          <p className="text-[9px] font-bold uppercase text-red-300 mb-1">Hard Rejection Rules Triggered</p>
+        <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: "#FEE2E2", border: "1px solid #FCA5A5" }}>
+          <p className="text-[9px] font-bold uppercase mb-1" style={{ color: "#B91C1C" }}>
+            Hard Rejection Rules Triggered
+          </p>
           {result.hardRejectionReasons.map((r, i) => (
-            <p key={i} className="text-[11px] text-red-200">
+            <p key={i} className="text-[11px]" style={{ color: "#991B1B" }}>
               • {r}
             </p>
           ))}
@@ -89,8 +93,8 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
       )}
 
       {result.reasons.positive.length > 0 && (
-        <p className="text-[10.5px] text-white/60 mt-3 leading-relaxed">
-          <span className="text-white/80 font-bold">Reason: </span>
+        <p className="text-[10.5px] text-[var(--color-muted)] mt-3 leading-relaxed">
+          <span className="font-bold text-[var(--color-ink)]">Reason: </span>
           {[...result.reasons.positive.slice(0, 6), ...result.reasons.negative.slice(0, 3)].join(", ")}.
         </p>
       )}
@@ -100,8 +104,8 @@ export function VerifyProDecisionCard({ result, label, entry }: { result: Verify
 
 function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
-    <div className="rounded-xl py-2 px-1" style={{ background: "rgba(255,255,255,.06)" }}>
-      <p className="text-[8px] text-white/50 uppercase">{label}</p>
+    <div className="rounded-xl py-2 px-1" style={{ background: `${accent}14` }}>
+      <p className="text-[8px] text-[var(--color-muted)] uppercase">{label}</p>
       <p className="text-sm font-black" style={{ color: accent }}>
         {value}
       </p>
@@ -111,9 +115,9 @@ function Stat({ label, value, accent }: { label: string; value: string; accent: 
 
 function MiniRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl px-2.5 py-2" style={{ background: "rgba(255,255,255,.06)" }}>
-      <p className="text-[8px] text-white/50 uppercase">{label}</p>
-      <p className="text-[11px] font-bold text-white/90 truncate">{value}</p>
+    <div className="rounded-xl px-2.5 py-2" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+      <p className="text-[8px] text-[var(--color-muted)] uppercase">{label}</p>
+      <p className="text-[11px] font-bold truncate">{value}</p>
     </div>
   );
 }
