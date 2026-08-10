@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Target, TrendingUp, TrendingDown, Gauge, ListChecks } from "lucide-react";
+import { Target, TrendingUp, TrendingDown, Gauge, ListChecks, RefreshCcw } from "lucide-react";
 import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -8,9 +8,13 @@ import { scanForAiTwenty, projectPremium20, LOT_SIZE, type AiTwentyCandidate } f
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
-import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
+import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
+
+// Same password-gated manual override Best Call already uses for its own
+// Force Stop button -- reused verbatim rather than inventing a second one.
+const FORCE_STOP_PASSWORD = "SHANVI";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -97,10 +101,12 @@ function CategoryBar({ label, score }: { label: string; score: number }) {
 }
 
 function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { candidate: AiTwentyCandidate; tradeLogs: Record<string, TradeLogEntry[]>; options: OptionsAnalytics | undefined; keyPrefix: string }) {
+  const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const bullish = candidate.analysis.bias === "bullish";
   const accent = bullish ? "#0EA5E9" : "#F43F5E";
   const symbolKey = candidate.symbol as TradableSymbol;
-  const log = tradeLogs[`${keyPrefix}-${symbolKey}-${candidate.analysis.tf}`] ?? [];
+  const tradeLogKey = `${keyPrefix}-${symbolKey}-${candidate.analysis.tf}`;
+  const log = tradeLogs[tradeLogKey] ?? [];
   const latest = log[log.length - 1];
   const openTrade = latest && !latest.closed ? latest : undefined;
   const liveLtp = openTrade ? liveLtpFor(options, openTrade.strike, openTrade.optSide) : null;
@@ -115,6 +121,23 @@ function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { can
   // shown per-target once a real entry exists, rather than a hardcoded "+20"
   // that made sense for Crude but was an impossible ask for NG.
   const delta = (target: number) => (latest ? `+${(target - latest.entry).toFixed(2)}` : "");
+  // Entry/stop/targets are frozen the moment a trade log line opens (same
+  // rule every engine in this app follows) -- an entry opened before a
+  // target-formula change keeps its OLD numbers until it closes on its own.
+  // This lets a stuck/stale entry (e.g. one left over from before this
+  // profit-per-lot redesign) be manually cleared so a fresh one opens under
+  // the current logic, the same password-gated override Best Call already has.
+  const handleForceStop = () => {
+    const pw = window.prompt("Enter password to clear this signal and let a fresh one open:");
+    if (pw === null) return;
+    if (pw !== FORCE_STOP_PASSWORD) {
+      window.alert("Incorrect password.");
+      return;
+    }
+    if (window.confirm("Clear this running signal now? A new one will open on the next qualifying scan. This can't be undone.")) {
+      forceCloseTradeLog(tradeLogKey);
+    }
+  };
 
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
@@ -173,7 +196,15 @@ function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { can
 
         {log.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-bold uppercase text-slate-400">Trade Log (newest first)</p>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-bold uppercase text-slate-400">Trade Log (newest first)</p>
+              {openTrade && (
+                <button onClick={handleForceStop} className="flex items-center gap-1 text-[9px] font-bold text-slate-400 underline underline-offset-2">
+                  <RefreshCcw size={10} />
+                  Clear stale signal
+                </button>
+              )}
+            </div>
             {[...log].reverse().map((entry) => (
               <TwentyTradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
             ))}
