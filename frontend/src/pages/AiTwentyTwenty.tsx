@@ -4,7 +4,7 @@ import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useHitScoreSuite } from "../hooks/useHitScoreSuite";
-import { scanForAiTwenty, projectPremium20, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
+import { scanForAiTwenty, projectPremium20, LOT_SIZE, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
@@ -108,6 +108,13 @@ function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { can
   const heroLegFloor = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : null;
   const heroEntryTiming = liveLtp !== null && heroNextTarget !== null && heroLegFloor !== null && latest ? evaluateEntryTiming(heroLegFloor, heroNextTarget, effectiveStopFor(latest), liveLtp) : null;
   const categories = candidate.analysis.categories;
+  const lotSize = LOT_SIZE[symbolKey];
+  // The point move that gets you to Rs2000/lot is symbol-specific (Crude
+  // Oil's own lot size makes that a 20-point move; Natural Gas's much
+  // larger lot size means the same profit only needs a couple of points) --
+  // shown per-target once a real entry exists, rather than a hardcoded "+20"
+  // that made sense for Crude but was an impossible ask for NG.
+  const delta = (target: number) => (latest ? `+${(target - latest.entry).toFixed(2)}` : "");
 
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
@@ -118,7 +125,7 @@ function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { can
           </p>
           <p className="text-lg font-black flex items-center gap-1.5" style={{ color: accent }}>
             {bullish ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-            {candidate.analysis.optSide} Quick +20
+            {candidate.analysis.optSide} Quick Win
           </p>
           {latest && (
             <p className="text-sm font-bold text-slate-700 mt-0.5">
@@ -127,22 +134,27 @@ function TwentyCandidateCard({ candidate, tradeLogs, options, keyPrefix }: { can
           )}
         </div>
         <div className="text-center shrink-0">
-          <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-sm shadow" style={{ background: accent }}>
-            +20
+          <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-[11px] shadow" style={{ background: accent }}>
+            ₹2000
           </div>
-          <p className="text-[9px] font-bold text-slate-400 mt-1">Target 1</p>
+          <p className="text-[9px] font-bold text-slate-400 mt-1">Per Lot at T1</p>
         </div>
       </div>
 
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-3 gap-2">
           <MiniStat label="Stop Loss" value={latest ? `₹${effectiveStopFor(latest)}` : "—"} color="#EF4444" />
-          <MiniStat label="Target 1 (+20)" value={latest ? `₹${latest.targets[0]}` : "—"} color="#0EA5E9" />
-          <MiniStat label="Target 2 (+32)" value={latest ? `₹${latest.targets[1]}` : "—"} color="#0EA5E9" />
-          <MiniStat label="Target 3 (+45)" value={latest ? `₹${latest.targets[2]}` : "—"} color="#0EA5E9" />
+          <MiniStat label={`Target 1 ${delta(latest?.targets[0] ?? 0)}`} value={latest ? `₹${latest.targets[0]}` : "—"} color="#0EA5E9" />
+          <MiniStat label={`Target 2 ${delta(latest?.targets[1] ?? 0)}`} value={latest ? `₹${latest.targets[1]}` : "—"} color="#0EA5E9" />
+          <MiniStat label={`Target 3 ${delta(latest?.targets[2] ?? 0)}`} value={latest ? `₹${latest.targets[2]}` : "—"} color="#0EA5E9" />
           <MiniStat label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#6366F1" />
           <MiniStat label="Status" value={openTrade ? "Running" : latest ? "Closed" : "—"} color="#64748B" />
         </div>
+        {latest && (
+          <p className="text-[10px] text-slate-400">
+            {lotSize} lot size -- Target 1 is worth ~₹{Math.round((latest.targets[0] - latest.entry) * lotSize)} on 1 lot.
+          </p>
+        )}
         {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="light" />}
 
         {categories && (
@@ -239,8 +251,9 @@ export function AiTwentyTwenty() {
           <h1 className="text-2xl font-black bg-gradient-to-r from-sky-500 via-cyan-500 to-emerald-500 bg-clip-text text-transparent">Ai20-20</h1>
         </div>
         <p className="text-[11px] text-slate-500 px-4">
-          Best Call and AI Verify Pro are deliberately strict and go quiet once a call closes or runs past its move -- Ai20-20 fills that gap. A modest, flat <span className="font-bold text-slate-700">+20 premium point target</span> is
-          "enough" here: any clean directional read (at most one minor caution) across either market and all four timeframes qualifies, so this page fires far more often.
+          Best Call and AI Verify Pro are deliberately strict and go quiet once a call closes or runs past its move -- Ai20-20 fills that gap. A modest, flat <span className="font-bold text-slate-700">₹2000-per-lot profit target</span> is
+          "enough" here (that's 20 points for Crude Oil's own lot size, a smaller move for Natural Gas's much bigger lot size): any clean directional read (at most one minor caution) across either
+          market and all four timeframes qualifies, so this page fires far more often.
         </p>
         <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full ${market?.isOpen ? "bg-emerald-500" : "bg-rose-500"}`} />
@@ -264,7 +277,7 @@ export function AiTwentyTwenty() {
       {candidates.length === 0 ? (
         <section className="rounded-3xl bg-white shadow-md p-8 text-center space-y-2">
           <Gauge size={28} className="mx-auto text-sky-400 animate-pulse" />
-          <p className="text-base font-black text-slate-700">No Quick +20 Setup Right Now</p>
+          <p className="text-base font-black text-slate-700">No Quick Win Setup Right Now</p>
           <p className="text-xs text-slate-500 px-4">Still scanning both markets across all four timeframes (15m/30m/1H/4H) every poll — nothing has a clean directional read yet. Check back shortly.</p>
         </section>
       ) : (
