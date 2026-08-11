@@ -1,6 +1,6 @@
-import { Newspaper, LineChart, BarChart3, Droplets } from "lucide-react";
+import { Newspaper, LineChart, BarChart3, Droplets, Zap, TriangleAlert, CircleCheck } from "lucide-react";
 import { CircularGauge } from "./CircularGauge";
-import type { NewsTradeResult, CategoryReading } from "../utils/newsTradeEngine";
+import type { NewsTradeResult, CategoryReading, TradeConfirmation } from "../utils/newsTradeEngine";
 import type { ExpectedMove } from "../utils/newsScoring";
 
 const MOVE_VISUAL: Record<ExpectedMove, { label: string; color: string; emoji: string }> = {
@@ -46,9 +46,19 @@ function CategoryRow({ icon: Icon, name, reading, weightPct }: { icon: typeof Ne
   );
 }
 
+const CONFIRMATION_VISUAL: Record<TradeConfirmation, { color: string; bg: string; icon: typeof CircleCheck }> = {
+  STRONG_CONFIRM: { color: "#00E676", bg: "rgba(0,230,118,.12)", icon: CircleCheck },
+  CONFIRM: { color: "#00E676", bg: "rgba(0,230,118,.08)", icon: CircleCheck },
+  WAIT_CONFLICT: { color: "#FF4D4F", bg: "rgba(255,77,79,.12)", icon: TriangleAlert },
+  NEWS_SUPPORT_ONLY: { color: "#FFC107", bg: "rgba(255,193,7,.12)", icon: TriangleAlert },
+  NEUTRAL: { color: "#9AA4B2", bg: "rgba(154,164,178,.1)", icon: TriangleAlert },
+};
+
 export function NewsTradeDecisionCard({ result, label }: { result: NewsTradeResult; label: string }) {
   const visual = MOVE_VISUAL[result.expectedMove];
   const gaugeValue = (result.finalNet + 100) / 2;
+  const confirmVisual = CONFIRMATION_VISUAL[result.tradeConfirmation];
+  const ConfirmIcon = confirmVisual.icon;
 
   return (
     <div className="rounded-3xl p-4" style={{ background: "#181A24", border: `1px solid ${visual.color}33`, boxShadow: `0 8px 28px ${visual.color}15` }}>
@@ -63,9 +73,17 @@ export function NewsTradeDecisionCard({ result, label }: { result: NewsTradeResu
         <CircularGauge value={gaugeValue} size={110} label="Net Score" sublabel={`${result.finalNet > 0 ? "+" : ""}${result.finalNet}`} trackColor="rgba(255,255,255,.08)" labelColor="#9AA4B2" />
       </div>
 
+      <div className="rounded-xl p-3 mb-3 flex items-start gap-2" style={{ background: confirmVisual.bg, border: `1px solid ${confirmVisual.color}44` }}>
+        <ConfirmIcon size={15} className="shrink-0 mt-0.5" style={{ color: confirmVisual.color }} />
+        <p className="text-[11px] font-bold leading-snug" style={{ color: confirmVisual.color }}>
+          {result.tradeConfirmationLabel}
+        </p>
+      </div>
+
       <div className="space-y-2">
         <CategoryRow icon={Newspaper} name="News" reading={result.news} weightPct={result.weightsUsed.news} />
         <CategoryRow icon={LineChart} name="Technical" reading={result.technical} weightPct={result.weightsUsed.technical} />
+        <CategoryRow icon={Zap} name="Price Momentum" reading={result.momentum} weightPct={result.weightsUsed.momentum} />
         <CategoryRow icon={BarChart3} name="Options" reading={result.options} weightPct={result.weightsUsed.options} />
         <CategoryRow icon={Droplets} name="Liquidity" reading={result.liquidity} weightPct={result.weightsUsed.liquidity} />
       </div>

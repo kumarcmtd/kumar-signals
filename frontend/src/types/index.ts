@@ -1,4 +1,4 @@
-import type { ScoredNewsArticle, EiaScoreResult } from "../utils/newsScoring";
+import type { ScoredNewsArticle, EiaScoreResult, NewsEvent, AffectedMarket } from "../utils/newsScoring";
 
 export type InstrumentSymbol = "CRUDEOIL" | "NATURALGAS" | "GOLD" | "SILVER";
 
@@ -132,6 +132,8 @@ export interface MarketDepthSnapshot {
 export interface NewsFetchResponse {
   available: boolean;
   articles: ScoredNewsArticle[];
+  events: NewsEvent[];
+  sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
   error?: string;
 }
 
@@ -145,6 +147,10 @@ export interface EiaFetchResponse {
 export interface EconCalendarEvent {
   name: string;
   date: string;
+  actual: number | null;
+  previous: number | null;
+  affects: AffectedMarket;
+  impact: "HIGH" | "MEDIUM" | "LOW";
 }
 
 export interface CalendarFetchResponse {
@@ -153,10 +159,18 @@ export interface CalendarFetchResponse {
   error?: string;
 }
 
+export interface MarketStatus {
+  isOpen: boolean;
+  session: "OPEN" | "CLOSED" | "PRE_OPEN";
+  timeLabel: string;
+  mcxStatus: string;
+}
+
 export interface NewsTradeApiResponse {
   news: NewsFetchResponse;
   eia: EiaFetchResponse;
   calendar: CalendarFetchResponse;
+  marketStatus: MarketStatus;
   fetchedAt: string;
 }
 

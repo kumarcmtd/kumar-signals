@@ -11,7 +11,7 @@ import { findEliteSignal } from "./frontend/src/utils/eliteSignal";
 import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEngine";
 import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
-import { scoreArticles, scoreEiaChange, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult } from "./frontend/src/utils/newsScoring";
+import { scoreArticles, scoreEiaChange, clusterEvents, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -110,12 +110,19 @@ function getMarketStatus() {
   const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
   const isWeekday = day >= 1 && day <= 5;
   const isOpen = isWeekday && minutes >= 9 * 60 && minutes < 23 * 60 + 30;
+  const isPreOpen = isWeekday && minutes >= 8 * 60 + 30 && minutes < 9 * 60;
+  const session: "OPEN" | "CLOSED" | "PRE_OPEN" = isOpen ? "OPEN" : isPreOpen ? "PRE_OPEN" : "CLOSED";
   const hh = String(ist.getUTCHours()).padStart(2, "0");
   const mm = String(ist.getUTCMinutes()).padStart(2, "0");
   return {
     isOpen,
+    session,
     timeLabel: `${hh}:${mm} IST`,
-    mcxStatus: isOpen ? "MCX session is live." : "MCX session resumes ~9:00 AM IST on the next trading day.",
+    mcxStatus: isOpen
+      ? "MCX session is live."
+      : isPreOpen
+        ? "MCX pre-open session -- trading resumes shortly."
+        : "MCX session resumes ~9:00 AM IST on the next trading day. News monitoring remains active.",
   };
 }
 
@@ -1272,39 +1279,96 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
 }
 
 // ---- News Based Trade AI: news + EIA inventory/storage + econ calendar ----
-// Three independent third-party integrations, each gated behind its own
-// optional secret (see Env) and each failing gracefully to { available:
-// false, error } rather than fabricating data when a key is missing, the
-// upstream call fails, or the response shape doesn't match what's expected.
-// Series/release IDs below are EIA's and FRED's own documented identifiers
-// for weekly crude stocks, weekly Lower-48 gas storage, and the handful of
-// macro releases this page cares about -- verify against a live key once
-// configured, since this sandbox has no network path to test them directly.
-
-const ENERGY_NEWS_QUERY =
-  '(crude OR "oil price" OR OPEC OR "natural gas" OR "Henry Hub" OR WTI OR Brent OR "Strait of Hormuz" OR "Red Sea" OR pipeline OR refinery OR "EIA storage" OR "EIA inventory") AND (oil OR gas OR energy OR crude)';
+// The app must be fully useful with ZERO secrets configured: news comes
+// from a curated allowlist of official/public RSS feeds by default, and
+// NEWSAPI_KEY (when present) only ADDS to that feed, it never gates it.
+// EIA_API_KEY/FRED_API_KEY unlock their own extra panels but their absence
+// never breaks news or the rest of the page. Everything here fails
+// gracefully per-source (never throws past its own function) and never
+// fabricates a headline, price, or date -- a source that's down just
+// contributes nothing rather than being backfilled with invented data.
+// Series/release IDs below are EIA's and FRED's own documented identifiers.
 
 interface NewsFetchResult {
   available: boolean;
   articles: ScoredNewsArticle[];
+  events: NewsEvent[];
+  sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
   error?: string;
 }
 
-async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
-  if (!env.NEWSAPI_KEY) return { available: false, articles: [], error: "NEWSAPI_KEY not configured" };
+// Only these exact, hand-verified official/public RSS endpoints are ever
+// fetched -- the frontend can never submit an arbitrary URL for the Worker
+// to fetch (no such endpoint exists), which closes off SSRF entirely.
+const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
+  { url: "https://www.eia.gov/rss/todayinenergy.xml", source: "EIA - Today in Energy" },
+  { url: "https://www.eia.gov/rss/petroleum.xml", source: "EIA - This Week in Petroleum" },
+  { url: "https://www.eia.gov/rss/natural_gas.xml", source: "EIA - Natural Gas Weekly" },
+  { url: "https://www.eia.gov/rss/press_rss.xml", source: "EIA - Press Releases" },
+];
+const RSS_FETCH_TIMEOUT_MS = 6000;
+
+function xmlUnescape(s: string): string {
+  return s
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/<[^>]+>/g, "")
+    .trim();
+}
+
+// Minimal, tolerant RSS 2.0 / Atom item extractor -- Workers have no DOM
+// parser, and pulling in a full XML library for this would be overkill.
+// Regex-based on purpose: malformed/partial XML just yields fewer or zero
+// matched items rather than throwing, which is exactly the "never crash
+// the whole dashboard on a bad feed" behavior this needs.
+function parseRssFeed(xml: string, sourceName: string): RawNewsArticle[] {
+  const items: RawNewsArticle[] = [];
+  const itemBlocks = xml.match(/<item\b[\s\S]*?<\/item>/gi) ?? xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
+  for (const block of itemBlocks) {
+    const title = block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+    if (!title) continue;
+    const desc = block.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i)?.[1] ?? block.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i)?.[1] ?? "";
+    const link =
+      block.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i)?.[1] ??
+      block.match(/<link\b[^>]*href="([^"]+)"/i)?.[1] ??
+      "";
+    const pubDate = block.match(/<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1] ?? block.match(/<(?:published|updated)\b[^>]*>([\s\S]*?)<\/(?:published|updated)>/i)?.[1] ?? "";
+    const parsedDate = pubDate ? new Date(pubDate) : new Date();
+    items.push({
+      headline: xmlUnescape(title),
+      summary: xmlUnescape(desc).slice(0, 400),
+      source: sourceName,
+      publishedAt: Number.isFinite(parsedDate.getTime()) ? parsedDate.toISOString() : new Date().toISOString(),
+      url: xmlUnescape(link),
+    });
+  }
+  return items;
+}
+
+async function fetchOneRssFeed(feed: { url: string; source: string }): Promise<{ source: string; ok: boolean; count: number; error?: string; articles: RawNewsArticle[] }> {
   try {
-    const usp = new URLSearchParams({
-      q: ENERGY_NEWS_QUERY,
-      language: "en",
-      sortBy: "publishedAt",
-      pageSize: "40",
-    });
-    const res = await fetch(`https://newsapi.org/v2/everything?${usp.toString()}`, {
-      headers: { "X-Api-Key": env.NEWSAPI_KEY, "User-Agent": "KumarSignalsPro/1.0" },
-    });
-    if (!res.ok) return { available: false, articles: [], error: `NewsAPI returned ${res.status}` };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RSS_FETCH_TIMEOUT_MS);
+    const res = await fetch(feed.url, { headers: { "User-Agent": "KumarSignalsPro/1.0 (+energy-news-reader)", Accept: "application/rss+xml, application/xml, text/xml" }, signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status}`, articles: [] };
+    const xml = await res.text();
+    const articles = parseRssFeed(xml, feed.source);
+    return { source: feed.source, ok: true, count: articles.length, articles };
+  } catch (e: any) {
+    return { source: feed.source, ok: false, count: 0, error: e?.name === "AbortError" ? "Timed out" : (e?.message ?? "Fetch failed"), articles: [] };
+  }
+}
+
+async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; ok: boolean; count: number; error?: string; articles: RawNewsArticle[] }> {
+  const ENERGY_NEWS_QUERY =
+    '(crude OR "oil price" OR OPEC OR "natural gas" OR "Henry Hub" OR WTI OR Brent OR "Strait of Hormuz" OR "Red Sea" OR pipeline OR refinery OR "EIA storage" OR "EIA inventory") AND (oil OR gas OR energy OR crude)';
+  try {
+    const usp = new URLSearchParams({ q: ENERGY_NEWS_QUERY, language: "en", sortBy: "publishedAt", pageSize: "40" });
+    const res = await fetch(`https://newsapi.org/v2/everything?${usp.toString()}`, { headers: { "X-Api-Key": apiKey, "User-Agent": "KumarSignalsPro/1.0" } });
+    if (!res.ok) return { source: "NewsAPI", ok: false, count: 0, error: `HTTP ${res.status}`, articles: [] };
     const json: any = await res.json();
-    const raw: RawNewsArticle[] = (json?.articles ?? [])
+    const articles: RawNewsArticle[] = (json?.articles ?? [])
       .filter((a: any) => a?.title && a.title !== "[Removed]")
       .map((a: any) => ({
         headline: a.title as string,
@@ -1313,10 +1377,57 @@ async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
         publishedAt: (a.publishedAt ?? new Date().toISOString()) as string,
         url: (a.url ?? "") as string,
       }));
-    return { available: true, articles: scoreArticles(raw) };
+    return { source: "NewsAPI (additive)", ok: true, count: articles.length, articles };
   } catch (e: any) {
-    return { available: false, articles: [], error: e.message ?? "News fetch failed" };
+    return { source: "NewsAPI (additive)", ok: false, count: 0, error: e.message ?? "Fetch failed", articles: [] };
   }
+}
+
+const NEWS_CACHE_TTL_SECONDS = 90;
+const NEWS_CACHE_KV_KEY = "news:combined:v2";
+
+async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
+  const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as NewsFetchResult;
+    } catch {
+      // fall through and refetch on a corrupt cache entry
+    }
+  }
+
+  const rssResults = await Promise.all(TRUSTED_RSS_FEEDS.map(fetchOneRssFeed));
+  const sourceStatus = rssResults.map(({ articles, ...status }) => status);
+  const rawArticles: RawNewsArticle[] = rssResults.flatMap((r) => r.articles);
+
+  if (env.NEWSAPI_KEY) {
+    const napi = await fetchNewsApiArticles(env.NEWSAPI_KEY);
+    sourceStatus.push({ source: napi.source, ok: napi.ok, count: napi.count, error: napi.error });
+    rawArticles.push(...napi.articles);
+  }
+
+  const anySourceOk = sourceStatus.some((s) => s.ok);
+  if (!anySourceOk) {
+    const result: NewsFetchResult = { available: false, articles: [], events: [], sourceStatus, error: "All news sources are temporarily unavailable" };
+    return result;
+  }
+
+  // De-dupe identical URLs (the same wire story often appears verbatim
+  // across two of our own RSS feeds) before scoring/clustering.
+  const seenUrls = new Set<string>();
+  const deduped = rawArticles.filter((a) => {
+    const key = a.url || a.headline;
+    if (seenUrls.has(key)) return false;
+    seenUrls.add(key);
+    return true;
+  });
+
+  const now = Date.now();
+  const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);
+  const events = clusterEvents(scored);
+  const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus };
+  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
+  return result;
 }
 
 interface EiaFetchResult {
@@ -1343,16 +1454,29 @@ async function fetchEiaSeries(apiKey: string, path: string, seriesId: string): P
   return rows.map((r: any) => ({ period: r.period, value: Number(r.value) })).filter((r: any) => Number.isFinite(r.value));
 }
 
+const EIA_CACHE_TTL_SECONDS = 8 * 60;
+const EIA_CACHE_KV_KEY = "news:eia:v2";
+
 async function fetchEiaData(env: Env): Promise<EiaFetchResult> {
   if (!env.EIA_API_KEY) return { available: false, crude: null, ngStorage: null, error: "EIA_API_KEY not configured" };
+  const cached = await env.COMMODITY_KV.get(EIA_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as EiaFetchResult;
+    } catch {
+      // fall through and refetch
+    }
+  }
   try {
     const [crudeRows, ngRows] = await Promise.all([
       fetchEiaSeries(env.EIA_API_KEY, "petroleum/stoc/wstk", "WCESTUS1"),
       fetchEiaSeries(env.EIA_API_KEY, "natural-gas/stor/wkly", "NW2_EPG0_SWO_R48_BCF"),
     ]);
-    const crude = crudeRows.length >= 2 ? scoreEiaChange("crude_inventory", crudeRows[0].value - crudeRows[1].value) : null;
-    const ngStorage = ngRows.length >= 2 ? scoreEiaChange("ng_storage", ngRows[0].value - ngRows[1].value) : null;
-    return { available: crude !== null || ngStorage !== null, crude, ngStorage };
+    const crude = crudeRows.length >= 2 ? scoreEiaChange("crude_inventory", crudeRows[0].value, crudeRows[1].value) : null;
+    const ngStorage = ngRows.length >= 2 ? scoreEiaChange("ng_storage", ngRows[0].value, ngRows[1].value) : null;
+    const result: EiaFetchResult = { available: crude !== null || ngStorage !== null, crude, ngStorage };
+    await env.COMMODITY_KV.put(EIA_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: EIA_CACHE_TTL_SECONDS });
+    return result;
   } catch (e: any) {
     return { available: false, crude: null, ngStorage: null, error: e.message ?? "EIA fetch failed" };
   }
@@ -1361,6 +1485,10 @@ async function fetchEiaData(env: Env): Promise<EiaFetchResult> {
 interface EconCalendarEvent {
   name: string;
   date: string;
+  actual: number | null;
+  previous: number | null;
+  affects: AffectedMarket;
+  impact: "HIGH" | "MEDIUM" | "LOW";
 }
 
 interface CalendarFetchResult {
@@ -1369,36 +1497,70 @@ interface CalendarFetchResult {
   error?: string;
 }
 
-const FRED_RELEASES: { name: string; releaseId: number }[] = [
-  { name: "CPI (Inflation)", releaseId: 10 },
-  { name: "Employment Situation (Jobs Report)", releaseId: 50 },
-  { name: "PPI", releaseId: 46 },
-  { name: "GDP", releaseId: 53 },
+// releaseId = FRED's release-calendar identifier (next scheduled date).
+// seriesId = FRED's own observation series (real reported actual/previous
+// values -- FRED's free API does not expose analyst consensus-forecast
+// numbers, so "actual vs prior release" is shown rather than inventing a
+// forecast figure).
+const FRED_RELEASES: { name: string; releaseId: number; seriesId: string; affects: AffectedMarket; impact: "HIGH" | "MEDIUM" | "LOW" }[] = [
+  { name: "CPI (Inflation)", releaseId: 10, seriesId: "CPIAUCSL", affects: "BOTH", impact: "HIGH" },
+  { name: "Employment Situation (Jobs Report)", releaseId: 50, seriesId: "PAYEMS", affects: "BOTH", impact: "HIGH" },
+  { name: "PPI", releaseId: 46, seriesId: "PPIACO", affects: "BOTH", impact: "MEDIUM" },
+  { name: "GDP", releaseId: 53, seriesId: "GDP", affects: "BOTH", impact: "MEDIUM" },
+  { name: "Fed Funds Rate Decision", releaseId: 101, seriesId: "FEDFUNDS", affects: "BOTH", impact: "HIGH" },
 ];
+
+const CALENDAR_CACHE_TTL_SECONDS = 20 * 60;
+const CALENDAR_CACHE_KV_KEY = "news:calendar:v2";
 
 async function fetchEconCalendar(env: Env): Promise<CalendarFetchResult> {
   if (!env.FRED_API_KEY) return { available: false, events: [], error: "FRED_API_KEY not configured" };
+  const cached = await env.COMMODITY_KV.get(CALENDAR_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as CalendarFetchResult;
+    } catch {
+      // fall through and refetch
+    }
+  }
   try {
     const now = new Date().toISOString().slice(0, 10);
+    const apiKey = env.FRED_API_KEY as string;
     const results = await Promise.all(
       FRED_RELEASES.map(async (rel) => {
-        const usp = new URLSearchParams({
-          release_id: String(rel.releaseId),
-          api_key: env.FRED_API_KEY as string,
-          file_type: "json",
-          realtime_start: now,
-          sort_order: "asc",
-          limit: "1",
-        });
-        const res = await fetch(`https://api.stlouisfed.org/fred/release/dates?${usp.toString()}`);
-        if (!res.ok) return null;
-        const json: any = await res.json();
-        const next = json?.release_dates?.[0]?.date;
-        return next ? { name: rel.name, date: next as string } : null;
+        const dateUsp = new URLSearchParams({ release_id: String(rel.releaseId), api_key: apiKey, file_type: "json", realtime_start: now, sort_order: "asc", limit: "1" });
+        const obsUsp = new URLSearchParams({ series_id: rel.seriesId, api_key: apiKey, file_type: "json", sort_order: "desc", limit: "2" });
+        const [dateRes, obsRes] = await Promise.all([
+          fetch(`https://api.stlouisfed.org/fred/release/dates?${dateUsp.toString()}`),
+          fetch(`https://api.stlouisfed.org/fred/series/observations?${obsUsp.toString()}`),
+        ]);
+        if (!dateRes.ok) return null;
+        const dateJson: any = await dateRes.json();
+        const next = dateJson?.release_dates?.[0]?.date;
+        if (!next) return null;
+        let actual: number | null = null;
+        let previous: number | null = null;
+        if (obsRes.ok) {
+          const obsJson: any = await obsRes.json();
+          const obs = (obsJson?.observations ?? []).filter((o: any) => o?.value && o.value !== ".");
+          if (obs[0]) actual = Number(obs[0].value);
+          if (obs[1]) previous = Number(obs[1].value);
+        }
+        const event: EconCalendarEvent = {
+          name: rel.name,
+          date: next as string,
+          actual: Number.isFinite(actual) ? actual : null,
+          previous: Number.isFinite(previous) ? previous : null,
+          affects: rel.affects,
+          impact: rel.impact,
+        };
+        return event;
       })
     );
     const events = results.filter((e): e is EconCalendarEvent => e !== null).sort((a, b) => a.date.localeCompare(b.date));
-    return { available: true, events };
+    const result: CalendarFetchResult = { available: true, events };
+    await env.COMMODITY_KV.put(CALENDAR_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: CALENDAR_CACHE_TTL_SECONDS });
+    return result;
   } catch (e: any) {
     return { available: false, events: [], error: e.message ?? "Economic calendar fetch failed" };
   }
@@ -2110,7 +2272,34 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 
         if (url.pathname === "/api/news-trade") {
           const [news, eia, calendar] = await Promise.all([fetchEnergyNews(env), fetchEiaData(env), fetchEconCalendar(env)]);
-          return json({ news, eia, calendar, fetchedAt: new Date().toISOString() });
+          return json({ news, eia, calendar, marketStatus: getMarketStatus(), fetchedAt: new Date().toISOString() });
+        }
+
+        // Spec-compliant standalone routes -- same underlying cached
+        // fetchers as /api/news-trade above (so there is exactly one place
+        // that actually talks to RSS/EIA/FRED), exposed individually for
+        // any consumer that only needs one slice rather than the combined
+        // decision payload. All server-side, no client ever sees a secret.
+        if (url.pathname === "/api/news") {
+          const symbolParam = url.searchParams.get("symbol");
+          const news = await fetchEnergyNews(env);
+          if (!symbolParam) return json(news);
+          const marketKey: AffectedMarket = symbolParam.toUpperCase() === "NG" ? "NG" : symbolParam.toUpperCase() === "CRUDE" ? "CRUDE" : "BOTH";
+          return json({
+            ...news,
+            articles: news.articles.filter((a) => a.affectedMarket === marketKey || a.affectedMarket === "BOTH"),
+            events: news.events.filter((e) => e.affectedMarket === marketKey || e.affectedMarket === "BOTH"),
+          });
+        }
+
+        if (url.pathname === "/api/events") {
+          const news = await fetchEnergyNews(env);
+          return json({ available: news.available, events: news.events, error: news.error });
+        }
+
+        if (url.pathname === "/api/energy") {
+          const eia = await fetchEiaData(env);
+          return json(eia);
         }
 
         if (url.pathname === "/api/notify/topic") {
