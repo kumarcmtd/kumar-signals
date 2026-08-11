@@ -3,6 +3,7 @@ import { Wallet } from "lucide-react";
 import type { TradeLogEntry } from "../store/appStore";
 import type { ReboundCheck, ReboundTier } from "../utils/reboundStrength";
 import type { VolumeSupportCheck, VolumeSupportTier } from "../utils/volumeSupport";
+import type { TradeLightVerdict, TradeLightColor } from "../utils/tradeLight";
 import { TradeChart, type ChartMarkerSpec } from "./TradeChart";
 import type { Candle } from "../types";
 
@@ -372,6 +373,47 @@ export function ReboundStrengthCard({ rebound }: { rebound: ReboundCheck | null 
           </p>
         ))}
       </div>
+    </div>
+  );
+}
+
+const TRADE_LIGHT_STYLE: Record<TradeLightColor, { bg: string; border: string; text: string; dot: string; emoji: string }> = {
+  green: { bg: "#DCFCE7", border: "#86EFAC", text: "#15803D", dot: "#22C55E", emoji: "🟢" },
+  yellow: { bg: "#FEF3C7", border: "#FCD34D", text: "#B45309", dot: "#F59E0B", emoji: "🟡" },
+  red: { bg: "#FEE2E2", border: "#FCA5A5", text: "#B91C1C", dot: "#EF4444", emoji: "🔴" },
+};
+
+// The single at-a-glance answer to "should I buy this right now" -- built
+// entirely from real, already-computed levels (Entry Timing + Rebound
+// Strength, see tradeLight.ts), never a fabricated signal. Green means the
+// current live price IS the buy zone; yellow/red show the real price level
+// to watch for instead of a flat "wait" with no actionable number attached.
+export function TradeLightSignal({ verdict }: { verdict: TradeLightVerdict }) {
+  const style = TRADE_LIGHT_STYLE[verdict.light];
+  return (
+    <div className="rounded-2xl px-4 py-3.5" style={{ background: style.bg, border: `1.5px solid ${style.border}` }}>
+      <div className="flex items-center gap-2.5">
+        <span className="relative flex items-center justify-center w-4 h-4 shrink-0">
+          {verdict.light === "green" && <span className="absolute inline-flex w-full h-full rounded-full animate-ping" style={{ background: style.dot, opacity: 0.5 }} />}
+          <span className="relative inline-flex w-3.5 h-3.5 rounded-full border-2 border-white" style={{ background: style.dot, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }} />
+        </span>
+        <p className="text-base font-black" style={{ color: style.text }}>
+          {style.emoji} {verdict.label}
+        </p>
+      </div>
+      <p className="text-[11px] mt-1.5 leading-snug" style={{ color: style.text, opacity: 0.9 }}>
+        {verdict.note}
+      </p>
+      {verdict.suggestedBuyPrice !== null && (
+        <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style={{ background: "rgba(255,255,255,.6)" }}>
+          <span className="text-[9px] font-bold uppercase" style={{ color: style.text, opacity: 0.75 }}>
+            Buy Zone
+          </span>
+          <span className="text-sm font-black" style={{ color: style.text }}>
+            ₹{verdict.suggestedBuyPrice.toFixed(2)}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

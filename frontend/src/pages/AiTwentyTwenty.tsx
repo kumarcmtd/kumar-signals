@@ -13,7 +13,8 @@ import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../u
 import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { checkReboundStrength } from "../utils/reboundStrength";
 import { checkVolumeSupport } from "../utils/volumeSupport";
-import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
+import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble, TradeLightSignal } from "../components/CallCardKit";
+import { computeTradeLight } from "../utils/tradeLight";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -177,6 +178,7 @@ function TwentyCandidateCard({
   const rebound = inBetween ? checkReboundStrength(candles, direction) : null;
   const volumeSupport = openTrade ? checkVolumeSupport(candles, direction) : null;
   const potential = latest && heroNextTarget !== null ? calculatePotentialLeft(latest.entry, latest.stop, heroNextTarget, liveLtp ?? latest.entry) : null;
+  const tradeLight = heroEntryTiming && heroLegFloor !== null && heroNextTarget !== null && latest ? computeTradeLight(heroEntryTiming, rebound, heroLegFloor, heroNextTarget, effectiveStopFor(latest)) : null;
   // The point move that gets you to the profit-per-lot target is
   // symbol-specific (Crude Oil's own lot size makes that a 20-point move;
   // Natural Gas's much larger lot size means the same profit only needs a
@@ -240,6 +242,12 @@ function TwentyCandidateCard({
         </div>
       </div>
 
+      {tradeLight && (
+        <div className="px-4 pt-4">
+          <TradeLightSignal verdict={tradeLight} />
+        </div>
+      )}
+
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-3 gap-2">
           <LightStatTile label="Stop Loss" value={latest ? `₹${effectiveStopFor(latest)}` : "—"} color="#EF4444" />
@@ -254,7 +262,6 @@ function TwentyCandidateCard({
             {lotSize} lot size -- Target 1 is worth ~₹{Math.round((latest.targets[0] - latest.entry) * lotSize)} on 1 lot.
           </p>
         )}
-        {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="light" />}
         {potential && (
           <div className="flex items-center gap-1">
             <span className="text-emerald-600">▲▲</span>
