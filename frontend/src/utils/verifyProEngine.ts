@@ -8,6 +8,7 @@ import { detectCandlePatterns } from "./candlePatterns";
 import { analyzeOrderFlow } from "./orderFlowAnalysis";
 import { evaluateOptionsSentiment } from "./optionsSentiment";
 import { evaluateEntryTiming, type EntryTimingVerdict } from "./entryTiming";
+import { detectBreakoutIgnition } from "./breakoutIgnition";
 
 // AI Verify Pro is a FINAL APPROVAL gate on top of whatever Best Call
 // already generated -- it never invents a signal of its own. It re-reads
@@ -114,6 +115,7 @@ const CATEGORY_MAP: Record<string, ConfidenceCategory> = {
   maxPain: "optionsSentiment",
   oi: "optionsSentiment",
   orderFlow: "orderFlow",
+  ignition: "trend",
 };
 
 function mk(key: string, name: string, weightPct: number, tier: StrategyTier, reason: string, explain: string): StrategyResult {
@@ -171,6 +173,29 @@ function buildOrderFlowCheck(direction: CallDirection, flow: ReturnType<typeof a
   if (aligned) return mk("orderFlow", "Order Flow", 10, "pass", `${flow.deltaLabel} -- matches this call.`, flow.reason);
   if (opposed) return mk("orderFlow", "Order Flow", 10, "fail", `${flow.deltaLabel} -- against this call.`, flow.reason);
   return mk("orderFlow", "Order Flow", 10, "wait", `${flow.deltaLabel} -- no clear edge yet.`, flow.reason);
+}
+
+// A confirmed squeeze-release breakout (see breakoutIgnition.ts) is a
+// legitimate reason to trust a move even before the slower checks above
+// (EMA200, ADX maturity) have caught up -- so it's added here as its own
+// confirming vote rather than silently, so the "why" is visible on the
+// card like every other check.
+function buildIgnitionCheck(direction: CallDirection, ignition: ReturnType<typeof detectBreakoutIgnition>): StrategyResult {
+  if (!ignition.firing || !ignition.direction) {
+    return mk("ignition", "Breakout Ignition", 10, "wait", "No confirmed volatility-squeeze breakout right now.", "Needs a recent Bollinger Band squeeze followed by a volume-backed expansion in either direction.");
+  }
+  const aligned = ignition.direction === direction;
+  if (aligned) {
+    return mk(
+      "ignition",
+      "Breakout Ignition",
+      10,
+      "pass",
+      `Confirmed volatility-squeeze breakout, matching this call -- band width up ${ignition.bandExpansionRatio?.toFixed(1)}x on ${ignition.volumeMultiple?.toFixed(1)}x volume.`,
+      ignition.notes.join(" ")
+    );
+  }
+  return mk("ignition", "Breakout Ignition", 10, "fail", "Confirmed volatility-squeeze breakout, but in the OPPOSITE direction to this call.", ignition.notes.join(" "));
 }
 
 function computeRiskPlan(entry: number, stop: number, targets: [number, number, number]): RiskPlan {
@@ -247,6 +272,8 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
   const smc = analyzeSmartMoneyConcepts(candles);
   const flow = analyzeOrderFlow(rawDepth, previousRawDepth, candles);
   const optionChecks = evaluateOptionsSentiment(options, direction, liveUnderlyingPrice, oiSamples, underlyingPriceSamples);
+  const ignition = detectBreakoutIgnition(candles);
+  const ignitionAligned = ignition.firing && ignition.direction === direction;
 
   const checks: StrategyResult[] = [
     ...base.strategies,
@@ -254,6 +281,7 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
     buildSmartMoneyFlagsCheck(direction, smc),
     buildCandlePatternCheck(direction, candles),
     buildOrderFlowCheck(direction, flow),
+    buildIgnitionCheck(direction, ignition),
     ...optionChecks,
   ];
 
@@ -310,8 +338,22 @@ export function evaluateVerifyPro(input: VerifyProInput): VerifyProResult {
   const volumeCheck = checks.find((c) => c.key === "volume");
 
   if (supertrendCheck?.tier === "fail") cautionFlags.push({ reason: "SuperTrend is against this call.", penalty: 15 });
-  if (ema200Check?.tier === "fail") cautionFlags.push({ reason: "Higher-timeframe (EMA200) trend is against this call.", penalty: 12 });
-  if (adxValue !== null && adxValue < 20) cautionFlags.push({ reason: `ADX ${adxValue.toFixed(1)} is below 20 -- trend isn't fully confirmed yet.`, penalty: 10 });
+  // EMA200 and ADX-maturity are both structurally LAGGING -- a 200-period
+  // average and a trend-strength gauge that only reads "confirmed" past 20
+  // both take time to catch up to a move that only just started. A
+  // confirmed breakout ignition (see buildIgnitionCheck above) is a direct,
+  // real-time reason those two haven't caught up YET, not a reason to
+  // doubt the move -- so their penalty is halved rather than waived
+  // outright (still counts for something; ignition isn't infallible).
+  if (ema200Check?.tier === "fail") cautionFlags.push({ reason: "Higher-timeframe (EMA200) trend is against this call.", penalty: ignitionAligned ? 6 : 12 });
+  if (adxValue !== null && adxValue < 20) {
+    cautionFlags.push({
+      reason: ignitionAligned
+        ? `ADX ${adxValue.toFixed(1)} is below 20, but a confirmed breakout ignition explains why -- trend strength hasn't caught up to the move yet.`
+        : `ADX ${adxValue.toFixed(1)} is below 20 -- trend isn't fully confirmed yet.`,
+      penalty: ignitionAligned ? 5 : 10,
+    });
+  }
   if (risk.riskRewardRatio !== null && risk.riskRewardRatio < 1.5) cautionFlags.push({ reason: `Risk:Reward is only 1:${risk.riskRewardRatio.toFixed(1)} -- below the 1:1.5 target.`, penalty: 12 });
   if (srCheck?.tier === "wait") cautionFlags.push({ reason: "Price is still testing a major support/resistance level.", penalty: 6 });
   if (marketDepth && marketDepth.liquidityScore < 3) cautionFlags.push({ reason: "Order book liquidity is thin.", penalty: 15 });

@@ -93,7 +93,16 @@ function scoreSetup(analysis: TimeframeAnalysis, candles: Candle[], siblings: Ti
   const orderBlockAligned = !!lastBlock && lastBlock.direction === bias;
   const orderBlockPts = orderBlockAligned ? 10 : 0;
 
-  const hitScore = Math.min(Math.round(priceActionPts + valueZonePts + volumePts + momentumPts + crossTfPts + orderBlockPts), 100);
+  // A confirmed squeeze-release breakout (see breakoutIgnition.ts) is the
+  // single strongest "this is real, not noise" signal this app can compute
+  // -- worth a bonus on top of the other categories (which already sum to
+  // 100 on their own) so a genuinely igniting move that's still moderate on
+  // the slower categories above can still clear the bar, rather than only
+  // ever qualifying once the move has already matured.
+  const ignitionAligned = !!analysis.ignition?.firing && analysis.ignition.direction === bias;
+  const ignitionPts = ignitionAligned ? 15 : 0;
+
+  const hitScore = Math.min(Math.round(priceActionPts + valueZonePts + volumePts + momentumPts + crossTfPts + orderBlockPts + ignitionPts), 100);
 
   return {
     confirmingTimeframes,
@@ -107,6 +116,7 @@ function scoreSetup(analysis: TimeframeAnalysis, candles: Candle[], siblings: Ti
       { label: "Momentum", points: Math.round(momentumPts), max: 15 },
       { label: "Cross-Timeframe Confirmation", points: crossTfPts, max: 15 },
       { label: "Smart-Money Order Block Alignment", points: orderBlockPts, max: 10 },
+      { label: "Breakout Ignition (Volatility Squeeze Release)", points: ignitionPts, max: 15 },
     ],
   };
 }

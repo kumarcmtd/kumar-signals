@@ -2,6 +2,7 @@ import type { Candle, Direction, OptionsAnalytics } from "../types";
 import { computeIndicatorSnapshot, rsi, stochasticRsi, obvTrend, pivotPoints, centralPivotRange } from "./indicators";
 import { detectCandlePattern, analyzeStructure, findSwingPoints } from "./priceAction";
 import { detectLiquiditySweep, premiumDiscountZone } from "./smc";
+import { detectBreakoutIgnition, type BreakoutIgnition } from "./breakoutIgnition";
 
 export type Decision6 = "STRONG BUY" | "BUY" | "WATCH BUY" | "WAIT" | "SELL" | "STRONG SELL";
 
@@ -66,6 +67,12 @@ export interface TimeframeAnalysis {
   underlyingStop: number | null;
   underlyingTargets: [number, number, number] | null;
   holdingTime: string;
+  // Fires on a genuine Bollinger-Band-squeeze-release breakout (see
+  // breakoutIgnition.ts) -- when it confirms this call's own direction, the
+  // "overextended" vetoes below (RSI>80, far above VWAP) get suppressed,
+  // since that's exactly what a real breakout's first hour looks like, not
+  // a reason to hold back. null when there isn't enough data yet.
+  ignition: BreakoutIgnition | null;
 }
 
 const MIN_BARS = 30;
@@ -357,6 +364,7 @@ export function analyzeTimeframe(params: {
     underlyingStop: null,
     underlyingTargets: null,
     holdingTime: HOLDING_TIME[tf] ?? "—",
+    ignition: null,
   };
 
   if (!candles || candles.length < MIN_BARS) {
@@ -415,13 +423,26 @@ export function analyzeTimeframe(params: {
   const nearestResPct = highsAbove.length ? ((Math.min(...highsAbove) - lastClose) / lastClose) * 100 : null;
   const nearestSupPct = lowsBelow.length ? ((lastClose - Math.max(...lowsBelow)) / lastClose) * 100 : null;
 
+  // A genuine squeeze-release breakout (see breakoutIgnition.ts) looks
+  // IDENTICAL to "overextended" by the RSI>80/far-above-VWAP checks below --
+  // that's what a real trend day's first hour looks like, not a reason to
+  // veto it. Only suppress those two specific "don't chase" checks when
+  // ignition confirms the SAME direction this call is already reading;
+  // near-resistance and thin-volume vetoes stay in force either way, since
+  // those are independent real conflicts ignition doesn't address.
+  const ignition = detectBreakoutIgnition(candles);
+  const ignitionConfirmsBuy = ignition.firing && ignition.direction === "bullish";
+  const ignitionConfirmsSell = ignition.firing && ignition.direction === "bearish";
+
   if (decision === "STRONG BUY" || decision === "BUY" || decision === "WATCH BUY") {
-    if (snap.rsi14 !== null && snap.rsi14 > 80) vetoes.push(`RSI ${snap.rsi14.toFixed(0)} > 80 (overbought)`);
-    if (priceAboveVwapPct > 2) vetoes.push(`Price ${priceAboveVwapPct.toFixed(1)}% above VWAP (extended)`);
+    if (!ignitionConfirmsBuy) {
+      if (snap.rsi14 !== null && snap.rsi14 > 80) vetoes.push(`RSI ${snap.rsi14.toFixed(0)} > 80 (overbought)`);
+      if (priceAboveVwapPct > 2) vetoes.push(`Price ${priceAboveVwapPct.toFixed(1)}% above VWAP (extended)`);
+    }
     if (nearestResPct !== null && nearestResPct < 0.3) vetoes.push(`Resistance only ${nearestResPct.toFixed(2)}% away`);
     if (volume.score < 40) vetoes.push("Volume too weak to confirm");
   } else if (decision === "SELL" || decision === "STRONG SELL") {
-    if (snap.rsi14 !== null && snap.rsi14 < 20) vetoes.push(`RSI ${snap.rsi14.toFixed(0)} < 20 (oversold)`);
+    if (!ignitionConfirmsSell && snap.rsi14 !== null && snap.rsi14 < 20) vetoes.push(`RSI ${snap.rsi14.toFixed(0)} < 20 (oversold)`);
     if (nearestSupPct !== null && nearestSupPct < 0.3) vetoes.push(`Strong support only ${nearestSupPct.toFixed(2)}% away`);
     if (options && !options.error && options.bias === "bullish") vetoes.push("Chain shows heavy put writing (bullish OI bias)");
     if (detectBullishDivergence(candles, closes)) vetoes.push("Bullish divergence — price lower low, RSI higher low");
@@ -430,6 +451,8 @@ export function analyzeTimeframe(params: {
   if (vetoes.length > 0) {
     decision = "WAIT";
     bias = "neutral";
+  } else if (ignition.firing && ignition.direction) {
+    reasons.push(...ignition.notes);
   }
 
   const optSide: "CE" | "PE" | null = bias === "bullish" ? "CE" : bias === "bearish" ? "PE" : null;
@@ -490,5 +513,6 @@ export function analyzeTimeframe(params: {
     underlyingStop,
     underlyingTargets,
     holdingTime: HOLDING_TIME[tf] ?? "—",
+    ignition,
   };
 }
