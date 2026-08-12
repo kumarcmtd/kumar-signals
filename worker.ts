@@ -1300,13 +1300,19 @@ interface NewsFetchResult {
 // Only these exact, hand-verified official/public RSS endpoints are ever
 // fetched -- the frontend can never submit an arbitrary URL for the Worker
 // to fetch (no such endpoint exists), which closes off SSRF entirely.
+// Deliberately spans more than one domain: eia.gov alone is a single point
+// of failure (a WAF/bot-protection block on that one domain would silently
+// zero out the entire feed, which is exactly what production showed --
+// every eia.gov feed failing together), so oilprice.com is included as an
+// independent Tier-3 fallback source.
 const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
   { url: "https://www.eia.gov/rss/todayinenergy.xml", source: "EIA - Today in Energy" },
   { url: "https://www.eia.gov/rss/petroleum.xml", source: "EIA - This Week in Petroleum" },
   { url: "https://www.eia.gov/rss/natural_gas.xml", source: "EIA - Natural Gas Weekly" },
   { url: "https://www.eia.gov/rss/press_rss.xml", source: "EIA - Press Releases" },
+  { url: "https://oilprice.com/rss/main", source: "OilPrice.com" },
 ];
-const RSS_FETCH_TIMEOUT_MS = 6000;
+const RSS_FETCH_TIMEOUT_MS = 8000;
 
 function xmlUnescape(s: string): string {
   return s
@@ -1349,9 +1355,19 @@ async function fetchOneRssFeed(feed: { url: string; source: string }): Promise<{
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RSS_FETCH_TIMEOUT_MS);
-    const res = await fetch(feed.url, { headers: { "User-Agent": "KumarSignalsPro/1.0 (+energy-news-reader)", Accept: "application/rss+xml, application/xml, text/xml" }, signal: controller.signal });
+    // A generic-looking, standards-compliant browser UA -- some public feeds
+    // sit behind bot-protection that blocks unfamiliar/non-browser UA
+    // strings outright, which reads identically to a dead URL from here
+    // (both come back non-ok) unless the UA itself is ruled out first.
+    const res = await fetch(feed.url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Accept: "application/rss+xml, application/xml, text/xml, */*",
+      },
+      signal: controller.signal,
+    });
     clearTimeout(timer);
-    if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status}`, articles: [] };
+    if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
     const xml = await res.text();
     const articles = parseRssFeed(xml, feed.source);
     return { source: feed.source, ok: true, count: articles.length, articles };

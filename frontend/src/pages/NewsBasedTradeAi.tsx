@@ -3,7 +3,7 @@ import { Radio, TrendingUp, TrendingDown } from "lucide-react";
 import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
 import { useNewsTrade } from "../api/hooks";
 import { NewsTradeDecisionCard } from "../components/NewsTradeDecisionCard";
-import { TopEventsList, NewsTimeline, EiaPanel, EconCalendarCardV2, DataFreshnessBadge, MarketStatusBanner, NewsMarketBiasCard } from "../components/NewsDashboardKit";
+import { TopEventsList, NewsTimeline, EiaPanel, EconCalendarCardV2, DataFreshnessBadge, MarketStatusBanner, NewsMarketBiasCard, FeedStatusFooter } from "../components/NewsDashboardKit";
 import type { NewsTradeResult, NewsTradeSymbol } from "../utils/newsTradeEngine";
 
 const SYMBOLS: NewsTradeSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -93,13 +93,19 @@ export function NewsBasedTradeAi() {
 
       <SymbolBody symbol={symbol} result={result} underlyingPrice={underlyingPrice} candlesLoading={candlesLoading} candlesError={candlesError} />
 
-      <TopEventsList events={newsData?.news.events?.filter((e) => e.affectedMarket === (symbol === "CRUDEOIL" ? "CRUDE" : "NG") || e.affectedMarket === "BOTH") ?? []} />
+      <TopEventsList
+        events={newsData?.news.events?.filter((e) => e.affectedMarket === (symbol === "CRUDEOIL" ? "CRUDE" : "NG") || e.affectedMarket === "BOTH") ?? []}
+        available={newsData?.news.available ?? false}
+        error={newsData?.news.error}
+      />
 
       <EconCalendarCardV2 events={newsData?.calendar.events ?? []} available={newsData?.calendar.available ?? false} error={newsData?.calendar.error} symbol={symbol} />
 
       <EiaPanel eia={newsData?.eia ?? null} />
 
       <NewsTimeline articles={newsData?.news.articles ?? []} available={newsData?.news.available ?? false} error={newsData?.news.error} />
+
+      <FeedStatusFooter sourceStatus={newsData?.news.sourceStatus ?? []} />
 
       <p className="text-[10px] text-white/30 leading-relaxed text-center px-4 pb-2">
         Educational reference only, not financial advice. News scoring is rule-based (not an LLM classification), so the same headline always scores the same way. Always confirm on the live chart

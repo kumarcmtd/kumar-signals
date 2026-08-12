@@ -141,12 +141,14 @@ function EventCard({ event }: { event: NewsEvent }) {
   );
 }
 
-export function TopEventsList({ events }: { events: NewsEvent[] }) {
+export function TopEventsList({ events, available, error }: { events: NewsEvent[]; available: boolean; error?: string }) {
   const top5 = [...events].sort((a, b) => Math.abs(b.impactScale) * b.sourceQualityPct - Math.abs(a.impactScale) * a.sourceQualityPct).slice(0, 5);
   return (
     <div className="rounded-2xl p-4" style={{ background: "#181A24", border: "1px solid rgba(255,255,255,.08)" }}>
       <p className="text-xs font-black uppercase text-white/60 mb-3">Top Market-Moving Events</p>
-      {top5.length === 0 ? (
+      {!available ? (
+        <p className="text-[11px] text-white/40 leading-relaxed">{error ?? "News feed temporarily unavailable -- events will appear once a source responds."}</p>
+      ) : top5.length === 0 ? (
         <p className="text-[11px] text-white/40">No high-relevance events in the current feed.</p>
       ) : (
         <div className="space-y-2">
@@ -312,6 +314,39 @@ export function EconCalendarCardV2({ events, available, error, symbol }: { event
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Per-feed diagnostic footer ----
+// Server-side logging (worker.ts) covers "what happened and why" for an
+// operator with dashboard access, but this app has no log viewer -- this
+// small, low-emphasis footer surfaces the same per-source ok/error detail
+// directly on the page, so a real production failure (a feed 404ing, a
+// timeout, a WAF block) is visible without needing to reproduce it
+// separately.
+export function FeedStatusFooter({ sourceStatus }: { sourceStatus: { source: string; ok: boolean; count: number; error?: string }[] }) {
+  const [open, setOpen] = useState(false);
+  if (sourceStatus.length === 0) return null;
+  const failCount = sourceStatus.filter((s) => !s.ok).length;
+  return (
+    <div className="rounded-xl px-3 py-2" style={{ background: "#12131C", border: "1px solid rgba(255,255,255,.06)" }}>
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center justify-between text-[10px] font-bold text-white/40">
+        <span>
+          News feed status ({sourceStatus.length - failCount}/{sourceStatus.length} sources OK)
+        </span>
+        <span>{open ? "hide" : "show"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1">
+          {sourceStatus.map((s) => (
+            <div key={s.source} className="flex items-center justify-between text-[9px]">
+              <span className="text-white/50">{s.source}</span>
+              <span className={s.ok ? "text-[#00E676] font-bold" : "text-[#FF4D4F] font-bold"}>{s.ok ? `OK (${s.count})` : (s.error ?? "failed")}</span>
+            </div>
+          ))}
         </div>
       )}
     </div>
