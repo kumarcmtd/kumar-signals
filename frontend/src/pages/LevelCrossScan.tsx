@@ -1,17 +1,98 @@
-import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target } from "lucide-react";
+import { useState } from "react";
+import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target, ChevronDown, CandlestickChart } from "lucide-react";
 import { useLevelCrossScanner } from "../hooks/useLevelCrossScanner";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow } from "../components/CallCardKit";
+import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
+import { detectSignificantLevels, type LevelCrossSignal, type SrLevel } from "../utils/levelCrossEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import type { Candle } from "../types";
+import type { TradeLogEntry } from "../store/appStore";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 
+const RESISTANCE_COLOR = "#DC2626";
+const SUPPORT_COLOR = "#16A34A";
+const TARGET_COLOR = "#2563EB";
+const CONTEXT_COLOR = "#94A3B8";
+
+// The whole point of this page is a claim someone should be able to check
+// with their own eyes -- "this level was tested N times, then broke" isn't
+// trustworthy as a bare number alone. This draws the exact level that
+// broke, the next level used as the real target, and a couple of other
+// significant levels nearby for context, directly on the same candle
+// series (same timeframe) the engine itself scanned -- never a mismatched
+// fixed interval.
+function LevelCrossChart({ candles, signal, entry }: { candles: Candle[]; signal: LevelCrossSignal | null; entry: TradeLogEntry | undefined }) {
+  if (!candles.length) {
+    return <p className="text-xs text-[var(--color-muted)] text-center py-6 px-2">No chart data available yet.</p>;
+  }
+
+  const allLevels = detectSignificantLevels(candles);
+  const drawn = new Set<number>();
+  const priceLines: { price: number; color: string; title: string }[] = [];
+
+  if (signal?.level) {
+    priceLines.push({
+      price: signal.level.price,
+      color: signal.level.type === "resistance" ? RESISTANCE_COLOR : SUPPORT_COLOR,
+      title: `${signal.level.type === "resistance" ? "Resistance" : "Support"} · ${signal.level.touches}x tested`,
+    });
+    drawn.add(signal.level.price);
+  }
+  if (signal?.nextLevel) {
+    priceLines.push({ price: signal.nextLevel.price, color: TARGET_COLOR, title: `Target level · ${signal.nextLevel.touches}x tested` });
+    drawn.add(signal.nextLevel.price);
+  }
+  const context = allLevels.filter((l: SrLevel) => !drawn.has(l.price)).slice(0, 3);
+  for (const l of context) priceLines.push({ price: l.price, color: CONTEXT_COLOR, title: `${l.touches}x tested` });
+
+  const markers: ChartMarkerSpec[] = entry
+    ? [
+        {
+          timeMs: entry.openedAt,
+          color: signal?.direction === "bullish" ? "#16a34a" : "#dc2626",
+          shape: signal?.direction === "bullish" ? "arrowUp" : "arrowDown",
+          text: "LEVEL BREAK",
+          position: signal?.direction === "bullish" ? "belowBar" : "aboveBar",
+        },
+      ]
+    : [];
+
+  return (
+    <div>
+      <TradeChart candles={candles} priceLines={priceLines} markers={markers} height={240} theme="light" />
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-[9px] text-[var(--color-muted)]">
+        {signal?.level && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: signal.level.type === "resistance" ? RESISTANCE_COLOR : SUPPORT_COLOR }} /> Level that broke
+          </span>
+        )}
+        {signal?.nextLevel && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: TARGET_COLOR }} /> Target level
+          </span>
+        )}
+        {context.length > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CONTEXT_COLOR }} /> Other tested levels nearby
+          </span>
+        )}
+      </div>
+      <p className="text-[9px] text-[var(--color-muted)] mt-1.5">
+        Underlying price on {signal?.label ?? "the"} chart -- the same candles and levels the scanner itself read. Entry/stop/target above are option-premium levels, not shown on this price scale.
+      </p>
+    </div>
+  );
+}
+
 function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: ReturnType<typeof useLevelCrossScanner> }) {
+  const [chartOpen, setChartOpen] = useState(false);
   const signal = scanner.best[symbol];
   const log = scanner.tradeLogs[symbol];
   const latest = log[log.length - 1];
@@ -26,15 +107,22 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
   if (!signal || !latest) {
     const nearMiss = scanner.misses[symbol][0];
     return (
-      <section className="rounded-3xl bg-white shadow-md p-5 text-center space-y-1.5">
-        <p className="text-sm font-black text-slate-700">{DISPLAY_NAME[symbol]} -- No Qualifying Break Right Now</p>
-        {nearMiss?.level ? (
-          <p className="text-xs text-slate-500 px-2">
-            Watching {nearMiss.level.type} at ₹{nearMiss.level.price} ({nearMiss.level.touches}x tested) on {nearMiss.label} -- {nearMiss.reasons[nearMiss.reasons.length - 1]}
-          </p>
-        ) : (
-          <p className="text-xs text-slate-500 px-2">No significant, well-tested level has broken with real conviction yet on any timeframe.</p>
-        )}
+      <section className="rounded-3xl bg-white shadow-md p-5 space-y-2.5">
+        <div className="text-center space-y-1.5">
+          <p className="text-sm font-black text-slate-700">{DISPLAY_NAME[symbol]} -- No Qualifying Break Right Now</p>
+          {nearMiss?.level ? (
+            <p className="text-xs text-slate-500 px-2">
+              Watching {nearMiss.level.type} at ₹{nearMiss.level.price} ({nearMiss.level.touches}x tested) on {nearMiss.label} -- {nearMiss.reasons[nearMiss.reasons.length - 1]}
+            </p>
+          ) : (
+            <p className="text-xs text-slate-500 px-2">No significant, well-tested level has broken with real conviction yet on any timeframe.</p>
+          )}
+        </div>
+        <button onClick={() => setChartOpen((o) => !o)} className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-teal-700">
+          <CandlestickChart size={14} /> {nearMiss ? "View Watched Level" : "View Chart"}
+          <ChevronDown size={14} className={`transition-transform ${chartOpen ? "rotate-180" : ""}`} />
+        </button>
+        {chartOpen && <LevelCrossChart candles={scanner.chartCandles[symbol] ?? []} signal={nearMiss ?? null} entry={undefined} />}
       </section>
     );
   }
@@ -100,6 +188,12 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
             </p>
           ))}
         </div>
+
+        <button onClick={() => setChartOpen((o) => !o)} className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-teal-700 pt-1">
+          <CandlestickChart size={14} /> View Chart
+          <ChevronDown size={14} className={`transition-transform ${chartOpen ? "rotate-180" : ""}`} />
+        </button>
+        {chartOpen && <LevelCrossChart candles={scanner.chartCandles[symbol] ?? []} signal={signal} entry={latest} />}
       </div>
     </section>
   );

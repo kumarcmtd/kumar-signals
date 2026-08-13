@@ -5,6 +5,7 @@ import { useHitScoreSuite } from "./useHitScoreSuite";
 import { useEliteTradeLog } from "./useTradeLog";
 import { evaluateLevelCross, type LevelCrossSignal } from "../utils/levelCrossEngine";
 import { projectFromUnderlying } from "../utils/bestCallSelector";
+import type { Candle } from "../types";
 
 interface LevelCrossProjection {
   strike: number;
@@ -54,9 +55,17 @@ export function useLevelCrossScanner() {
 
   const best: Record<string, LevelCrossSignal | null> = {};
   const misses: Record<string, LevelCrossSignal[]> = {};
+  // The exact same candle series each signal was computed from -- so any
+  // price line drawn on the chart (the level, the target) lines up with the
+  // bars actually shown, rather than a mismatched fixed timeframe. Falls
+  // back to the 15-minute series when nothing qualifies yet, so the chart
+  // still has something real to show for a near-miss.
+  const chartCandles: Record<string, Candle[]> = {};
   for (const symbol of SYMBOLS) {
     best[symbol] = pickBest(signalsBySymbol[symbol]);
     misses[symbol] = nearMisses(signalsBySymbol[symbol]);
+    const chartTf = best[symbol]?.tf ?? misses[symbol][0]?.tf ?? suites[symbol].entries[0]?.tf;
+    chartCandles[symbol] = suites[symbol].entries.find((e) => e.tf === chartTf)?.candles ?? suites[symbol].entries[0]?.candles ?? [];
   }
 
   const projections: Record<string, LevelCrossProjection | null> = {};
@@ -91,6 +100,7 @@ export function useLevelCrossScanner() {
     best,
     misses,
     projections,
+    chartCandles,
     tradeLogs: { CRUDEOIL: crudeLog, NATURALGAS: ngLog },
     options: { CRUDEOIL: crudeOil.options, NATURALGAS: naturalGas.options },
     anyLiveDataUnavailable,
