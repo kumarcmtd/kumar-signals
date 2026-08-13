@@ -128,12 +128,18 @@ export function kimiToBestCallPick(result: TimedScanResult, commodity: Commodity
   const underlyingTargets = deriveThreeTargets(result.entry, result.target);
   const proj = projectFromUnderlying(optSide, result.entry, result.stop, underlyingTargets, options);
   if (!proj) return null;
+  // Graduated docking for a trigger candle that doesn't actually confirm
+  // follow-through (weak close, extended RSI, volume against the move --
+  // see entryQuality.ts) -- never re-blocks a setup that already cleared
+  // calculateHitProbability's own bar, just makes it less likely to win the
+  // cross-engine confidence comparison in pickBestCall.
+  const confidence = Math.max(20, Math.round(prob.finalProbability - result.qualityPenalty));
   return {
     source: "Kimi Playbook",
     label: `${result.setupName} (${result.tfLabel})`,
     direction: result.direction === "bearish" ? "bearish" : "bullish",
     optSide,
-    confidence: prob.finalProbability,
+    confidence,
     strike: proj.strike,
     entry: proj.entry,
     targets: proj.targets,

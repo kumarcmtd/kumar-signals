@@ -3,6 +3,7 @@ import { rsi, computeIndicatorSnapshot, macd } from "./indicators";
 import { detectCandlePattern, findSwingPoints, analyzeStructure, type SwingPoint, type StructureAnalysis } from "./priceAction";
 import { sessionDayKey } from "./tradeLogStats";
 import { findPlaybookSetup, type ConfluenceFactor } from "./kimiPlaybook";
+import { assessEntryQuality } from "./entryQuality";
 
 // Real rule-based scanners for the 13 Kimi AI playbook setups that are
 // purely technical (price/indicator based). The other 3 setups in the
@@ -40,6 +41,10 @@ export interface ScanResult {
 // meaningful instead of a permanent no-op.
 export interface ScannedResult extends ScanResult {
   detectedConfluence: ConfluenceFactor[];
+  // Graduated docking (0-40, see entryQuality.ts) for a trigger candle that
+  // doesn't actually confirm follow-through -- subtracted from this setup's
+  // hit probability in bestCallSelector.kimiToBestCallPick, never a veto.
+  qualityPenalty: number;
 }
 
 interface ScanContext {
@@ -506,7 +511,13 @@ function detectConfluence(ctx: ScanContext, r: ScanResult, required: ConfluenceF
 
 function withConfluence(r: ScanResult, ctx: ScanContext, commodity: "NG" | "CL"): ScannedResult {
   const setup = findPlaybookSetup(r.setupName, commodity);
-  return { ...r, detectedConfluence: setup ? detectConfluence(ctx, r, setup.requiredConfluence) : [] };
+  const quality = assessEntryQuality(ctx.last, r.direction, ctx.snap, ctx.candles);
+  return {
+    ...r,
+    detectedConfluence: setup ? detectConfluence(ctx, r, setup.requiredConfluence) : [],
+    qualityPenalty: quality.penaltyPct,
+    notes: [...r.notes, ...quality.reasons],
+  };
 }
 
 export function scanNaturalGasSetups(candles: Candle[], todaysCandles: Candle[]): ScannedResult[] {

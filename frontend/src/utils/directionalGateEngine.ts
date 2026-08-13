@@ -1,5 +1,6 @@
 import type { Candle, OptionsAnalytics } from "../types";
 import { computeIndicatorSnapshot } from "./indicators";
+import { assessEntryQuality } from "./entryQuality";
 
 // A deliberately different, MUCH stricter engine from analyzeTimeframe()'s
 // 6-tier Decision6 score. That engine intentionally surfaces every timeframe
@@ -108,7 +109,11 @@ export function evaluateDirectionalGate(direction: GateDirection, entryCandles: 
 
   const adxScore = Math.min(((snap.adx14 - MIN_ADX) / 30) * 50, 50);
   const volScore = Math.min(((volRatio - MIN_VOLUME_RATIO) / 1.5) * 30, 30);
-  const confidence = Math.round(Math.min(60 + adxScore + volScore, 97));
+  // Graduated docking for a trigger candle that doesn't actually confirm --
+  // never a hard veto, since ADX/volume/trend already cleared their own
+  // bars above (see entryQuality.ts).
+  const quality = assessEntryQuality(last, direction, snap, entryCandles);
+  const confidence = Math.round(Math.max(20, Math.min(60 + adxScore + volScore - quality.penaltyPct, 97)));
 
   return {
     status: "qualified",
@@ -124,6 +129,7 @@ export function evaluateDirectionalGate(direction: GateDirection, entryCandles: 
       `ADX ${snap.adx14.toFixed(1)} shows a real trend, not chop (minimum ${MIN_ADX})`,
       `Volume ${volRatio.toFixed(2)}x the recent average confirms real participation (minimum ${MIN_VOLUME_RATIO}x)`,
       `Stop at 1x ATR, Target 1 at 1.5x ATR -- minimum 1:1.5 reward-to-risk by construction`,
+      ...quality.reasons,
     ],
   };
 }

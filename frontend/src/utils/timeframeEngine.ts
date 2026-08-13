@@ -3,6 +3,7 @@ import { computeIndicatorSnapshot, rsi, stochasticRsi, obvTrend, pivotPoints, ce
 import { detectCandlePattern, analyzeStructure, findSwingPoints } from "./priceAction";
 import { detectLiquiditySweep, premiumDiscountZone } from "./smc";
 import { detectBreakoutIgnition, type BreakoutIgnition } from "./breakoutIgnition";
+import { assessEntryQuality, type EntryQualityCheck } from "./entryQuality";
 
 export type Decision6 = "STRONG BUY" | "BUY" | "WATCH BUY" | "WAIT" | "SELL" | "STRONG SELL";
 
@@ -73,6 +74,11 @@ export interface TimeframeAnalysis {
   // since that's exactly what a real breakout's first hour looks like, not
   // a reason to hold back. null when there isn't enough data yet.
   ignition: BreakoutIgnition | null;
+  // Graduated docking (see entryQuality.ts) for a trigger candle that
+  // doesn't actually confirm follow-through -- already subtracted from
+  // hitProbability below, kept here too so callers (e.g. AI Elite) can show
+  // the specific reasons. null when bias is neutral (nothing to assess).
+  entryQuality: EntryQualityCheck | null;
 }
 
 const MIN_BARS = 30;
@@ -365,6 +371,7 @@ export function analyzeTimeframe(params: {
     underlyingTargets: null,
     holdingTime: HOLDING_TIME[tf] ?? "—",
     ignition: null,
+    entryQuality: null,
   };
 
   if (!candles || candles.length < MIN_BARS) {
@@ -473,8 +480,15 @@ export function analyzeTimeframe(params: {
     structureQuality,
     journalWinRate ?? 50,
   ];
-  const hitProbability =
+  // Graduated docking for a trigger candle that doesn't actually confirm
+  // follow-through (see entryQuality.ts) -- applied to hitProbability
+  // itself so it flows through everywhere that number is used (AI Elite's
+  // own comparisons, Best Call's cross-engine confidence pick), not just at
+  // one downstream call site.
+  const entryQuality = bias === "neutral" ? null : assessEntryQuality(candles[candles.length - 1], bias, snap, candles);
+  const rawHitProbability =
     decision === "WAIT" ? null : Math.round(clamp100(hitProbabilityInputs.reduce((s, v) => s + v, 0) / hitProbabilityInputs.length));
+  const hitProbability = rawHitProbability === null ? null : Math.max(20, rawHitProbability - (entryQuality?.penaltyPct ?? 0));
 
   const atr = snap.atr14 ?? lastClose * 0.01;
   const underlyingEntry = lastClose;
@@ -503,7 +517,7 @@ export function analyzeTimeframe(params: {
     decision,
     bias,
     optSide,
-    reasons: Array.from(new Set(reasons)),
+    reasons: Array.from(new Set([...reasons, ...(entryQuality?.reasons ?? [])])),
     vetoes,
     hitProbability,
     confidenceLabel,
@@ -514,5 +528,6 @@ export function analyzeTimeframe(params: {
     underlyingTargets,
     holdingTime: HOLDING_TIME[tf] ?? "—",
     ignition,
+    entryQuality,
   };
 }
