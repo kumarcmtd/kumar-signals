@@ -26,6 +26,7 @@ import { AiStrategyVerification } from "./pages/AiStrategyVerification";
 import { AiVerifyPro } from "./pages/AiVerifyPro";
 import { NewsBasedTradeAi } from "./pages/NewsBasedTradeAi";
 import { AiTwentyTwenty } from "./pages/AiTwentyTwenty";
+import { LevelCrossScan } from "./pages/LevelCrossScan";
 
 function App() {
   return (
@@ -58,6 +59,7 @@ function App() {
           <Route path="/ai-verify-pro" element={<AiVerifyPro />} />
           <Route path="/news-trade-ai" element={<NewsBasedTradeAi />} />
           <Route path="/ai-20-20" element={<AiTwentyTwenty />} />
+          <Route path="/level-cross-scan" element={<LevelCrossScan />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>
