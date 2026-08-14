@@ -79,20 +79,21 @@ export function useLevelCrossScanner() {
     }
   }
 
-  const crudeLog = useEliteTradeLog(
-    best.CRUDEOIL ? `LEVELCROSS-CRUDEOIL-${best.CRUDEOIL.tf}` : null,
-    best.CRUDEOIL?.decision ?? null,
-    best.CRUDEOIL?.optSide ?? null,
-    projections.CRUDEOIL,
-    crudeOil.options
-  );
-  const ngLog = useEliteTradeLog(
-    best.NATURALGAS ? `LEVELCROSS-NATURALGAS-${best.NATURALGAS.tf}` : null,
-    best.NATURALGAS?.decision ?? null,
-    best.NATURALGAS?.optSide ?? null,
-    projections.NATURALGAS,
-    naturalGas.options
-  );
+  // Stable per-symbol key, NOT suffixed by timeframe -- the same pattern
+  // Best Call already uses for its own three source engines. Which
+  // timeframe currently has the highest-confidence break can change poll
+  // to poll (a 15m break today, a 4H break tomorrow); a key that varied
+  // with it would silently orphan a still-open trade the moment a
+  // different timeframe took the lead, freezing its live tracking forever
+  // instead of continuing to advance it. advanceTradeLog already only ever
+  // opens a fresh entry when nothing is currently open, so a stable key
+  // can't accidentally double-open either.
+  const meta = (sig: LevelCrossSignal | null) =>
+    sig?.level
+      ? { label: `Level Cross (${sig.label})`, reasons: sig.reasons, confirmingTimeframes: [] as string[] }
+      : undefined;
+  const crudeLog = useEliteTradeLog("LEVELCROSS-CRUDEOIL", best.CRUDEOIL?.decision ?? null, best.CRUDEOIL?.optSide ?? null, projections.CRUDEOIL, crudeOil.options, meta(best.CRUDEOIL));
+  const ngLog = useEliteTradeLog("LEVELCROSS-NATURALGAS", best.NATURALGAS?.decision ?? null, best.NATURALGAS?.optSide ?? null, projections.NATURALGAS, naturalGas.options, meta(best.NATURALGAS));
 
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 

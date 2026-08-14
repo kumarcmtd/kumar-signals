@@ -1,15 +1,17 @@
-import { useState } from "react";
-import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target, ChevronDown, CandlestickChart } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target, ChevronDown, ChevronRight, CandlestickChart, X, ShieldCheck } from "lucide-react";
 import { useLevelCrossScanner } from "../hooks/useLevelCrossScanner";
+import { useCandles } from "../api/hooks";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
-import { PriceScale, ProfitEstimate, DetailRow } from "../components/CallCardKit";
+import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen } from "../components/CallCardKit";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
 import { detectSignificantLevels, type LevelCrossSignal, type SrLevel } from "../utils/levelCrossEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
+import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import type { Candle } from "../types";
-import type { TradeLogEntry } from "../store/appStore";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -199,13 +201,170 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
   );
 }
 
+function CallHistoryRow({ symbol, entry, onOpen }: { symbol: TradableSymbol; entry: TradeLogEntry; onOpen: () => void }) {
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
+  const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "#0D9488" : pnl !== null && pnl < 0 ? "#DC2626" : "#B45309";
+  const effStop = effectiveStopFor(entry);
+
+  return (
+    <button onClick={onOpen} className="w-full text-left rounded-xl border px-3 py-2.5 border-slate-200 active:bg-slate-50">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-bold truncate">
+            {DISPLAY_NAME[symbol]} · {entry.strike} {entry.optSide}
+            {entry.meta?.label ? ` · ${entry.meta.label}` : ""}
+          </p>
+          <p className="text-[10px] text-slate-400">
+            Called {fmtWhen(entry.openedAt)} at ₹{entry.entry}
+            {entry.closed && entry.closedAt !== null && (
+              <>
+                {" "}
+                · Closed {fmtWhen(entry.closedAt)} at ₹{exit}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="text-right shrink-0 flex items-center gap-1">
+          <div>
+            <p className="text-xs font-bold" style={{ color: statusColor }}>
+              {statusLabel}
+            </p>
+            {pnl !== null && (
+              <p className="text-[10px] text-slate-400">
+                {pnl >= 0 ? "+" : ""}
+                {pnl} pts
+              </p>
+            )}
+          </div>
+          <ChevronRight size={14} className="text-slate-400 shrink-0" />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px] text-slate-400">
+        <span className={entry.targetsHit[0] ? "text-teal-600 font-semibold" : ""}>
+          {tickMarks(entry.targetTouches?.[0] ?? (entry.targetsHit[0] ? 1 : 0))} T1 ₹{entry.targets[0]}
+        </span>
+        <span className={entry.targetsHit[1] ? "text-teal-600 font-semibold" : ""}>
+          {tickMarks(entry.targetTouches?.[1] ?? (entry.targetsHit[1] ? 1 : 0))} T2 ₹{entry.targets[1]}
+        </span>
+        <span className={entry.targetsHit[2] ? "text-teal-600 font-semibold" : ""}>
+          {tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))} T3 ₹{entry.targets[2]}
+        </span>
+        <span>
+          SL ₹{effStop}
+          {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; entry: TradeLogEntry; onClose: () => void }) {
+  const exit = entry.closed ? exitPriceFor(entry) : null;
+  const pnl = exit !== null ? Number((exit - entry.entry).toFixed(2)) : null;
+  const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
+  const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "#0D9488" : pnl !== null && pnl < 0 ? "#DC2626" : "#B45309";
+  const effStop = effectiveStopFor(entry);
+  const direction = entry.optSide === "CE" ? "bullish" : "bearish";
+  const Bias = direction === "bullish" ? TrendingUp : TrendingDown;
+  const biasColor = direction === "bullish" ? "#0D9488" : "#DC2626";
+  const { data: candleData, isLoading: candlesLoading } = useCandles(symbol, "15");
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50" />
+      <div className="relative w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xl font-black flex items-center gap-2">
+            <Bias size={20} style={{ color: biasColor }} />
+            {DISPLAY_NAME[symbol]} {entry.strike} {entry.optSide}
+          </p>
+          <button onClick={onClose} className="p-2 rounded-full bg-slate-100 shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+        {entry.meta?.label && (
+          <p className="text-sm font-bold mb-3" style={{ color: "#0D9488" }}>
+            {entry.meta.label}
+          </p>
+        )}
+
+        <div className="rounded-2xl p-3.5 mb-3 bg-slate-50">
+          <p className="text-lg font-black" style={{ color: statusColor }}>
+            {statusLabel}
+          </p>
+          {pnl !== null && (
+            <p className="text-sm font-bold text-slate-500">
+              {pnl >= 0 ? "+" : ""}
+              {pnl} points
+            </p>
+          )}
+        </div>
+
+        <div>
+          <DetailRow label="Called" value={`${fmtWhen(entry.openedAt)} at ₹${entry.entry}`} />
+          {entry.closed && entry.closedAt !== null && <DetailRow label="Closed" value={`${fmtWhen(entry.closedAt)} at ₹${exit}`} />}
+          <DetailRow label="Entry" value={`₹${entry.entry}`} />
+          <DetailRow label="Target 1" value={`₹${entry.targets[0]}  ${tickMarks(entry.targetTouches?.[0] ?? (entry.targetsHit[0] ? 1 : 0))}`} valueColor={entry.targetsHit[0] ? "#0D9488" : undefined} />
+          <DetailRow label="Target 2" value={`₹${entry.targets[1]}  ${tickMarks(entry.targetTouches?.[1] ?? (entry.targetsHit[1] ? 1 : 0))}`} valueColor={entry.targetsHit[1] ? "#0D9488" : undefined} />
+          <DetailRow label="Target 3" value={`₹${entry.targets[2]}  ${tickMarks(entry.targetTouches?.[2] ?? (entry.targetsHit[2] ? 1 : 0))}`} valueColor={entry.targetsHit[2] ? "#0D9488" : undefined} />
+          <DetailRow label="Stop Loss" value={effStop !== entry.stop ? `₹${effStop} (was ₹${entry.stop})` : `₹${entry.stop}`} valueColor="#DC2626" />
+        </div>
+
+        <div className="mt-4 -mx-5">
+          <PriceScale entry={entry} current={entry.closed ? exit : null} />
+          <ProfitEstimate trade={entry} current={entry.closed ? exit : null} lotSize={LOT_SIZE[symbol]} />
+        </div>
+
+        {entry.meta?.reasons && entry.meta.reasons.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-bold uppercase text-slate-400 mb-2">Why this call cleared the bar</p>
+            <div className="space-y-1.5">
+              {entry.meta.reasons.map((r, i) => (
+                <p key={i} className="text-sm flex items-start gap-2">
+                  <ShieldCheck size={14} className="shrink-0 mt-0.5 text-teal-600" />
+                  {r}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <p className="text-xs font-bold uppercase text-slate-400 mb-2 flex items-center gap-1.5">
+            <CandlestickChart size={13} />
+            Chart
+          </p>
+          <CallChart candles={candleData?.candles ?? []} entry={entry} loading={candlesLoading} errorReason={(candleData as { error?: string } | undefined)?.error ?? null} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function LevelCrossScan() {
   const scanner = useLevelCrossScanner();
+  const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
 
-  const dayStats = summarizeTradeLogsByDay({
-    "LEVELCROSS-CRUDEOIL": scanner.tradeLogs.CRUDEOIL,
-    "LEVELCROSS-NATURALGAS": scanner.tradeLogs.NATURALGAS,
-  });
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
+  const levelCrossLogsOnly = useMemo(() => {
+    const out: Record<string, TradeLogEntry[]> = {};
+    for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith("LEVELCROSS-")) out[k] = v;
+    return out;
+  }, [tradeLogs]);
+  const realized = useMemo(() => flattenClosedTrades(levelCrossLogsOnly), [levelCrossLogsOnly]);
+  const perf = useMemo(() => computePerformanceStats(realized), [realized]);
+  const allCalls = useMemo(() => {
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry }[] = [];
+    for (const [k, v] of Object.entries(levelCrossLogsOnly)) {
+      const symbol = k.replace("LEVELCROSS-", "") as TradableSymbol;
+      for (const entry of v) out.push({ symbol, entry });
+    }
+    return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
+  }, [levelCrossLogsOnly]);
+
+  const dayStats = summarizeTradeLogsByDay(levelCrossLogsOnly);
 
   const anyMiss = SYMBOLS.some((s) => scanner.misses[s].length > 0);
 
@@ -252,6 +411,30 @@ export function LevelCrossScan() {
         </section>
       )}
 
+      <section className="card p-4">
+        <p className="text-xs font-bold mb-3">Level Cross Track Record</p>
+        <div className="grid grid-cols-3 gap-2">
+          <StatTile label="Closed" value={String(perf.totalClosed)} />
+          <StatTile label="Accuracy" value={perf.accuracyPct !== null ? `${perf.accuracyPct}%` : "—"} />
+          <StatTile label="Net Points" value={`${perf.netPoints >= 0 ? "+" : ""}${perf.netPoints}`} color={perf.netPoints >= 0 ? "#0D9488" : "#DC2626"} />
+        </div>
+        <p className="text-[10px] text-[var(--color-muted)] mt-2">Tracked separately from every other page's own trade log, starting from zero the day this page shipped.</p>
+      </section>
+
+      {allCalls.length > 0 && (
+        <section className="card p-4">
+          <p className="text-xs font-bold mb-1">Call History</p>
+          <p className="text-[10px] text-[var(--color-muted)] mb-3">
+            Every Level Cross call ever made, newest first -- exact time and price it was called, and once closed, exact time and price of whichever target/breakeven/stop rule actually closed it.
+          </p>
+          <div className="space-y-2">
+            {allCalls.map(({ symbol, entry }) => (
+              <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} onOpen={() => setDetail({ symbol, entry })} />
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="card p-4 overflow-x-auto">
         <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-1 flex items-center gap-1.5">
           <Target size={13} className="text-purple-500" /> Day-wise Trade Log
@@ -288,6 +471,19 @@ export function LevelCrossScan() {
       <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2 flex items-start justify-center gap-1.5">
         <Info size={12} className="shrink-0 mt-0.5" />
         Educational reference only, not financial advice. Levels and touch counts are computed deterministically from real candle history -- always confirm on the live chart before acting.
+      </p>
+
+      {detail && <CallDetailModal symbol={detail.symbol} entry={detail.entry} onClose={() => setDetail(null)} />}
+    </div>
+  );
+}
+
+function StatTile({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div className="rounded-xl px-2.5 py-2 bg-slate-50">
+      <p className="text-[9px] text-slate-400">{label}</p>
+      <p className="text-xs font-bold" style={{ color: color ?? "inherit" }}>
+        {value}
       </p>
     </div>
   );
