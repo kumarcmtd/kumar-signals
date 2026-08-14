@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target, ChevronDown, ChevronRight, CandlestickChart, X, ShieldCheck } from "lucide-react";
+import { Waypoints, TrendingUp, TrendingDown, Info, Eye, Target, ChevronDown, ChevronRight, CandlestickChart, X, ShieldCheck, Lock } from "lucide-react";
 import { useLevelCrossScanner } from "../hooks/useLevelCrossScanner";
 import { useCandles } from "../api/hooks";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -17,6 +17,11 @@ type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
+// A soft accidental-tap guard, not real security -- same purpose and value
+// as Best Call's own Force Stop password (this is a public client bundle,
+// so anyone in devtools can read it). Stops a stray tap from silently
+// ending a live trade.
+const FORCE_STOP_PASSWORD = "SHANVI";
 
 const RESISTANCE_COLOR = "#DC2626";
 const SUPPORT_COLOR = "#16A34A";
@@ -106,7 +111,16 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
   const legFloor = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : null;
   const entryTiming = liveLtp !== null && nextTarget !== null && legFloor !== null && latest ? evaluateEntryTiming(legFloor, nextTarget, effectiveStopFor(latest), liveLtp) : null;
 
-  if (!signal || !latest) {
+  // A call must keep showing (and stay force-stoppable) for as long as it's
+  // still RUNNING, even if this particular poll's fresh re-scan doesn't
+  // currently re-detect the exact same qualifying condition -- a level
+  // break is momentary by nature, but the trade it opened is still open
+  // and tracked against live premium regardless. Only fall through to the
+  // empty/near-miss state once the latest tracked call has actually closed
+  // with nothing new currently live to replace it (same guard Best Call
+  // uses for its own three source engines).
+  const hasVisibleCall = !!latest && (!latest.closed || !!signal);
+  if (!hasVisibleCall) {
     const nearMiss = scanner.misses[symbol][0];
     return (
       <section className="rounded-3xl bg-white shadow-md p-5 space-y-2.5">
@@ -129,34 +143,63 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
     );
   }
 
-  const bullish = signal.direction === "bullish";
+  // `signal` is only ever THIS poll's fresh re-scan -- it can legitimately
+  // be null here while `latest` (the actually-open trade) keeps running, so
+  // every display value below prefers the live signal when it's genuinely
+  // current and falls back to what was captured in the trade's own meta at
+  // the moment it opened, rather than assuming signal is always present.
+  const bullish = latest.optSide === "CE";
   const accent = bullish ? "#0D9488" : "#DC2626";
+  const displayReasons = signal?.reasons ?? latest.meta?.reasons ?? [];
+  const displayLabel = signal?.label ?? latest.meta?.label?.match(/\(([^)]+)\)/)?.[1] ?? "";
+
+  const handleForceStop = () => {
+    const pw = window.prompt("Enter password to force-stop this trade:");
+    if (pw === null) return;
+    if (pw !== FORCE_STOP_PASSWORD) {
+      window.alert("Incorrect password.");
+      return;
+    }
+    if (window.confirm("Mark this trade as completed now? This can't be undone.")) {
+      scanner.forceCloseTradeLog(scanner.trackingKey[symbol]);
+    }
+  };
 
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
       <div className="p-4 flex items-start justify-between gap-3" style={{ background: bullish ? "linear-gradient(135deg,#ECFEFF,#FFFFFF)" : "linear-gradient(135deg,#FEF2F2,#FFFFFF)" }}>
         <div>
           <p className="text-[10px] font-bold uppercase text-slate-400">
-            {DISPLAY_NAME[symbol]} · {signal.label}
+            {DISPLAY_NAME[symbol]} {displayLabel && `· ${displayLabel}`}
           </p>
           <p className="text-lg font-black flex items-center gap-1.5" style={{ color: accent }}>
             {bullish ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-            {signal.optSide} Buy Call
+            {latest.optSide} Buy Call
           </p>
           <p className="text-sm font-bold text-slate-700 mt-0.5">
             {latest.strike} {latest.optSide} · Entry ₹{latest.entry}
           </p>
         </div>
         <div className="text-center shrink-0">
-          <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-lg shadow" style={{ background: accent }}>
-            {signal.confidence}
-          </div>
-          <p className="text-[9px] font-bold text-slate-400 mt-1">Confidence</p>
+          {signal ? (
+            <>
+              <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-lg shadow" style={{ background: accent }}>
+                {signal.confidence}
+              </div>
+              <p className="text-[9px] font-bold text-slate-400 mt-1">Confidence</p>
+            </>
+          ) : (
+            !latest.closed && (
+              <span className="text-[10px] px-2 py-1 rounded-full font-bold animate-pulse" style={{ background: "#FEE2E2", color: "#B91C1C" }}>
+                LIVE
+              </span>
+            )
+          )}
         </div>
       </div>
 
       <div className="p-4 space-y-3">
-        {signal.level && (
+        {signal?.level && (
           <div className="rounded-2xl p-3" style={{ background: "#F0FDFA", border: "1px solid #99F6E4" }}>
             <p className="text-[10px] font-bold uppercase text-teal-700 flex items-center gap-1.5">
               <Waypoints size={12} /> Level That Broke
@@ -182,14 +225,31 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
         <PriceScale entry={latest} current={liveLtp} />
         <ProfitEstimate trade={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
 
-        <div className="space-y-1.5">
-          <p className="text-[10px] font-bold uppercase text-slate-400">Why This Cleared The Bar</p>
-          {signal.reasons.map((r, i) => (
-            <p key={i} className="text-[11px] text-slate-500 flex items-start gap-1.5">
-              <span className="mt-0.5 text-teal-500">•</span> {r}
-            </p>
-          ))}
-        </div>
+        {displayReasons.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Why This Cleared The Bar</p>
+            {displayReasons.map((r, i) => (
+              <p key={i} className="text-[11px] text-slate-500 flex items-start gap-1.5">
+                <span className="mt-0.5 text-teal-500">•</span> {r}
+              </p>
+            ))}
+          </div>
+        )}
+
+        {!latest.closed && (
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <p className="text-[10px] text-slate-400">Next target ₹{nextTarget}</p>
+            <button onClick={handleForceStop} className="flex items-center gap-1 text-[10px] font-bold text-slate-400 underline underline-offset-2 shrink-0">
+              <Lock size={10} />
+              Force Stop
+            </button>
+          </div>
+        )}
+        {latest.closed && (
+          <p className="text-[11px] font-bold" style={{ color: exitPriceFor(latest) - latest.entry >= 0 ? "#0D9488" : "#DC2626" }}>
+            Closed: {latest.status.replace(/_/g, " ")}
+          </p>
+        )}
 
         <button onClick={() => setChartOpen((o) => !o)} className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-teal-700 pt-1">
           <CandlestickChart size={14} /> View Chart

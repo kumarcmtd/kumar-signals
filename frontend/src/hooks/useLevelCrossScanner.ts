@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useHitScoreSuite } from "./useHitScoreSuite";
 import { useEliteTradeLog } from "./useTradeLog";
 import { evaluateLevelCross, type LevelCrossSignal } from "../utils/levelCrossEngine";
 import { projectFromUnderlying } from "../utils/bestCallSelector";
+import { useAppStore } from "../store/appStore";
 import type { Candle } from "../types";
 
 interface LevelCrossProjection {
@@ -17,6 +18,7 @@ interface LevelCrossProjection {
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
+const STABLE_KEY: Record<TradableSymbol, string> = { CRUDEOIL: "LEVELCROSS-CRUDEOIL", NATURALGAS: "LEVELCROSS-NATURALGAS" };
 
 // No fixed timeframe, by design (the same reasoning as AI-Shoot/Best Call):
 // a well-tested level breaking on the 15-minute chart is just as valid a
@@ -39,6 +41,28 @@ function nearMisses(signals: LevelCrossSignal[]): LevelCrossSignal[] {
 export function useLevelCrossScanner() {
   const { data: trades } = usePortfolio();
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
+
+  // One-time cleanup for a real bug fixed earlier: this page used to key
+  // each symbol's trade log by whichever timeframe currently had the best
+  // signal (e.g. "LEVELCROSS-NATURALGAS-15"), so a still-open trade got
+  // silently orphaned -- never advanced against live price again -- the
+  // moment a different timeframe took the lead. Those legacy keys are now
+  // stuck showing "Running" forever with no way to actually resolve them
+  // (there's no live price feed still watching them). Force-closing them
+  // once, honestly labeled "closed_manual" (never fabricating a market
+  // exit price), clears the phantom entries out of Call History instead of
+  // either hiding real historical data or leaving it permanently wrong.
+  const tradeLogsRaw = useAppStore((s) => s.tradeLogs);
+  const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
+  useEffect(() => {
+    for (const [key, history] of Object.entries(tradeLogsRaw)) {
+      if (!key.startsWith("LEVELCROSS-")) continue;
+      if (key === STABLE_KEY.CRUDEOIL || key === STABLE_KEY.NATURALGAS) continue;
+      const last = history[history.length - 1];
+      if (last && !last.closed) forceCloseTradeLog(key);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeLogsRaw]);
 
   const crudeOil = useHitScoreSuite("CRUDEOIL", journalSummary.winRate);
   const naturalGas = useHitScoreSuite("NATURALGAS", journalSummary.winRate);
@@ -92,8 +116,8 @@ export function useLevelCrossScanner() {
     sig?.level
       ? { label: `Level Cross (${sig.label})`, reasons: sig.reasons, confirmingTimeframes: [] as string[] }
       : undefined;
-  const crudeLog = useEliteTradeLog("LEVELCROSS-CRUDEOIL", best.CRUDEOIL?.decision ?? null, best.CRUDEOIL?.optSide ?? null, projections.CRUDEOIL, crudeOil.options, meta(best.CRUDEOIL));
-  const ngLog = useEliteTradeLog("LEVELCROSS-NATURALGAS", best.NATURALGAS?.decision ?? null, best.NATURALGAS?.optSide ?? null, projections.NATURALGAS, naturalGas.options, meta(best.NATURALGAS));
+  const crudeLog = useEliteTradeLog(STABLE_KEY.CRUDEOIL, best.CRUDEOIL?.decision ?? null, best.CRUDEOIL?.optSide ?? null, projections.CRUDEOIL, crudeOil.options, meta(best.CRUDEOIL));
+  const ngLog = useEliteTradeLog(STABLE_KEY.NATURALGAS, best.NATURALGAS?.decision ?? null, best.NATURALGAS?.optSide ?? null, projections.NATURALGAS, naturalGas.options, meta(best.NATURALGAS));
 
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 
@@ -103,6 +127,8 @@ export function useLevelCrossScanner() {
     projections,
     chartCandles,
     tradeLogs: { CRUDEOIL: crudeLog, NATURALGAS: ngLog },
+    trackingKey: STABLE_KEY,
+    forceCloseTradeLog,
     options: { CRUDEOIL: crudeOil.options, NATURALGAS: naturalGas.options },
     anyLiveDataUnavailable,
   };
