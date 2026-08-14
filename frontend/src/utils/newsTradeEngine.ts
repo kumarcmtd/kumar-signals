@@ -303,7 +303,11 @@ export function evaluateNewsTrade(input: NewsTradeInput): NewsTradeResult {
       finalNet += c.reading.net * (normalizedWeight / 100);
     }
   }
-  finalNet = clamp(finalNet);
+  // Rounded here (not left as a raw weighted-average float) since finalNet
+  // is displayed directly in several places (News page's own gauge label,
+  // the compact NewsImpactCard on Best Call/Ai20-20/Level Cross) -- a
+  // score like "+54.82915933232924" reads as broken, not precise.
+  finalNet = Math.round(clamp(finalNet));
 
   // "Do not force a trade": News should strengthen an existing technical/
   // options setup, never manufacture one on its own -- and when News

@@ -16,6 +16,7 @@ import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
+import { NewsImpactCard } from "../components/NewsImpactCard";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -529,6 +530,10 @@ function BestCallCard({
             LIVE
           </span>
         )}
+      </div>
+
+      <div className="px-4 mt-2">
+        <NewsImpactCard symbol={symbol} />
       </div>
 
       <div className="px-4 pt-3 pb-4">

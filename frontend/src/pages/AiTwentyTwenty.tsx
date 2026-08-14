@@ -15,6 +15,7 @@ import { checkReboundStrength } from "../utils/reboundStrength";
 import { checkVolumeSupport } from "../utils/volumeSupport";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble, TradeLightSignal } from "../components/CallCardKit";
 import { computeTradeLight } from "../utils/tradeLight";
+import { NewsImpactCard } from "../components/NewsImpactCard";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -247,6 +248,10 @@ function TwentyCandidateCard({
           <TradeLightSignal verdict={tradeLight} />
         </div>
       )}
+
+      <div className="px-4 pt-4">
+        <NewsImpactCard symbol={symbolKey} />
+      </div>
 
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-3 gap-2">

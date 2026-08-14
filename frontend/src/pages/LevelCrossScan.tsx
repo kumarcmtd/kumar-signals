@@ -6,6 +6,7 @@ import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen } from "../components/CallCardKit";
+import { NewsImpactCard } from "../components/NewsImpactCard";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
 import { detectSignificantLevels, type LevelCrossSignal, type SrLevel } from "../utils/levelCrossEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
@@ -134,6 +135,7 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
             <p className="text-xs text-slate-500 px-2">No significant, well-tested level has broken with real conviction yet on any timeframe.</p>
           )}
         </div>
+        <NewsImpactCard symbol={symbol} />
         <button onClick={() => setChartOpen((o) => !o)} className="w-full flex items-center justify-center gap-1.5 text-xs font-bold text-teal-700">
           <CandlestickChart size={14} /> {nearMiss ? "View Watched Level" : "View Chart"}
           <ChevronDown size={14} className={`transition-transform ${chartOpen ? "rotate-180" : ""}`} />
@@ -199,6 +201,7 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
       </div>
 
       <div className="p-4 space-y-3">
+        <NewsImpactCard symbol={symbol} />
         {signal?.level && (
           <div className="rounded-2xl p-3" style={{ background: "#F0FDFA", border: "1px solid #99F6E4" }}>
             <p className="text-[10px] font-bold uppercase text-teal-700 flex items-center gap-1.5">
