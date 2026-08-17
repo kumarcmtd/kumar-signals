@@ -16,6 +16,7 @@ import { checkVolumeSupport } from "../utils/volumeSupport";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble, TradeLightSignal } from "../components/CallCardKit";
 import { computeTradeLight } from "../utils/tradeLight";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -682,6 +683,8 @@ export function AiTwentyTwenty() {
         <StatTile label="Live Refresh" value="~8s" gradient="linear-gradient(135deg,#06B6D4,#10B981)" />
         <StatTile label="Qualifying Now" value={String(candidates.length)} gradient="linear-gradient(135deg,#6366F1,#0EA5E9)" />
       </div>
+
+      <ExpiryAlertBanner />
 
       {anyLiveDataUnavailable && (
         <div className="rounded-2xl bg-white border border-rose-200 p-4 text-center shadow-sm">

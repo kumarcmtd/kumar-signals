@@ -17,6 +17,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -116,6 +117,8 @@ export function BestCall() {
           than a weaker one just to fill the space.
         </p>
       </div>
+
+      <ExpiryAlertBanner />
 
       {!anyPick && (
         <div className="card p-6 text-center space-y-2">

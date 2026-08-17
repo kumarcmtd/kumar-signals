@@ -2193,6 +2193,94 @@ async function runBestCallNotificationCheck(env: Env): Promise<void> {
   }
 }
 
+// ---- Options expiry alerts (Crude Oil / Natural Gas, 2 days out) ----
+// MCX options near expiry lose liquidity and bleed theta fast -- a trade
+// that looked fine a week out can become hard to exit at a fair price in
+// the final couple of sessions. This surfaces a plain warning once the
+// REAL listed option expiry (not the future's own, later, expiry -- see
+// resolveOptionExpiryCandidates above) is 2 days away or closer, so open
+// positions get closed or rolled in time rather than discovered stuck.
+interface ExpiryAlert {
+  symbol: "CRUDEOIL" | "NATURALGAS";
+  displayName: string;
+  expiry: string;
+  daysLeft: number;
+  message: string;
+}
+
+const EXPIRY_ALERT_DISPLAY_NAME: Record<string, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+
+// Calendar-day difference (UTC midnight to UTC midnight), not a raw
+// millisecond division -- that would round differently depending on what
+// time of day "now" happens to be, flipping the reported daysLeft back and
+// forth across a boundary within the same calendar day.
+function daysUntil(expiry: string): number {
+  const e = new Date(expiry);
+  const expiryMidnight = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
+  const now = new Date();
+  const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((expiryMidnight - todayMidnight) / 86_400_000);
+}
+
+function expiryAlertMessage(displayName: string, daysLeft: number): string {
+  if (daysLeft <= 0) {
+    return `${displayName} options expire TODAY. Close or roll any open trade before end of session -- liquidity and spreads worsen fast into expiry.`;
+  }
+  if (daysLeft === 1) {
+    return `${displayName} options expire tomorrow. Close or roll open trades soon -- theta decay accelerates sharply in the last couple of sessions.`;
+  }
+  return `${displayName} options expire in ${daysLeft} days. Start planning to close or roll open trades -- theta decay accelerates sharply into expiry.`;
+}
+
+// Best-effort per symbol, same pattern as computeBestCallForSymbol -- one
+// symbol's lookup failing (e.g. a transient Upstox error) shouldn't block
+// the other from still being reported.
+async function computeExpiryAlerts(token: string): Promise<ExpiryAlert[]> {
+  const out: ExpiryAlert[] = [];
+  for (const symbol of OPTION_SYMBOLS) {
+    try {
+      const fut = await getNearestFuture(token, symbol);
+      if (!fut) continue;
+      const candidates = await resolveOptionExpiryCandidates(token, fut);
+      const expiry = candidates[0];
+      if (!expiry) continue;
+      const daysLeft = daysUntil(expiry);
+      if (daysLeft < 0 || daysLeft > 2) continue;
+      const displayName = EXPIRY_ALERT_DISPLAY_NAME[symbol] ?? symbol;
+      out.push({ symbol: symbol as ExpiryAlert["symbol"], displayName, expiry, daysLeft, message: expiryAlertMessage(displayName, daysLeft) });
+    } catch {
+      // best-effort -- one symbol failing shouldn't block the other
+    }
+  }
+  return out;
+}
+
+// Re-notifies once per distinct (symbol, expiry, daysLeft) combination --
+// so the user gets pinged at 2 days out, again at 1 day, again on expiry
+// day itself, but not every 5 minutes in between.
+async function runExpiryAlertCheck(env: Env): Promise<void> {
+  const token = await env.COMMODITY_KV.get("access_token");
+  if (!token) return;
+  const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+  if (!topic) return;
+
+  try {
+    const alerts = await computeExpiryAlerts(token);
+    for (const alert of alerts) {
+      const key = `notified:EXPIRY-${alert.symbol}-${alert.expiry}-${alert.daysLeft}`;
+      const already = await env.COMMODITY_KV.get(key);
+      if (already) continue;
+      await env.COMMODITY_KV.put(key, "1", { expirationTtl: 7 * 86_400 });
+
+      const daysLabel = alert.daysLeft <= 0 ? "TODAY" : alert.daysLeft === 1 ? "1 day" : `${alert.daysLeft} days`;
+      const title = `⏳ ${alert.displayName} options expiry in ${daysLabel}`;
+      await sendNtfyNotification(topic, title, alert.message);
+    }
+  } catch {
+    // best-effort -- a failed check just means no alert fires this tick
+  }
+}
+
 async function requireToken(env: Env): Promise<string | Response> {
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return json({ error: "No token found in KV. Log in via the main kumarcmtd worker's /login first." }, 400);
@@ -2354,6 +2442,12 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           return json({ ok: true });
         }
 
+        if (url.pathname === "/api/expiry-alerts") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          return json({ alerts: await computeExpiryAlerts(token) });
+        }
+
         if (url.pathname === "/api/portfolio") {
           if (request.method === "GET") return json(await getPortfolioTrades(env));
           if (request.method === "POST") {
@@ -2423,5 +2517,6 @@ export default {
   // notifications actually reach the user with the app fully closed.
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runBestCallNotificationCheck(env));
+    ctx.waitUntil(runExpiryAlertCheck(env));
   },
 };

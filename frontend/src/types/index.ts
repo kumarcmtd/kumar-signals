@@ -105,6 +105,14 @@ export interface OptionsAnalytics {
   error?: string;
 }
 
+export interface ExpiryAlert {
+  symbol: "CRUDEOIL" | "NATURALGAS";
+  displayName: string;
+  expiry: string;
+  daysLeft: number;
+  message: string;
+}
+
 export interface DepthLevel {
   price: number;
   quantity: number;

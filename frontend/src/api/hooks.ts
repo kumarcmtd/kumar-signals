@@ -110,6 +110,17 @@ export function useNewsTrade() {
   });
 }
 
+// Expiry doesn't change intraday, so this doesn't need News/Depth's fast
+// cadence -- a 5-minute refetch (matching the worker's own Cron interval)
+// is plenty to catch the daysLeft boundary rolling over.
+export function useExpiryAlerts() {
+  return useQuery({
+    queryKey: ["expiry-alerts"],
+    queryFn: api.expiryAlerts,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
 export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],

@@ -7,6 +7,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
 import { detectSignificantLevels, type LevelCrossSignal, type SrLevel } from "../utils/levelCrossEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
@@ -444,6 +445,8 @@ export function LevelCrossScan() {
           against the break disqualifies it outright -- some days that's zero calls, by design.
         </p>
       </div>
+
+      <ExpiryAlertBanner />
 
       {scanner.anyLiveDataUnavailable && (
         <div className="card p-4 text-center">
