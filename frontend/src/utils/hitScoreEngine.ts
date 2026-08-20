@@ -53,14 +53,20 @@ function dirScore(categoryScore: number, bias: "bullish" | "bearish"): number {
   return bias === "bullish" ? categoryScore : 100 - categoryScore;
 }
 
-// Reward:risk from the real underlying entry/stop/target1 -- independent of
+// Reward:risk from the real underlying entry/stop/target2 -- independent of
 // options-side delta approximations so scoring still works even if the
-// option chain is briefly unavailable.
+// option chain is briefly unavailable. Measured against target[1], not
+// target[0] -- see the matching comment in eliteSignal.ts's own rrFor:
+// timeframeEngine.ts builds stop and target[0] from the identical 1.5x-ATR
+// distance, so reward:risk on target[0] is fixed at exactly 1:1 no matter
+// what the market does, which made this MIN_RR=1.5 gate mathematically
+// impossible to ever pass -- the real, silent reason this page showed zero
+// live calls since launch, not the intended "some days that's zero" bar.
 function rrFor(analysis: TimeframeAnalysis): number | null {
   if (analysis.underlyingEntry === null || analysis.underlyingStop === null || !analysis.underlyingTargets) return null;
   const risk = Math.abs(analysis.underlyingEntry - analysis.underlyingStop);
   if (risk <= 0) return null;
-  const reward = Math.abs(analysis.underlyingTargets[0] - analysis.underlyingEntry);
+  const reward = Math.abs(analysis.underlyingTargets[1] - analysis.underlyingEntry);
   return Number((reward / risk).toFixed(2));
 }
 

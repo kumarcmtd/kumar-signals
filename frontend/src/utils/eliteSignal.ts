@@ -40,14 +40,21 @@ function confluenceFor(analysis: TimeframeAnalysis): EliteConfluence {
   };
 }
 
-// Reward:risk from the real underlying entry/stop/target1 levels -- kept
+// Reward:risk from the real underlying entry/stop/target2 levels -- kept
 // independent of options-side delta approximations so the gate applies even
-// when the option chain is temporarily unavailable.
+// when the option chain is temporarily unavailable. Measured against
+// target[1], not target[0]: timeframeEngine.ts builds stop and target[0]
+// from the SAME 1.5x-ATR distance (a deliberate first scale-out point, not
+// a risk-reward claim), so reward:risk on target[0] is mathematically fixed
+// at exactly 1:1, forever -- no market condition can ever clear a 1:1.5
+// bar against it. That silently made this gate impossible to pass since
+// launch. target[1] (2.5x ATR) is the real first point past breakeven this
+// setup is actually aiming for, and gives a genuine, achievable ratio.
 function rrFor(analysis: TimeframeAnalysis): number | null {
   if (analysis.underlyingEntry === null || analysis.underlyingStop === null || !analysis.underlyingTargets) return null;
   const risk = Math.abs(analysis.underlyingEntry - analysis.underlyingStop);
   if (risk <= 0) return null;
-  const reward = Math.abs(analysis.underlyingTargets[0] - analysis.underlyingEntry);
+  const reward = Math.abs(analysis.underlyingTargets[1] - analysis.underlyingEntry);
   return Number((reward / risk).toFixed(2));
 }
 
