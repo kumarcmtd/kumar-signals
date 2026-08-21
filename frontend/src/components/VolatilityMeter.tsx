@@ -3,6 +3,8 @@ import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { computePriceSpeed } from "../utils/priceSpeed";
 import type { InstrumentSymbol } from "../types";
 
+const DISPLAY_NAME: Partial<Record<InstrumentSymbol, string>> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+
 const SIZE = 168;
 const HEIGHT = SIZE * 0.72;
 const CX = SIZE / 2;
@@ -90,7 +92,7 @@ export function VolatilityMeter({ symbol, variant = "light" }: { symbol: Instrum
   return (
     <div className={`rounded-2xl p-3.5 ${dark ? "" : "bg-white border border-slate-100 shadow-sm"}`} style={dark ? { background: "#181A24", border: "1px solid rgba(255,255,255,.08)" } : undefined}>
       <p className={`text-[10px] font-bold uppercase flex items-center gap-1.5 mb-1 ${dark ? "text-white/50" : "text-slate-500"}`}>
-        <GaugeIcon size={12} /> Price Speed (15m)
+        <GaugeIcon size={12} /> {DISPLAY_NAME[symbol] ?? symbol} Speed (15m)
       </p>
       <div className="flex items-center justify-center">
         <SpeedGauge score={reading.score} color={reading.color} label={reading.label} />
