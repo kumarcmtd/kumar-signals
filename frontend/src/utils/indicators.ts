@@ -130,7 +130,7 @@ function latestSessionOnly(candles: Candle[]): Candle[] {
   return idx === -1 ? candles : candles.slice(idx);
 }
 
-function trueRanges(candles: Candle[]): number[] {
+export function trueRanges(candles: Candle[]): number[] {
   const out: number[] = [];
   for (let i = 0; i < candles.length; i++) {
     if (i === 0) {

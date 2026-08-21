@@ -18,6 +18,7 @@ import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
+import { VolatilityMeter } from "../components/VolatilityMeter";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -119,6 +120,11 @@ export function BestCall() {
       </div>
 
       <ExpiryAlertBanner />
+
+      <div className="grid grid-cols-2 gap-2">
+        <VolatilityMeter symbol="CRUDEOIL" />
+        <VolatilityMeter symbol="NATURALGAS" />
+      </div>
 
       {!anyPick && (
         <div className="card p-6 text-center space-y-2">

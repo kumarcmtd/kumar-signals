@@ -17,6 +17,7 @@ import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, 
 import { computeTradeLight } from "../utils/tradeLight";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
+import { VolatilityMeter } from "../components/VolatilityMeter";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -685,6 +686,11 @@ export function AiTwentyTwenty() {
       </div>
 
       <ExpiryAlertBanner />
+
+      <div className="grid grid-cols-2 gap-2">
+        <VolatilityMeter symbol="CRUDEOIL" />
+        <VolatilityMeter symbol="NATURALGAS" />
+      </div>
 
       {anyLiveDataUnavailable && (
         <div className="rounded-2xl bg-white border border-rose-200 p-4 text-center shadow-sm">

@@ -7,6 +7,7 @@ import { VerifyProThinkingPanel } from "../components/VerifyProThinkingPanel";
 import { VerifyProConfidenceBreakdown } from "../components/VerifyProConfidenceBreakdown";
 import { VerifyProTrackRecordCard } from "../components/VerifyProTrackRecordCard";
 import { StrategyCard } from "../components/StrategyCard";
+import { VolatilityMeter } from "../components/VolatilityMeter";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -119,6 +120,8 @@ export function AiVerifyPro() {
           </button>
         ))}
       </div>
+
+      <VolatilityMeter symbol={symbol} />
 
       <SymbolBody symbol={symbol} />
 

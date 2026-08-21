@@ -8,6 +8,7 @@ import { scanForHitScoreCalls, scanForNearMisses, HIT_SCORE_MIN, type HitScoreCa
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
+import { VolatilityMeter } from "../components/VolatilityMeter";
 import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
@@ -336,6 +337,11 @@ export function AiShoot() {
         <StatTile label="Markets Scanned" value="2" gradient="linear-gradient(135deg,#6366F1,#8B5CF6)" />
         <StatTile label="Timeframes Scanned" value="4" gradient="linear-gradient(135deg,#0EA5E9,#06B6D4)" />
         <StatTile label="Qualifying Now" value={String(calls.length)} gradient="linear-gradient(135deg,#F97316,#EC4899)" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <VolatilityMeter symbol="CRUDEOIL" />
+        <VolatilityMeter symbol="NATURALGAS" />
       </div>
 
       {anyLiveDataUnavailable && (

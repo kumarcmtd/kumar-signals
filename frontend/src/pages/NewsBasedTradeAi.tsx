@@ -4,6 +4,7 @@ import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
 import { useNewsTrade } from "../api/hooks";
 import { NewsTradeDecisionCard } from "../components/NewsTradeDecisionCard";
 import { TopEventsList, NewsTimeline, EiaPanel, EconCalendarCardV2, DataFreshnessBadge, MarketStatusBanner, NewsMarketBiasCard, FeedStatusFooter } from "../components/NewsDashboardKit";
+import { VolatilityMeter } from "../components/VolatilityMeter";
 import type { NewsTradeResult, NewsTradeSymbol } from "../utils/newsTradeEngine";
 
 const SYMBOLS: NewsTradeSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -88,6 +89,8 @@ export function NewsBasedTradeAi() {
           </button>
         ))}
       </div>
+
+      <VolatilityMeter symbol={symbol} variant="dark" />
 
       <NewsMarketBiasCard net={result.news.net} confidence={result.newsSignal.newsConfidence} weightPct={result.weightsUsed.news} />
 
