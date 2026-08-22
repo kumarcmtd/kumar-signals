@@ -9,12 +9,15 @@ import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { VolatilityMeter } from "../components/VolatilityMeter";
-import type { TradeLogEntry, TradeLogStatus } from "../store/appStore";
+import { ConfluenceCallCard } from "../components/ConfluenceCallCard";
+import { findConfluenceCalls } from "../utils/confluenceEngine";
+import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics } from "../types";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 
 interface ShootPremium {
   strike: number;
@@ -253,6 +256,10 @@ export function AiShoot() {
   const naturalGas = useHitScoreSuite("NATURALGAS", journalSummary.winRate);
   const board: Record<TradableSymbol, ReturnType<typeof useHitScoreSuite>> = { CRUDEOIL: crudeOil, NATURALGAS: naturalGas };
 
+  const allTradeLogs = useAppStore((s) => s.tradeLogs);
+  const confluenceCalls = useMemo(() => findConfluenceCalls(allTradeLogs), [allTradeLogs]);
+  const candles15mFor = (symbol: TradableSymbol) => board[symbol].entries.find((e) => e.tf === "15")?.candles ?? [];
+
   const calls = useMemo(() => {
     const entries = [
       ...crudeOil.entries.map((e) => ({ symbol: "CRUDEOIL", analysis: e.analysis, candles: e.candles })),
@@ -332,6 +339,10 @@ export function AiShoot() {
           {market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"}
         </p>
       </section>
+
+      {confluenceCalls.map((call) => (
+        <ConfluenceCallCard key={call.symbol} call={call} candles={candles15mFor(call.symbol)} options={board[call.symbol].options} lotSize={LOT_SIZE[call.symbol]} />
+      ))}
 
       <div className="grid grid-cols-3 gap-2">
         <StatTile label="Markets Scanned" value="2" gradient="linear-gradient(135deg,#6366F1,#8B5CF6)" />
