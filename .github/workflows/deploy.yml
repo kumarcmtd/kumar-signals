@@ -13,18 +13,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      # Gate the deploy on the engine tests and both typechecks. A failure
-      # here fails the job, so a bug like the original impossible reward:risk
-      # gate (which shipped silently and blocked every call since launch) can
-      # never reach production again.
+      # Install frontend deps FIRST: the worker's type graph reaches a couple
+      # of shared frontend modules (e.g. the trade-log stats/types), so the
+      # root worker typecheck needs frontend/node_modules present to resolve
+      # them. Installing here also serves the test + build steps below.
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+      # Gate the deploy on the worker typecheck and the engine test suite. A
+      # failure in either fails the job, so a bug like the original impossible
+      # reward:risk gate (which shipped silently and blocked every call since
+      # launch) can never reach production undetected again.
       - name: Worker typecheck
         run: |
           npm ci
           npm run typecheck
-      - name: Frontend install, test, build
+      - name: Frontend tests + build
         run: |
           cd frontend
-          npm ci
           npm run test
           npm run build
       - uses: cloudflare/wrangler-action@v3
