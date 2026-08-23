@@ -22,5 +22,7 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "//": "Tests are executed (and effectively type-checked) by the node:test + tsx runner via `npm run test`, and are excluded from the production build so their node:test/node:assert imports don't pull Node test globals into the app bundle typecheck.",
+  "exclude": ["src/__tests__"]
 }

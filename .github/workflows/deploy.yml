@@ -13,10 +13,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Build frontend
+      # Gate the deploy on the engine tests and both typechecks. A failure
+      # here fails the job, so a bug like the original impossible reward:risk
+      # gate (which shipped silently and blocked every call since launch) can
+      # never reach production again.
+      - name: Worker typecheck
+        run: |
+          npm ci
+          npm run typecheck
+      - name: Frontend install, test, build
         run: |
           cd frontend
           npm ci
+          npm run test
           npm run build
       - uses: cloudflare/wrangler-action@v3
         with:
