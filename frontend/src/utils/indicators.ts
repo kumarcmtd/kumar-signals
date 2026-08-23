@@ -16,40 +16,60 @@ export function emaLast(values: number[], period: number): number | null {
   return series[series.length - 1];
 }
 
-function rsiEndingAt(values: number[], endIdx: number, period: number): number | null {
-  if (endIdx < period) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = endIdx - period + 1; i <= endIdx; i++) {
-    const diff = values[i] - values[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
+// Wilder's smoothing (a.k.a. RMA / SMMA): an exponential average with
+// alpha = 1/period, SEEDED with a simple average of the first `period`
+// values. This is the smoothing RSI, ATR and ADX are actually defined
+// against on TradingView and every standard charting platform -- a plain EMA
+// (alpha = 2/(period+1)) reacts noticeably faster and gives readings that
+// won't line up with the chart a trader is cross-checking. Returns the full
+// smoothed series; out[0] aligns to values[period-1].
+function wilderSmooth(values: number[], period: number): number[] {
+  if (values.length < period) return [];
+  let seed = 0;
+  for (let i = 0; i < period; i++) seed += values[i];
+  seed /= period;
+  const out: number[] = [seed];
+  for (let i = period; i < values.length; i++) {
+    const prev = out[out.length - 1];
+    out.push(prev + (values[i] - prev) / period);
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
+  return out;
+}
+
+// Wilder RSI at every bar (out[0] aligns to values[period]), so both the
+// scalar rsi() and stochasticRsi() read from the same, standard definition.
+function rsiSeries(values: number[], period = 14): number[] {
+  if (values.length < period + 1) return [];
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < values.length; i++) {
+    const diff = values[i] - values[i - 1];
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? -diff : 0);
+  }
+  const avgGain = wilderSmooth(gains, period);
+  const avgLoss = wilderSmooth(losses, period);
+  const out: number[] = [];
+  for (let i = 0; i < avgGain.length; i++) {
+    const g = avgGain[i];
+    const l = avgLoss[i];
+    out.push(l === 0 ? 100 : 100 - 100 / (1 + g / l));
+  }
+  return out;
 }
 
 export function rsi(values: number[], period = 14): number | null {
-  if (values.length < period + 1) return null;
-  return rsiEndingAt(values, values.length - 1, period);
+  const series = rsiSeries(values, period);
+  return series.length ? series[series.length - 1] : null;
 }
 
-// Stochastic RSI: applies the stochastic %K formula over a rolling window of
-// RSI values themselves (not price), so it reads overbought/oversold on the
-// momentum oscillator rather than on price. Reuses the same RSI formula as
-// rsi() above, just evaluated at each bar to build the series.
+// Stochastic RSI: the stochastic %K formula over a rolling window of the
+// (Wilder) RSI series itself rather than price -- reads overbought/oversold
+// on the momentum oscillator, and now uses the same standard RSI as above.
 export function stochasticRsi(values: number[], rsiPeriod = 14, stochPeriod = 14): number | null {
-  if (values.length < rsiPeriod + stochPeriod + 1) return null;
-  const rsiSeries: number[] = [];
-  for (let i = rsiPeriod; i < values.length; i++) {
-    const r = rsiEndingAt(values, i, rsiPeriod);
-    if (r !== null) rsiSeries.push(r);
-  }
-  if (rsiSeries.length < stochPeriod) return null;
-  const window = rsiSeries.slice(rsiSeries.length - stochPeriod);
+  const series = rsiSeries(values, rsiPeriod);
+  if (series.length < stochPeriod) return null;
+  const window = series.slice(series.length - stochPeriod);
   const minR = Math.min(...window);
   const maxR = Math.max(...window);
   if (maxR === minR) return 50; // flat RSI window carries no directional info
@@ -149,35 +169,41 @@ export function trueRanges(candles: Candle[]): number[] {
   return out;
 }
 
+// Wilder ATR -- the standard definition, matching TradingView (was an EMA of
+// true range before, which reacts faster and reads differently).
 export function atr(candles: Candle[], period = 14): number | null {
   if (candles.length < period + 1) return null;
-  const tr = trueRanges(candles);
-  const series = ema(tr, period);
-  return series[series.length - 1];
+  const series = wilderSmooth(trueRanges(candles), period);
+  return series.length ? series[series.length - 1] : null;
 }
 
+// Wilder ADX: TR and the directional movements are Wilder-smoothed (not a
+// plain EMA), then DX, then ADX is Wilder-smoothed again -- the standard
+// two-stage smoothing every platform uses.
 export function adx(candles: Candle[], period = 14): number | null {
   if (candles.length < period * 2) return null;
-  const plusDM: number[] = [0];
-  const minusDM: number[] = [0];
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
   for (let i = 1; i < candles.length; i++) {
     const upMove = candles[i].high - candles[i - 1].high;
     const downMove = candles[i - 1].low - candles[i].low;
     plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
     minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
   }
-  const tr = trueRanges(candles);
-  const smoothTR = ema(tr, period);
-  const smoothPlusDM = ema(plusDM, period);
-  const smoothMinusDM = ema(minusDM, period);
+  // Drop the first true range (index 0 has no previous close) so TR lines up
+  // one-to-one with the directional-movement series, which start at i=1.
+  const trFrom1 = trueRanges(candles).slice(1);
+  const smoothTR = wilderSmooth(trFrom1, period);
+  const smoothPlusDM = wilderSmooth(plusDM, period);
+  const smoothMinusDM = wilderSmooth(minusDM, period);
   const dx: number[] = [];
   for (let i = 0; i < smoothTR.length; i++) {
     if (smoothTR[i] === 0) {
       // No true-range movement at all (e.g. a stretch of identical-OHLC
-      // candles during an illiquid/no-trade period) -- 0/0 would be NaN,
-      // and once introduced it poisons every later EMA value permanently.
-      // No range movement means no directional strength either, so 0 is
-      // the correct reading, not an error.
+      // candles during an illiquid/no-trade period) -- 0/0 would be NaN, and
+      // once introduced it poisons every later smoothed value permanently.
+      // No range movement means no directional strength either, so 0 is the
+      // correct reading, not an error.
       dx.push(0);
       continue;
     }
@@ -186,34 +212,47 @@ export function adx(candles: Candle[], period = 14): number | null {
     const sum = plusDI + minusDI;
     dx.push(sum === 0 ? 0 : (Math.abs(plusDI - minusDI) / sum) * 100);
   }
-  const adxSeries = ema(dx, period);
-  const result = adxSeries[adxSeries.length - 1];
+  const adxSeries = wilderSmooth(dx, period);
+  const result = adxSeries.length ? adxSeries[adxSeries.length - 1] : NaN;
   return Number.isFinite(result) ? result : null;
 }
 
+// SuperTrend with proper final-band persistence. The previous version
+// initialized the bands to 0, which defeated the "carry the locked band
+// forward until price genuinely breaks it" step -- so it collapsed to raw
+// basic bands and flipped direction far more often than the real indicator.
+// This carries finalUpper/finalLower forward per Wilder's rules and only
+// flips trend on a real close through the opposite band.
 export function superTrend(
   candles: Candle[],
   period = 10,
   multiplier = 3
 ): { value: number; direction: Direction } | null {
   if (candles.length < period + 1) return null;
-  const tr = trueRanges(candles);
-  const atrSeries = ema(tr, period);
-  let upperBand = 0;
-  let lowerBand = 0;
+  const atrSeries = wilderSmooth(trueRanges(candles), period); // atrSeries[k] -> candle index (period-1)+k
+  const startIdx = period - 1;
+  let finalUpper = 0;
+  let finalLower = 0;
   let trendUp = true;
-  let stValue = candles[0].close;
-  for (let i = 1; i < candles.length; i++) {
-    const mid = (candles[i].high + candles[i].low) / 2;
-    const basicUpper = mid + multiplier * atrSeries[i];
-    const basicLower = mid - multiplier * atrSeries[i];
-    upperBand = basicUpper < upperBand || candles[i - 1].close > upperBand ? basicUpper : upperBand;
-    lowerBand = basicLower > lowerBand || candles[i - 1].close < lowerBand ? basicLower : lowerBand;
-    if (candles[i].close > upperBand) trendUp = true;
-    else if (candles[i].close < lowerBand) trendUp = false;
-    stValue = trendUp ? lowerBand : upperBand;
+  let prevClose = candles[startIdx].close;
+  for (let k = 0; k < atrSeries.length; k++) {
+    const c = candles[startIdx + k];
+    const hl2 = (c.high + c.low) / 2;
+    const basicUpper = hl2 + multiplier * atrSeries[k];
+    const basicLower = hl2 - multiplier * atrSeries[k];
+    if (k === 0) {
+      finalUpper = basicUpper;
+      finalLower = basicLower;
+      trendUp = c.close >= hl2;
+    } else {
+      finalUpper = basicUpper < finalUpper || prevClose > finalUpper ? basicUpper : finalUpper;
+      finalLower = basicLower > finalLower || prevClose < finalLower ? basicLower : finalLower;
+      if (trendUp && c.close <= finalLower) trendUp = false;
+      else if (!trendUp && c.close >= finalUpper) trendUp = true;
+    }
+    prevClose = c.close;
   }
-  return { value: stValue, direction: trendUp ? "bullish" : "bearish" };
+  return { value: trendUp ? finalLower : finalUpper, direction: trendUp ? "bullish" : "bearish" };
 }
 
 // Commodity Channel Index: how far the typical price sits from its moving
