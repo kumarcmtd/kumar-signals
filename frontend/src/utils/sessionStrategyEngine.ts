@@ -52,6 +52,17 @@ export interface SessionState {
   // live on its own report day for its own symbol.
   activeImpact: Impact | null;
   eiaTodayFor: "CRUDEOIL" | "NATURALGAS" | null; // which symbol has an EIA report today
+  // Non-null when the market is closed (weekend, outside MCX hours, or the
+  // live market-status API says so). No window is ever "active" while set --
+  // a window is a time-of-day edge, but only when the market is actually open.
+  closedReason: string | null;
+}
+
+// MCX energy trades Mon-Fri, ~9:00am-11:55pm IST.
+const MCX_OPEN_MIN = 9 * 60;
+const MCX_CLOSE_MIN = 23 * 60 + 55;
+export function isTradingDay(weekday: number): boolean {
+  return weekday >= 1 && weekday <= 5;
 }
 
 function effectiveImpact(w: SessionWindow, weekday: number): Impact {
@@ -59,8 +70,23 @@ function effectiveImpact(w: SessionWindow, weekday: number): Impact {
   return w.impact;
 }
 
-// Pure: given IST minutes-of-day and weekday, resolve the session state.
-export function sessionStateFor(istMinutes: number, istWeekday: number): SessionState {
+// Pure: given IST minutes-of-day, weekday, and (optionally) the live
+// market-status flag, resolve the session state. marketOpen is authoritative
+// when provided (so it also catches MCX holidays the calendar rules can't);
+// when it's undefined, the weekend + trading-hours rules stand in.
+export function sessionStateFor(istMinutes: number, istWeekday: number, marketOpen?: boolean): SessionState {
+  const eiaTodayFor = isTradingDay(istWeekday) ? POWER_WINDOWS.find((w) => w.eiaWeekday === istWeekday)?.eiaSymbol ?? null : null;
+
+  let closedReason: string | null = null;
+  if (marketOpen === false) closedReason = "Market is closed right now — no live windows.";
+  else if (marketOpen === undefined) {
+    if (!isTradingDay(istWeekday)) closedReason = "Weekend — MCX is closed. Windows resume Monday morning.";
+    else if (istMinutes < MCX_OPEN_MIN || istMinutes >= MCX_CLOSE_MIN) closedReason = "Outside MCX trading hours (9:00 AM–11:55 PM IST).";
+  }
+  if (closedReason) {
+    return { istMinutes, istWeekday, active: null, next: null, minutesToNext: null, activeImpact: null, eiaTodayFor, closedReason };
+  }
+
   let active: SessionWindow | null = null;
   for (const w of POWER_WINDOWS) {
     // An EIA window only "counts" as active on its report weekday.
@@ -86,8 +112,6 @@ export function sessionStateFor(istMinutes: number, istWeekday: number): Session
     minutesToNext = 0;
   }
 
-  const eiaTodayFor = POWER_WINDOWS.find((w) => w.eiaWeekday === istWeekday)?.eiaSymbol ?? null;
-
   return {
     istMinutes,
     istWeekday,
@@ -96,12 +120,14 @@ export function sessionStateFor(istMinutes: number, istWeekday: number): Session
     minutesToNext,
     activeImpact: active ? effectiveImpact(active, istWeekday) : null,
     eiaTodayFor,
+    closedReason: null,
   };
 }
 
 // Wall-clock wrapper: derives IST minutes + weekday via Intl (correct
 // regardless of the device/runner timezone), then delegates to the pure fn.
-export function sessionStateNow(now: Date = new Date()): SessionState {
+// Pass the live market-status isOpen flag so holidays are respected too.
+export function sessionStateNow(now: Date = new Date(), marketOpen?: boolean): SessionState {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
     hour: "2-digit",
@@ -113,7 +139,7 @@ export function sessionStateNow(now: Date = new Date()): SessionState {
   const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
   const wdName = parts.find((p) => p.type === "weekday")?.value ?? "Sun";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(wdName);
-  return sessionStateFor(hour * 60 + minute, weekday < 0 ? 0 : weekday);
+  return sessionStateFor(hour * 60 + minute, weekday < 0 ? 0 : weekday, marketOpen);
 }
 
 export interface SessionSetup {
@@ -139,6 +165,9 @@ const MIN_SPEED_SCORE = 38;
 export function evaluateSessionSetup(state: SessionState, analysis: TimeframeAnalysis, speed: PriceSpeedReading | null): SessionSetup {
   const base: SessionSetup = { decision: "WAIT", direction: null, optSide: null, confidence: null, reasons: [], waitingReason: null };
 
+  if (state.closedReason) {
+    return { ...base, waitingReason: state.closedReason };
+  }
   if (!state.active) {
     const nextLabel = state.next ? `${state.next.label} (~${state.minutesToNext} min)` : "tomorrow's first window";
     return { ...base, waitingReason: `Outside a high-movement window. Next: ${nextLabel}. No trade until then, by design.` };

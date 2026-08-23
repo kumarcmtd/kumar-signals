@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCandles, useOptionsAnalytics } from "../api/hooks";
+import { useCandles, useOptionsAnalytics, useMarketStatus } from "../api/hooks";
 import { analyzeTimeframe } from "../utils/timeframeEngine";
 import { computePriceSpeed } from "../utils/priceSpeed";
 import { sessionStateNow, evaluateSessionSetup } from "../utils/sessionStrategyEngine";
@@ -17,6 +17,7 @@ export function useAiOwn(symbol: AiOwnSymbol) {
   const c15 = useCandles(symbol, "15");
   const c1d = useCandles(symbol, "1D");
   const { data: options } = useOptionsAnalytics(symbol);
+  const { data: market } = useMarketStatus();
   const liveOptions = options && !options.error ? options : undefined;
 
   // A light clock tick so the active-window / countdown updates on their own.
@@ -36,7 +37,7 @@ export function useAiOwn(symbol: AiOwnSymbol) {
   const atmDelta = liveOptions?.atmStrike != null ? liveOptions.rows.find((r) => r.strike === liveOptions.atmStrike)?.call.delta ?? null : null;
   const speed = useMemo(() => (candles.length ? computePriceSpeed(candles, atmDelta) : null), [candles, atmDelta]);
 
-  const session = useMemo(() => sessionStateNow(now), [now]);
+  const session = useMemo(() => sessionStateNow(now, market?.isOpen), [now, market?.isOpen]);
   const setup = useMemo(() => evaluateSessionSetup(session, analysis, speed), [session, analysis, speed]);
 
   const proj = useMemo(() => {

@@ -7,6 +7,37 @@ import type { PriceSpeedReading } from "../utils/priceSpeed";
 const HM = (h: number, m = 0) => h * 60 + m;
 const WED = 3, THU = 4, MON = 1;
 
+const SUN = 0, SAT = 6;
+
+test("weekend: no window is ever live, whatever the clock says", () => {
+  const s = sessionStateFor(HM(19, 20), SUN); // Sunday 7:20pm -- looks like US-open time
+  assert.equal(s.active, null);
+  assert.ok(s.closedReason && /Weekend/.test(s.closedReason));
+  assert.equal(sessionStateFor(HM(20, 10), SAT).active, null);
+});
+
+test("weekday but outside MCX hours (before 9am / after 11:55pm): closed", () => {
+  assert.ok(sessionStateFor(HM(8, 30), MON).closedReason); // pre-open
+  assert.ok(sessionStateFor(HM(23, 58), MON).closedReason); // after close
+  assert.equal(sessionStateFor(HM(8, 30), MON).active, null);
+});
+
+test("the live market-status flag is authoritative (covers holidays)", () => {
+  // A weekday, in-hours, in a window -- but the API says the market is closed.
+  const s = sessionStateFor(HM(19, 20), MON, false);
+  assert.equal(s.active, null);
+  assert.ok(s.closedReason && /closed/.test(s.closedReason));
+  // ...and marketOpen=true trusts the API even if the calendar rules would object.
+  assert.equal(sessionStateFor(HM(19, 20), MON, true).active?.id, "us-open");
+});
+
+test("a closed market always evaluates to WAIT with the closed reason", () => {
+  const s = sessionStateFor(HM(19, 20), SUN);
+  const r = evaluateSessionSetup(s, analysis(), speed(90));
+  assert.equal(r.decision, "WAIT");
+  assert.ok(r.waitingReason && /Weekend/.test(r.waitingReason));
+});
+
 test("resolves the active window when inside one", () => {
   const s = sessionStateFor(HM(19, 20), MON); // 7:20pm -> US Market Open
   assert.equal(s.active?.id, "us-open");

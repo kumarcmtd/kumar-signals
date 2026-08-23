@@ -50,7 +50,9 @@ function SessionClock({ session }: { session: SessionState }) {
             </span>
           )}
         </div>
-        {session.active ? (
+        {session.closedReason ? (
+          <p className="text-sm font-black mt-1.5">🔴 Market Closed</p>
+        ) : session.active ? (
           <p className="text-sm font-black mt-1.5">🟢 LIVE NOW: {session.active.label}</p>
         ) : session.next ? (
           <p className="text-sm font-bold mt-1.5">
@@ -61,7 +63,11 @@ function SessionClock({ session }: { session: SessionState }) {
         )}
       </div>
 
-      <div className="p-3 space-y-1.5">
+      {session.closedReason && (
+        <p className="px-4 pt-3 text-xs text-slate-500">{session.closedReason} The windows below are the daily schedule for when it reopens.</p>
+      )}
+
+      <div className={`p-3 space-y-1.5 ${session.closedReason ? "opacity-60" : ""}`}>
         {rows.map((w) => {
           const impact = impactForRow(w, session.istWeekday);
           const isActive = session.active?.id === w.id;
@@ -127,7 +133,7 @@ function SymbolStrategyCard({ symbol }: { symbol: AiOwnSymbol }) {
       <div className="px-4 pt-3.5 flex items-center justify-between">
         <p className="text-base font-black">{DISPLAY_NAME[symbol]}</p>
         <span className="text-[11px] font-bold px-2 py-1 rounded-full" style={{ color: accent, background: `${accent}14` }}>
-          {session.active ? `In ${session.active.label}` : "Between windows"}
+          {session.closedReason ? "Market closed" : session.active ? `In ${session.active.label}` : "Between windows"}
         </span>
       </div>
 
