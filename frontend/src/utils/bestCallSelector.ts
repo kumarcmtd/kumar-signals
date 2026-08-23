@@ -4,6 +4,7 @@ import { projectGatePremium, type GateDirection, type GateQualified } from "./di
 import type { TimedScanResult } from "./kimiScanner";
 import { calculateHitProbability, type Commodity } from "./kimiPlaybook";
 import type { TimeframeAnalysis } from "./timeframeEngine";
+import { projectPremiumFromUnderlying } from "./optionProjection";
 
 // "Best Call" compares the three independent, already-strict engines this
 // app runs elsewhere -- AI Elite (STRONG-only + confluence), the CE/PE
@@ -32,12 +33,11 @@ export interface BestCallPick {
   reasons: string[];
 }
 
-const DELTA = 0.5; // same ATM-option delta approximation used by every projection in this app
-
-// Exported so other engines (e.g. patternSignalEngine's AI-Learn-informed
-// candlestick detector) can project their own underlying entry/stop/targets
-// into an option premium using this exact same convention, instead of each
-// writing a slightly different copy.
+// Thin wrapper kept for the callers that import it by this name (Level Cross
+// scanner, pattern-signal engine). The real, Greeks-aware projection lives in
+// optionProjection.ts and is shared with the Directional Gate so every engine
+// projects premiums identically -- real per-strike delta, a theta haircut on
+// the targets, and one consistent reward:risk convention.
 export function projectFromUnderlying(
   optSide: "CE" | "PE",
   underlyingEntry: number,
@@ -45,22 +45,9 @@ export function projectFromUnderlying(
   underlyingTargets: [number, number, number],
   options: OptionsAnalytics | undefined
 ): { strike: number; entry: number; targets: [number, number, number]; stop: number; rr: number | null } | null {
-  if (!options || options.error) return null;
-  const row = options.rows.find((r) => r.strike === options.atmStrike) ?? options.rows[Math.floor(options.rows.length / 2)];
-  if (!row) return null;
-  const leg = optSide === "CE" ? row.call : row.put;
-  if (leg.ltp === null || leg.ltp <= 0) return null;
-  const favMove = Math.abs(underlyingTargets[0] - underlyingEntry);
-  const riskMove = Math.abs(underlyingEntry - underlyingStop);
-  const entry = leg.ltp;
-  const targets: [number, number, number] = [
-    Number((entry + DELTA * favMove).toFixed(2)),
-    Number((entry + DELTA * Math.abs(underlyingTargets[1] - underlyingEntry)).toFixed(2)),
-    Number((entry + DELTA * Math.abs(underlyingTargets[2] - underlyingEntry)).toFixed(2)),
-  ];
-  const stop = Number(Math.max(entry * 0.35, entry - DELTA * riskMove).toFixed(2));
-  const rr = entry - stop !== 0 ? Number(((targets[0] - entry) / (entry - stop)).toFixed(2)) : null;
-  return { strike: row.strike, entry, targets, stop, rr };
+  const proj = projectPremiumFromUnderlying(optSide, underlyingEntry, underlyingStop, underlyingTargets, options);
+  if (!proj) return null;
+  return { strike: proj.strike, entry: proj.entry, targets: proj.targets, stop: proj.stop, rr: proj.rr };
 }
 
 export function eliteToBestCallPick(elite: EliteCandidate): BestCallPick | null {
@@ -80,7 +67,11 @@ export function eliteToBestCallPick(elite: EliteCandidate): BestCallPick | null 
     entry: proj.entry,
     targets: proj.targets,
     stop: proj.stop,
-    rr: elite.rr,
+    // The premium-based reward:risk from the shared projection (measured to
+    // Target 2), so the Elite card reports the SAME kind of R:R as the Gate
+    // and Kimi cards instead of the underlying-based one it used before.
+    // elite.rr is still the qualifying GATE inside findEliteSignal.
+    rr: proj.rr,
     reasons: analysis.reasons,
   };
 }

@@ -1,6 +1,7 @@
 import type { Candle, OptionsAnalytics } from "../types";
 import { computeIndicatorSnapshot } from "./indicators";
 import { assessEntryQuality } from "./entryQuality";
+import { projectPremiumFromUnderlying } from "./optionProjection";
 
 // A deliberately different, MUCH stricter engine from analyzeTimeframe()'s
 // 6-tier Decision6 score. That engine intentionally surfaces every timeframe
@@ -143,26 +144,11 @@ export interface GatePremiumProjection {
   rr: number | null;
 }
 
-// Same delta~=0.5 ATM premium projection every other page in this app
-// already uses, generalized to take the gate's raw underlying levels
-// directly rather than a TimeframeAnalysis object.
+// Delegates to the shared, Greeks-aware projection (real per-strike delta +
+// theta haircut, one consistent reward:risk convention) so the Gate's premium
+// cards are built identically to every other engine's.
 export function projectGatePremium(signal: GateQualified, optSide: "CE" | "PE", options: OptionsAnalytics | undefined): GatePremiumProjection | null {
-  if (!options || options.error) return null;
-  const row = options.rows.find((r) => r.strike === options.atmStrike) ?? options.rows[Math.floor(options.rows.length / 2)];
-  if (!row) return null;
-  const leg = optSide === "CE" ? row.call : row.put;
-  if (leg.ltp === null || leg.ltp <= 0) return null;
-
-  const DELTA = 0.5;
-  const favMove = Math.abs(signal.targets[0] - signal.entry);
-  const riskMove = Math.abs(signal.entry - signal.stop);
-  const entry = leg.ltp;
-  const targets: [number, number, number] = [
-    Number((entry + DELTA * favMove).toFixed(2)),
-    Number((entry + DELTA * Math.abs(signal.targets[1] - signal.entry)).toFixed(2)),
-    Number((entry + DELTA * Math.abs(signal.targets[2] - signal.entry)).toFixed(2)),
-  ];
-  const stop = Number(Math.max(entry * 0.35, entry - DELTA * riskMove).toFixed(2));
-  const rr = entry - stop !== 0 ? Number(((targets[0] - entry) / (entry - stop)).toFixed(2)) : null;
-  return { strike: row.strike, optSide, entry, targets, stop, rr };
+  const proj = projectPremiumFromUnderlying(optSide, signal.entry, signal.stop, signal.targets, options);
+  if (!proj) return null;
+  return { strike: proj.strike, optSide, entry: proj.entry, targets: proj.targets, stop: proj.stop, rr: proj.rr };
 }
