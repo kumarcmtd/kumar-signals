@@ -9,14 +9,17 @@ export interface RealizedTrade {
   pnlPoints: number;
 }
 
-// The exact live tick that closed a trade isn't stored on the entry itself
-// (only the rule that closed it), so the exit price used here is the RULE's
-// own defined level -- original stop for sl_hit, entry price (breakeven) for
+// Prefer the REAL observed premium at close (exitPrice), recorded by
+// advanceOpenEntry the moment the target/stop condition was first met -- this
+// is the honest fill, and matters most for stops, which options can gap
+// through (booking a loss at exactly the stop level understated it). Entries
+// closed before exitPrice existed, and manual closes, fall back to the RULE's
+// own level below -- original stop for sl_hit, entry (breakeven) for
 // stopped_breakeven, the Target 1 trailing level for stopped_after_t1, and
-// the full Target 3 level for target3_hit. This is an honest approximation
-// of the real exit, not an invented number: it is exactly the level our own
-// close logic acted on.
+// the full Target 3 level for target3_hit -- still an honest approximation
+// (exactly the level our own close logic acted on), never an invented number.
 export function exitPriceFor(e: TradeLogEntry): number {
+  if (typeof e.exitPrice === "number" && e.status !== "closed_manual") return e.exitPrice;
   switch (e.status) {
     case "target3_hit":
       return e.targets[2];

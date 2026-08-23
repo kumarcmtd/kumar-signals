@@ -1,7 +1,11 @@
 import { useAppStore, type TradeLogEntry } from "./store/appStore";
 import { api } from "./api/client";
-import { MAX_HISTORY } from "./hooks/useTradeLog";
-import { dedupeOverlappingEntries } from "./utils/dedupeTradeLog";
+// The merge lives in the pure tradeLogCore so the browser and the Cloudflare
+// Worker's Cron merge trade logs by the exact same "closed version always
+// wins" rule -- that shared rule is what lets the Cron close a trade
+// server-side and have that close survive a browser later pushing its own
+// still-open copy of the same id.
+import { mergeTradeLogs } from "./utils/tradeLogCore";
 
 // This app has no login, so trade/signal history has exactly one shared
 // home on the server (same trust level as every other endpoint here) rather
@@ -9,36 +13,6 @@ import { dedupeOverlappingEntries } from "./utils/dedupeTradeLog";
 // previously showed nothing at all, since Zustand's persist middleware only
 // ever wrote to that one browser's own localStorage.
 const PUSH_DEBOUNCE_MS = 8000;
-
-// Merges one key's two entry lists by id (a real union, not a
-// whole-array pick) -- an earlier version of this function picked
-// whichever SIDE's last entry was newer and discarded the other side's
-// array entirely, which could wipe out a whole morning of local-only
-// history the instant the server happened to have one fresher entry.
-// For an id both sides have, the closed/more-advanced version wins;
-// otherwise local wins (it's what's actually running in this browser
-// right now). Capped to the same MAX_HISTORY every page's own rolling
-// window already uses, keeping the newest entries by open time.
-function mergeEntryLists(local: TradeLogEntry[], server: TradeLogEntry[]): TradeLogEntry[] {
-  const byId = new Map<string, TradeLogEntry>();
-  for (const e of server) byId.set(e.id, e);
-  for (const e of local) {
-    const existing = byId.get(e.id);
-    if (!existing || !existing.closed || e.closed) byId.set(e.id, e);
-  }
-  const merged = Array.from(byId.values()).sort((a, b) => a.openedAt - b.openedAt);
-  const deduped = dedupeOverlappingEntries(merged);
-  return deduped.length > MAX_HISTORY ? deduped.slice(deduped.length - MAX_HISTORY) : deduped;
-}
-
-function mergeTradeLogs(local: Record<string, TradeLogEntry[]>, server: Record<string, TradeLogEntry[]>): Record<string, TradeLogEntry[]> {
-  const keys = new Set([...Object.keys(local), ...Object.keys(server)]);
-  const out: Record<string, TradeLogEntry[]> = {};
-  for (const key of keys) {
-    out[key] = mergeEntryLists(local[key] ?? [], server[key] ?? []);
-  }
-  return out;
-}
 
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPushedJson = "";

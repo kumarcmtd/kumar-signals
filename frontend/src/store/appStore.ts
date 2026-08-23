@@ -1,67 +1,19 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { InstrumentSymbol, Direction } from "../types";
-import type { Decision6 } from "../utils/timeframeEngine";
 import type { StrategyTier } from "../utils/strategyVerification";
+// TradeLogEntry/TradeLogStatus now live in the pure, React-free tradeLogCore
+// module so the Cloudflare Worker's Cron can share the exact same shape and
+// advance/close logic. Re-exported here so every existing
+// `import { type TradeLogEntry } from "../store/appStore"` keeps working.
+export type { TradeLogStatus, TradeLogEntry } from "../utils/tradeLogCore";
+import type { TradeLogEntry } from "../utils/tradeLogCore";
 
 export type Timeframe = "5" | "15" | "30" | "1D";
 
 interface RiskSettings {
   capital: number;
   riskPercent: number;
-}
-
-// One trade instance for a given "<symbol>-<timeframe>" line: entry/targets/
-// stop are frozen at the moment the signal first fired, targetsHit ticks off
-// each level as the live premium reaches it (permanently, even if price later
-// retraces), and once closed the line is done -- the next actionable signal
-// for that timeframe starts a brand-new entry rather than mutating this one.
-export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit" | "closed_manual";
-
-export interface TradeLogEntry {
-  id: string;
-  strike: number;
-  optSide: "CE" | "PE";
-  entry: number;
-  targets: [number, number, number];
-  stop: number;
-  targetsHit: [boolean, boolean, boolean];
-  status: TradeLogStatus;
-  closed: boolean;
-  openedAt: number;
-  closedAt: number | null;
-  // Captured at the moment the entry opened, so a later "explain this call"
-  // view can show the REAL reasoning from back then instead of substituting
-  // today's live analysis (which has nothing to do with an already-closed
-  // trade) or inventing something. Optional so existing entries and callers
-  // that don't track this (AI-Test V2/Pro) are unaffected.
-  meta?: { label: string; reasons: string[]; confirmingTimeframes: string[] };
-  // The decision tier (Strong Buy/Good Buy/Risky Buy/Don't Buy Risky) that
-  // was active when this entry opened -- lets a "which signal actually wins
-  // more" ranking group real closed trades by tier. Optional: entries from
-  // before this field existed, and Kimi's setup-based log (no Decision6
-  // concept), simply have no tier and are excluded from that ranking.
-  decision?: Decision6;
-  // How many separate TIMES price has crossed up through each target --
-  // unlike targetsHit (a permanent, one-way "reached at least once" flag
-  // used to trail the stop and decide closure), this keeps counting on every
-  // fresh touch: hit T1, pull back below it, hit T1 again -> 2. Optional so
-  // entries persisted before this field existed just start counting from
-  // whatever targetsHit already recorded (see advanceOpenEntry).
-  targetTouches?: [number, number, number];
-  // Internal bookkeeping for targetTouches: was price at/above each target
-  // as of the last poll -- lets advanceOpenEntry tell a genuine new touch
-  // (crossing up from below) apart from "still sitting above from before."
-  targetAboveState?: [boolean, boolean, boolean];
-  // Highest live premium seen since this entry opened -- a call can run up
-  // most of the way to a target and pull back WITHOUT ever crossing that
-  // target's exact level, which targetsHit/targetTouches has no way to show
-  // (they only fire at the target price itself). This is the number a price
-  // scale needs to answer "how close did it actually get before pulling
-  // back," independent of whether any target line was crossed. Optional so
-  // entries persisted before this field existed just start tracking from
-  // whatever price is live the next time they're advanced.
-  highWaterMark?: number;
 }
 
 // One line per fired alert, newest first. The engine that produces these

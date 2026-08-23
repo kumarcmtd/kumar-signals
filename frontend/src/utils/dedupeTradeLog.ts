@@ -1,4 +1,4 @@
-import type { TradeLogEntry } from "../store/appStore";
+import type { TradeLogEntry } from "./tradeLogCore";
 
 // A genuine, legitimate re-trigger of the same strike (this trade closes,
 // and a fresh one opens right away because the underlying still qualifies)

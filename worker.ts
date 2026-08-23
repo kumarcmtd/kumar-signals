@@ -12,6 +12,7 @@ import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEng
 import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
 import { scoreArticles, scoreEiaChange, clusterEvents, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
+import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1882,6 +1883,79 @@ async function saveTradeLogsToKv(env: Env, logs: Record<string, unknown>): Promi
   await env.COMMODITY_KV.put(TRADE_LOGS_KV_KEY, JSON.stringify(logs));
 }
 
+// ---- Server-side trade-log advancement (Cron) ----
+// The browser only advances/closes trades while a tab is open (see
+// useTradeLog.ts). This runs the SAME pure advanceOpenEntry logic on the
+// Cron schedule so a call's target/stop is detected -- and the trade closed
+// at the real observed premium -- even with the app fully shut. It never
+// OPENS a trade (that stays the browser's job, driven by each page's own
+// engine); it only advances and closes the ones already open, so the two
+// sides can never fight over what qualifies.
+async function advanceOpenTradesForSymbol(
+  token: string,
+  symbol: Symbol,
+  logs: Record<string, TradeLogEntry[]>,
+  now: number
+): Promise<boolean> {
+  // Gather every open strike for this symbol across all of its keys, so the
+  // one chain fetch pins them all in and none freeze for being far from ATM.
+  const openStrikes = new Set<number>();
+  for (const [key, entries] of Object.entries(logs)) {
+    if (symbolOfTradeLogKey(key) !== symbol) continue;
+    const last = entries[entries.length - 1];
+    if (last && !last.closed) openStrikes.add(last.strike);
+  }
+  if (openStrikes.size === 0) return false;
+
+  const analytics = await computeOptionsAnalytics(token, symbol, Array.from(openStrikes));
+  if ("error" in analytics) return false; // no live quotes -> never fabricate a close
+
+  const ltpByStrikeSide = new Map<string, number>();
+  for (const row of analytics.rows) {
+    if (row.call?.ltp != null) ltpByStrikeSide.set(`${row.strike}-CE`, row.call.ltp);
+    if (row.put?.ltp != null) ltpByStrikeSide.set(`${row.strike}-PE`, row.put.ltp);
+  }
+
+  let changed = false;
+  for (const [key, entries] of Object.entries(logs)) {
+    if (symbolOfTradeLogKey(key) !== symbol) continue;
+    const last = entries[entries.length - 1];
+    if (!last || last.closed) continue;
+    const ltp = ltpByStrikeSide.get(`${last.strike}-${last.optSide}`) ?? null;
+    const advanced = advanceOpenEntry(last, ltp, now);
+    if (advanced !== last) {
+      logs[key] = [...entries.slice(0, -1), advanced];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
+  const token = await env.COMMODITY_KV.get("access_token");
+  if (!token) return;
+
+  const logs = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
+  const now = Date.now();
+  let anyChanged = false;
+  for (const symbol of TRADE_LOG_SYMBOLS) {
+    try {
+      const changed = await advanceOpenTradesForSymbol(token, symbol as Symbol, logs, now);
+      anyChanged = anyChanged || changed;
+    } catch {
+      // best-effort -- one symbol failing must not block the other
+    }
+  }
+  if (!anyChanged) return;
+
+  // Re-read the freshest KV right before writing and merge our advanced
+  // result over it (advanced = "server", so its closes win), so a client
+  // push that landed mid-run -- e.g. a brand-new open trade -- is preserved
+  // rather than clobbered by our older snapshot.
+  const fresh = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
+  await saveTradeLogsToKv(env, mergeTradeLogs(fresh, logs));
+}
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -2476,7 +2550,15 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           if (request.method === "POST") {
             const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
             if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Body must be an object keyed by trade-log id" }, 400);
-            await saveTradeLogsToKv(env, body);
+            // Merge the incoming client push OVER what's already in KV rather
+            // than overwriting -- the Cron may have closed a trade server-side
+            // that the client still shows as open, and the merge's "closed
+            // version always wins" rule keeps that close instead of letting a
+            // stale-open client copy resurrect it. (incoming = "local",
+            // existing KV = "server".)
+            const existing = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
+            const merged = mergeTradeLogs(body as Record<string, TradeLogEntry[]>, existing);
+            await saveTradeLogsToKv(env, merged);
             return json({ ok: true });
           }
           return json({ error: "Method not allowed" }, 405);
@@ -2518,5 +2600,6 @@ export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runBestCallNotificationCheck(env));
     ctx.waitUntil(runExpiryAlertCheck(env));
+    ctx.waitUntil(runTradeLogAdvanceCheck(env));
   },
 };
