@@ -52,6 +52,15 @@ test("symbol recovery from any key shape", () => {
   assert.equal(symbolOfTradeLogKey("nonsense"), null);
 });
 
+test("orphan sweep: a manual close books breakeven, never a fabricated price", () => {
+  // The Cron sweeps expired-contract orphans as closed_manual (no exitPrice).
+  const swept: TradeLogEntry = { ...openNewEntry(proj, now), closed: true, closedAt: now + 1, status: "closed_manual" };
+  assert.equal(exitPriceFor(swept), swept.entry); // = breakeven, not an invented outcome
+  // Even if an exitPrice somehow rode along, closed_manual must ignore it.
+  const withStray: TradeLogEntry = { ...swept, exitPrice: 99 };
+  assert.equal(exitPriceFor(withStray), withStray.entry);
+});
+
 test("flattenClosedTrades uses the real fill for net points", () => {
   const stopped = advanceOpenEntry(openNewEntry(proj, now), 4.2, now + 1000);
   const realized = flattenClosedTrades({ "BEST-CRUDEOIL": [stopped] });

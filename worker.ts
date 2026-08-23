@@ -1891,11 +1891,27 @@ async function saveTradeLogsToKv(env: Env, logs: Record<string, unknown>): Promi
 // OPENS a trade (that stays the browser's job, driven by each page's own
 // engine); it only advances and closes the ones already open, so the two
 // sides can never fight over what qualifies.
+// An open trade this old whose strike no longer appears in a successfully
+// fetched, strike-pinned option chain has an EXPIRED/delisted contract -- it
+// can never resolve on live quotes again, so it would sit "running" forever.
+// The age guard keeps a fresh intraday trade (whose strike might briefly fall
+// outside the window on a transient fetch) from being swept.
+const ORPHAN_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+
+const CRON_STATUS_KV_KEY = "cron:trade_log_last_run";
+
+interface AdvanceCounts {
+  opensChecked: number;
+  advanced: number; // ticked or closed against a live premium
+  swept: number; // orphaned (expired-contract) trades closed as manual/breakeven
+}
+
 async function advanceOpenTradesForSymbol(
   token: string,
   symbol: Symbol,
   logs: Record<string, TradeLogEntry[]>,
-  now: number
+  now: number,
+  counts: AdvanceCounts
 ): Promise<boolean> {
   // Gather every open strike for this symbol across all of its keys, so the
   // one chain fetch pins them all in and none freeze for being far from ATM.
@@ -1911,7 +1927,9 @@ async function advanceOpenTradesForSymbol(
   if ("error" in analytics) return false; // no live quotes -> never fabricate a close
 
   const ltpByStrikeSide = new Map<string, number>();
+  const strikesInChain = new Set<number>();
   for (const row of analytics.rows) {
+    strikesInChain.add(row.strike);
     if (row.call?.ltp != null) ltpByStrikeSide.set(`${row.strike}-CE`, row.call.ltp);
     if (row.put?.ltp != null) ltpByStrikeSide.set(`${row.strike}-PE`, row.put.ltp);
   }
@@ -1921,10 +1939,29 @@ async function advanceOpenTradesForSymbol(
     if (symbolOfTradeLogKey(key) !== symbol) continue;
     const last = entries[entries.length - 1];
     if (!last || last.closed) continue;
+    counts.opensChecked += 1;
+
     const ltp = ltpByStrikeSide.get(`${last.strike}-${last.optSide}`) ?? null;
-    const advanced = advanceOpenEntry(last, ltp, now);
-    if (advanced !== last) {
-      logs[key] = [...entries.slice(0, -1), advanced];
+    if (ltp !== null) {
+      const advanced = advanceOpenEntry(last, ltp, now);
+      if (advanced !== last) {
+        logs[key] = [...entries.slice(0, -1), advanced];
+        counts.advanced += 1;
+        changed = true;
+      }
+      continue;
+    }
+
+    // No live quote for this strike. If the strike is genuinely absent from a
+    // chain we DID fetch (so it's not a transient fetch miss) and the trade is
+    // old enough that its contract has expired, close it honestly as manual:
+    // status closed_manual, no exitPrice, so P&L books it at breakeven rather
+    // than inventing an outcome we can't know.
+    const expired = !strikesInChain.has(last.strike);
+    const stale = now - last.openedAt >= ORPHAN_SWEEP_MIN_AGE_MS;
+    if (expired && stale) {
+      logs[key] = [...entries.slice(0, -1), { ...last, closed: true, closedAt: now, status: "closed_manual" }];
+      counts.swept += 1;
       changed = true;
     }
   }
@@ -1933,27 +1970,58 @@ async function advanceOpenTradesForSymbol(
 
 async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   const token = await env.COMMODITY_KV.get("access_token");
-  if (!token) return;
+  const now = Date.now();
+  const counts: AdvanceCounts = { opensChecked: 0, advanced: 0, swept: 0 };
+
+  // Heartbeat: always record that the Cron ran (and what it did), even when
+  // nothing changed and even when there's no token, so "/api/cron-status" can
+  // prove the schedule is actually firing.
+  const writeHeartbeat = async (note?: string) =>
+    env.COMMODITY_KV.put(CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
+
+  if (!token) {
+    await writeHeartbeat("no access token in KV");
+    return;
+  }
 
   const logs = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
-  const now = Date.now();
   let anyChanged = false;
   for (const symbol of TRADE_LOG_SYMBOLS) {
     try {
-      const changed = await advanceOpenTradesForSymbol(token, symbol as Symbol, logs, now);
+      const changed = await advanceOpenTradesForSymbol(token, symbol as Symbol, logs, now, counts);
       anyChanged = anyChanged || changed;
     } catch {
       // best-effort -- one symbol failing must not block the other
     }
   }
-  if (!anyChanged) return;
 
-  // Re-read the freshest KV right before writing and merge our advanced
-  // result over it (advanced = "server", so its closes win), so a client
-  // push that landed mid-run -- e.g. a brand-new open trade -- is preserved
-  // rather than clobbered by our older snapshot.
-  const fresh = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
-  await saveTradeLogsToKv(env, mergeTradeLogs(fresh, logs));
+  if (anyChanged) {
+    // Re-read the freshest KV right before writing and merge our advanced
+    // result over it (advanced = "server", so its closes win), so a client
+    // push that landed mid-run -- e.g. a brand-new open trade -- is preserved
+    // rather than clobbered by our older snapshot.
+    const fresh = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
+    await saveTradeLogsToKv(env, mergeTradeLogs(fresh, logs));
+  }
+  await writeHeartbeat();
+}
+
+async function getCronStatus(env: Env): Promise<Record<string, unknown>> {
+  const raw = await env.COMMODITY_KV.get(CRON_STATUS_KV_KEY);
+  if (!raw) return { lastRunAt: null, note: "the trade-log Cron has not recorded a run yet" };
+  try {
+    const p = JSON.parse(raw) as { at?: number; opensChecked?: number; advanced?: number; swept?: number; note?: string };
+    return {
+      lastRunAt: p.at ? new Date(p.at).toISOString() : null,
+      ageSeconds: p.at ? Math.round((Date.now() - p.at) / 1000) : null,
+      opensChecked: p.opensChecked ?? null,
+      advanced: p.advanced ?? null,
+      swept: p.swept ?? null,
+      note: p.note ?? null,
+    };
+  } catch {
+    return { lastRunAt: null, note: "unreadable cron status" };
+  }
 }
 
 function json(data: unknown, status = 200) {
@@ -2543,6 +2611,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
             return json({ ok: true });
           }
           return json({ error: "Method not allowed" }, 405);
+        }
+
+        if (url.pathname === "/api/cron-status") {
+          return json(await getCronStatus(env));
         }
 
         if (url.pathname === "/api/trade-logs") {
