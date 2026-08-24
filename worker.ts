@@ -13,6 +13,7 @@ import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
 import { scoreArticles, scoreEiaChange, clusterEvents, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
 import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
+import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1244,15 +1245,25 @@ async function getYahooQuote(symbol: string, name: string, tracksMCX: string): P
     return { symbol, name, tracksMCX, price: null, change: null, changePercent: null, currency: null, marketState: null, asOf: null, error: `Yahoo Finance returned ${res.status}` };
   }
   const json: any = await res.json();
-  const meta = json?.chart?.result?.[0]?.meta;
+  const result = json?.chart?.result?.[0];
+  const meta = result?.meta;
   if (!meta || typeof meta.regularMarketPrice !== "number") {
     const errMsg = json?.chart?.error?.description || "No quote data returned";
     return { symbol, name, tracksMCX, price: null, change: null, changePercent: null, currency: null, marketState: null, asOf: null, error: errMsg };
   }
   const price = meta.regularMarketPrice;
-  const prevClose = meta.chartPreviousClose ?? meta.previousClose ?? null;
+  // Daily change vs the true PRIOR-DAY close -- not chartPreviousClose, which
+  // over a multi-day range is ~6 days old and can flip the sign (a red crude
+  // day was reading "bullish" because the week was green). See resolvePrevClose.
+  const dailyCloses: number[] = (result?.indicators?.quote?.[0]?.close ?? []).filter((c: any) => typeof c === "number");
+  const secondLastDailyClose = dailyCloses.length >= 2 ? dailyCloses[dailyCloses.length - 2] : null;
+  const prevClose = resolvePrevClose({
+    previousClose: typeof meta.previousClose === "number" ? meta.previousClose : null,
+    secondLastDailyClose,
+    chartPreviousClose: typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null,
+  });
   const change = prevClose !== null ? r2(price - prevClose) : null;
-  const changePercent = prevClose ? r2((change! / prevClose) * 100) : null;
+  const changePercent = prevClose ? r2(((price - prevClose) / prevClose) * 100) : null;
   return {
     symbol,
     name,

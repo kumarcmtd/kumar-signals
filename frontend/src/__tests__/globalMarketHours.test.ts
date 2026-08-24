@@ -1,6 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cmeEnergyOpen, globalEnergyVenues, moveDirection, aggregateBias } from "../utils/globalMarketHours";
+import { cmeEnergyOpen, globalEnergyVenues, moveDirection, aggregateBias, resolvePrevClose } from "../utils/globalMarketHours";
+
+test("resolvePrevClose prefers the true prior-day close over the 6-day-old chart reference", () => {
+  // The bug: crude down TODAY but up over the WEEK. previousClose = yesterday
+  // (higher, so today is negative); chartPreviousClose = ~6 days ago (lower, so
+  // the week is positive). We must pick previousClose so the sign matches today.
+  const price = 85.3;
+  const yesterday = 86.6; // -> today ~ -1.5% (matches TradingView)
+  const sixDaysAgo = 84.7; // -> +0.7% over the week (the wrong "bullish")
+  const chosen = resolvePrevClose({ previousClose: yesterday, secondLastDailyClose: yesterday, chartPreviousClose: sixDaysAgo });
+  assert.equal(chosen, yesterday);
+  assert.ok((price - chosen) / chosen < 0); // negative -> bearish, as it should be
+
+  // Falls back to the second-to-last daily close when previousClose is absent.
+  assert.equal(resolvePrevClose({ previousClose: null, secondLastDailyClose: 86.6, chartPreviousClose: 84.7 }), 86.6);
+  // chartPreviousClose only as a last resort.
+  assert.equal(resolvePrevClose({ previousClose: null, secondLastDailyClose: null, chartPreviousClose: 84.7 }), 84.7);
+  assert.equal(resolvePrevClose({}), null);
+});
 
 test("moveDirection: neutral band around zero, else bullish/bearish", () => {
   assert.equal(moveDirection(0.05), "neutral"); // chop

@@ -17,6 +17,21 @@ export interface MarketVenue {
   tracksMcx?: "CRUDEOIL" | "NATURALGAS";
 }
 
+// Yahoo's chart meta exposes several "previous close" references, and only the
+// prior-DAY close yields the daily % change a trader actually sees:
+//  - previousClose      : Yahoo's own prior-session settlement (what we want).
+//  - second-last daily  : the reliable fallback from the daily closes series.
+//  - chartPreviousClose : the close BEFORE a multi-day range's first bar --
+//    using this as the reference gives a multi-day change that can show the
+//    OPPOSITE sign of today's move (the bug that made a red crude read
+//    "bullish"). Only ever a last resort.
+export function resolvePrevClose(opts: { previousClose?: number | null; secondLastDailyClose?: number | null; chartPreviousClose?: number | null }): number | null {
+  if (typeof opts.previousClose === "number") return opts.previousClose;
+  if (typeof opts.secondLastDailyClose === "number") return opts.secondLastDailyClose;
+  if (typeof opts.chartPreviousClose === "number") return opts.chartPreviousClose;
+  return null;
+}
+
 export type MoveDir = "bullish" | "bearish" | "neutral";
 
 // Below this, a move is chop, not a lean.
