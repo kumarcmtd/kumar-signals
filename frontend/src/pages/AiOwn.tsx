@@ -7,6 +7,7 @@ import { POWER_WINDOWS, type SessionWindow, type SessionState, type Impact } fro
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow, tickMarks, fmtWhen } from "../components/CallCardKit";
+import { GlobalMarketHours } from "../components/GlobalMarketHours";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -238,6 +239,8 @@ export function AiOwn() {
       </section>
 
       <SessionClock session={session} />
+
+      <GlobalMarketHours mcxOpen={!session.closedReason} />
 
       {SYMBOLS.map((s) => (
         <SymbolStrategyCard key={s} symbol={s} />
