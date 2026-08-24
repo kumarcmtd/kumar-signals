@@ -1,6 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cmeEnergyOpen, globalEnergyVenues } from "../utils/globalMarketHours";
+import { cmeEnergyOpen, globalEnergyVenues, moveDirection, aggregateBias } from "../utils/globalMarketHours";
+
+test("moveDirection: neutral band around zero, else bullish/bearish", () => {
+  assert.equal(moveDirection(0.05), "neutral"); // chop
+  assert.equal(moveDirection(-0.1), "neutral");
+  assert.equal(moveDirection(0.9), "bullish");
+  assert.equal(moveDirection(-1.6), "bearish");
+  assert.equal(moveDirection(null), "neutral");
+});
+
+test("aggregateBias averages the crude read (WTI + Brent)", () => {
+  const b = aggregateBias([-1.4, -1.6]); // both down -> bearish
+  assert.equal(b.dir, "bearish");
+  assert.equal(b.avgPct, -1.5);
+  assert.equal(aggregateBias([null, undefined]).avgPct, null);
+});
+
 
 // Build a Date at a specific US Eastern wall-clock moment by searching for the
 // UTC instant whose America/New_York rendering matches. Simpler: use known

@@ -11,6 +11,31 @@ export interface MarketVenue {
   region: string;
   open: boolean;
   hoursNote: string;
+  // Ties this venue to its live global quote (from /api/global-markets) and to
+  // the MCX symbol it drives, so the panel can show a bullish/bearish read.
+  quoteSymbol?: string;
+  tracksMcx?: "CRUDEOIL" | "NATURALGAS";
+}
+
+export type MoveDir = "bullish" | "bearish" | "neutral";
+
+// Below this, a move is chop, not a lean.
+const NEUTRAL_PCT = 0.15;
+
+export function moveDirection(changePercent: number | null | undefined): MoveDir {
+  if (changePercent == null) return "neutral";
+  if (changePercent > NEUTRAL_PCT) return "bullish";
+  if (changePercent < -NEUTRAL_PCT) return "bearish";
+  return "neutral";
+}
+
+// Averages a set of change%s (e.g. WTI + Brent for the crude read) into one
+// bias. Returns neutral with a null pct when nothing is available.
+export function aggregateBias(changePercents: (number | null | undefined)[]): { dir: MoveDir; avgPct: number | null } {
+  const vals = changePercents.filter((x): x is number => typeof x === "number");
+  if (!vals.length) return { dir: "neutral", avgPct: null };
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return { dir: moveDirection(avg), avgPct: Number(avg.toFixed(2)) };
 }
 
 function partsInZone(now: Date, timeZone: string): { weekday: number; minutes: number } {
@@ -68,6 +93,8 @@ export function globalEnergyVenues(now: Date = new Date(), mcxOpen?: boolean): M
       region: "US",
       open: cme,
       hoursNote: "Sun 6:00 PM – Fri 5:00 PM ET (near 24h)",
+      quoteSymbol: "CL=F",
+      tracksMcx: "CRUDEOIL",
     },
     {
       id: "nymex-ng",
@@ -76,6 +103,8 @@ export function globalEnergyVenues(now: Date = new Date(), mcxOpen?: boolean): M
       region: "US",
       open: cme,
       hoursNote: "Sun 6:00 PM – Fri 5:00 PM ET (near 24h)",
+      quoteSymbol: "NG=F",
+      tracksMcx: "NATURALGAS",
     },
     {
       id: "ice-brent",
@@ -84,6 +113,8 @@ export function globalEnergyVenues(now: Date = new Date(), mcxOpen?: boolean): M
       region: "UK / Europe",
       open: cme,
       hoursNote: "Near-24h global session, Sun evening – Fri",
+      quoteSymbol: "BZ=F",
+      tracksMcx: "CRUDEOIL",
     },
   ];
 }
