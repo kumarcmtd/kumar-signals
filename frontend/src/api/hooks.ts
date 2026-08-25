@@ -121,6 +121,16 @@ export function useExpiryAlerts() {
   });
 }
 
+// "Why Today" is AI-synthesized off cached news (5-min server cache), so a
+// slow client cadence is plenty -- refetch every 5 minutes.
+export function useWhyToday() {
+  return useQuery({
+    queryKey: ["why-today"],
+    queryFn: api.whyToday,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
 export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],

@@ -14,6 +14,7 @@ import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCa
 import { scoreArticles, scoreEiaChange, clusterEvents, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
 import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
+import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1458,6 +1459,92 @@ async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   return result;
 }
 
+// ---- "Why Today": a grounded, plain-language read of why crude / NG is
+// moving, built from the SAME scored news the News AI page uses. The drivers
+// (real headlines) and the direction/duration are deterministic; the AI only
+// writes the prose, strictly from those headlines -- it can never introduce an
+// event, price, or number that isn't in the fetched news.
+const WHYTODAY_CACHE_KV_KEY = "whytoday:v1";
+const WHYTODAY_CACHE_TTL_SECONDS = 300;
+
+function buildWhyDrivers(articles: ScoredNewsArticle[], market: "CRUDE" | "NG"): { drivers: WhyDriver[]; leanScore: number; rules: string[] } {
+  const relevant = articles
+    .filter((a) => a.affectedMarket === market || a.affectedMarket === "BOTH")
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, 5);
+  const drivers: WhyDriver[] = relevant.map((a) => ({
+    headline: a.headline,
+    source: a.source,
+    url: a.url,
+    impact: leanFromScore(a.impactScale),
+    timeImpact: a.timeImpact,
+  }));
+  const leanScore = Number(relevant.reduce((s, a) => s + a.impactScale, 0).toFixed(2));
+  const rules = relevant.flatMap((a) => a.matchedRules);
+  return { drivers, leanScore, rules };
+}
+
+async function aiWhySummaries(env: Env, crude: WhyDriver[], ng: WhyDriver[]): Promise<{ crude: string; naturalGas: string }> {
+  if (!crude.length && !ng.length) return { crude: "", naturalGas: "" };
+  const fmt = (d: WhyDriver[]) => (d.length ? d.map((x) => `- [${x.impact}] "${x.headline}" (${x.source})`).join("\n") : "(no relevant headlines)");
+  try {
+    const result = await env.AI.run("@cf/meta/llama-4-scout-17b-16e-instruct", {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an energy market analyst. You are given REAL, already-fetched news headlines about crude oil and natural gas. Summarize ONLY what these headlines say -- NEVER invent an event, price, number, or cause that is not present in them. For each commodity give a 2-3 sentence plain-English summary of why the market is moving today, based only on the headlines provided. If a commodity has no relevant headlines, say exactly that its move looks technical/positioning with no major news catalyst. Reply with ONLY a single JSON object of the form {\"crude\":\"...\",\"naturalGas\":\"...\"}, no markdown.",
+        },
+        { role: "user", content: `CRUDE OIL headlines:\n${fmt(crude)}\n\nNATURAL GAS headlines:\n${fmt(ng)}` },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 500,
+    });
+    const raw = (result as { response?: unknown }).response;
+    const obj = typeof raw === "string" ? JSON.parse(raw) : (raw as { crude?: string; naturalGas?: string });
+    return { crude: typeof obj?.crude === "string" ? obj.crude : "", naturalGas: typeof obj?.naturalGas === "string" ? obj.naturalGas : "" };
+  } catch {
+    return { crude: "", naturalGas: "" }; // the deterministic drivers still stand on their own
+  }
+}
+
+function assembleWhyCommodity(drivers: WhyDriver[], leanScore: number, rules: string[], aiSummary: string): WhyCommodity {
+  const duration = classifyNewsDuration(rules);
+  return {
+    available: drivers.length > 0,
+    lean: leanFromScore(leanScore),
+    leanScore,
+    drivers,
+    aiSummary,
+    durationRead: duration.read,
+    durationWhy: duration.why,
+  };
+}
+
+async function computeWhyToday(env: Env): Promise<{ crude: WhyCommodity; naturalGas: WhyCommodity; newsAvailable: boolean; fetchedAt: string }> {
+  const cached = await env.COMMODITY_KV.get(WHYTODAY_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // refetch on a corrupt entry
+    }
+  }
+  const news = await fetchEnergyNews(env);
+  const cl = buildWhyDrivers(news.articles, "CRUDE");
+  const ng = buildWhyDrivers(news.articles, "NG");
+  const ai = news.available ? await aiWhySummaries(env, cl.drivers, ng.drivers) : { crude: "", naturalGas: "" };
+
+  const out = {
+    crude: assembleWhyCommodity(cl.drivers, cl.leanScore, cl.rules, ai.crude),
+    naturalGas: assembleWhyCommodity(ng.drivers, ng.leanScore, ng.rules, ai.naturalGas),
+    newsAvailable: news.available,
+    fetchedAt: new Date().toISOString(),
+  };
+  await env.COMMODITY_KV.put(WHYTODAY_CACHE_KV_KEY, JSON.stringify(out), { expirationTtl: WHYTODAY_CACHE_TTL_SECONDS });
+  return out;
+}
+
 interface EiaFetchResult {
   available: boolean;
   crude: EiaScoreResult | null;
@@ -2530,6 +2617,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (url.pathname === "/api/news-trade") {
           const [news, eia, calendar] = await Promise.all([fetchEnergyNews(env), fetchEiaData(env), fetchEconCalendar(env)]);
           return json({ news, eia, calendar, marketStatus: getMarketStatus(), fetchedAt: new Date().toISOString() });
+        }
+
+        if (url.pathname === "/api/why-today") {
+          return json(await computeWhyToday(env));
         }
 
         // Spec-compliant standalone routes -- same underlying cached

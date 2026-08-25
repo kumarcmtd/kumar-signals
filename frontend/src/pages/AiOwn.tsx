@@ -8,6 +8,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow, tickMarks, fmtWhen } from "../components/CallCardKit";
 import { GlobalMarketHours } from "../components/GlobalMarketHours";
+import { WhyTodayCard } from "../components/WhyTodayCard";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -241,6 +242,8 @@ export function AiOwn() {
       <SessionClock session={session} />
 
       <GlobalMarketHours mcxOpen={!session.closedReason} />
+
+      <WhyTodayCard />
 
       {SYMBOLS.map((s) => (
         <SymbolStrategyCard key={s} symbol={s} />
