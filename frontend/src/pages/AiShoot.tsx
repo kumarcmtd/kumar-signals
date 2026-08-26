@@ -10,6 +10,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { ConfluenceCallCard } from "../components/ConfluenceCallCard";
+import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
@@ -339,6 +340,8 @@ export function AiShoot() {
           {market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"}
         </p>
       </section>
+
+      <SignalConflictWarning />
 
       {confluenceCalls.map((call) => (
         <ConfluenceCallCard key={call.symbol} call={call} candles={candles15mFor(call.symbol)} options={board[call.symbol].options} lotSize={LOT_SIZE[call.symbol]} />
