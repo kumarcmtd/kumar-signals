@@ -4,8 +4,9 @@ import { useLevelCrossScanner } from "../hooks/useLevelCrossScanner";
 import { useCandles } from "../api/hooks";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
-import { EntryTimingBadge } from "../components/EntryTimingBadge";
-import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen } from "../components/CallCardKit";
+import { checkReboundStrength } from "../utils/reboundStrength";
+import { computeTradeLight } from "../utils/tradeLight";
+import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
@@ -157,6 +158,19 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
   const displayReasons = signal?.reasons ?? latest.meta?.reasons ?? [];
   const displayLabel = signal?.label ?? latest.meta?.label?.match(/\(([^)]+)\)/)?.[1] ?? "";
 
+  // Same single "traffic light" (Buy Now / Wait For Buy / Don't Buy Now)
+  // that Ai20-20 shows on its hero -- built from this card's own live entry
+  // timing plus, when price is between entry and stop, a real rebound read
+  // on the same candles the scanner used. Never a fabricated buy price.
+  const candles = scanner.chartCandles[symbol] ?? [];
+  const direction: "bullish" | "bearish" = bullish ? "bullish" : "bearish";
+  const inBetween = !!openTrade && liveLtp !== null && liveLtp < openTrade.entry && liveLtp > effectiveStopFor(openTrade);
+  const rebound = inBetween ? checkReboundStrength(candles, direction) : null;
+  const tradeLight =
+    !latest.closed && entryTiming && nextTarget !== null && legFloor !== null
+      ? computeTradeLight(entryTiming, rebound, legFloor, nextTarget, effectiveStopFor(latest))
+      : null;
+
   const handleForceStop = () => {
     const pw = window.prompt("Enter password to force-stop this trade:");
     if (pw === null) return;
@@ -183,6 +197,9 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
           <p className="text-sm font-bold text-slate-700 mt-0.5">
             {latest.strike} {latest.optSide} · Entry ₹{latest.entry}
           </p>
+          <p className="text-[10px] text-slate-400 mt-0.5">
+            Created {fmtWhen(latest.openedAt)} at ₹{latest.entry}
+          </p>
         </div>
         <div className="text-center shrink-0">
           {signal ? (
@@ -201,6 +218,12 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
           )}
         </div>
       </div>
+
+      {tradeLight && (
+        <div className="px-4 pt-4">
+          <TradeLightSignal verdict={tradeLight} />
+        </div>
+      )}
 
       <div className="p-4 space-y-3">
         <NewsImpactCard symbol={symbol} />
@@ -225,7 +248,6 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
           <DetailRow label="Target 1" value={`₹${latest.targets[0]}`} valueColor="#0D9488" />
           <DetailRow label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} valueColor="#0EA5E9" />
         </div>
-        {entryTiming && <EntryTimingBadge verdict={entryTiming} theme="light" />}
 
         <PriceScale entry={latest} current={liveLtp} />
         <ProfitEstimate trade={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />

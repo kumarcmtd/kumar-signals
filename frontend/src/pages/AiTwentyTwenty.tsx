@@ -232,9 +232,14 @@ function TwentyCandidateCard({
             {candidate.analysis.optSide} Quick Win
           </p>
           {latest && (
-            <p className="text-sm font-bold text-slate-700 mt-0.5">
-              {latest.strike} {latest.optSide} · Entry ₹{latest.entry} · {formatExpiryTip(expiry)} expiry
-            </p>
+            <>
+              <p className="text-sm font-bold text-slate-700 mt-0.5">
+                {latest.strike} {latest.optSide} · Entry ₹{latest.entry} · {formatExpiryTip(expiry)} expiry
+              </p>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Created {fmtWhen(latest.openedAt)} at ₹{latest.entry}
+              </p>
+            </>
           )}
         </div>
         <div className="text-center shrink-0">
