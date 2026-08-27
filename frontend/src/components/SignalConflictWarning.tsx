@@ -28,7 +28,7 @@ export function SignalConflictWarning() {
           >
             <div className="px-4 pt-3.5 pb-2 flex items-center gap-2 text-white" style={{ background: "linear-gradient(135deg,#D97706,#DC2626)" }}>
               <AlertTriangle size={18} className="shrink-0" />
-              <p className="text-sm font-black uppercase tracking-wide">Don't Trade {DISPLAY_NAME[c.symbol]} — CE &amp; PE Both Live</p>
+              <p className="text-sm font-black uppercase tracking-wide">Warning — {DISPLAY_NAME[c.symbol]}: CE &amp; PE Both Live</p>
             </div>
 
             <div className="p-4 space-y-3">
