@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { Activity, AlertTriangle, Layers, Sparkles, TrendingDown, TrendingUp, Wallet, Zap } from "lucide-react";
 import { useAppStore } from "../store/appStore";
-import { useMarketStatus } from "../api/hooks";
+import { useMarketStatus, useOptionsAnalytics } from "../api/hooks";
 import { useSuperTrendPro } from "../hooks/useSuperTrendPro";
+import { projectPremiumFromUnderlying } from "../utils/optionProjection";
+import type { OptionsAnalytics } from "../types";
 import { CircularGauge } from "../components/CircularGauge";
 import { TradeChart } from "../components/TradeChart";
 import { TradingViewWidget } from "../components/TradingViewWidget";
@@ -51,6 +53,7 @@ export function AiSuperTrendPro() {
   const [symbol, setSymbol] = useState<TradableSymbol>("NATURALGAS");
   const [timeframe, setTimeframe] = useState("15");
   const { data: market } = useMarketStatus();
+  const { data: options } = useOptionsAnalytics(symbol);
   const { snapshot, candles, candlesLoading, candlesError, log } = useSuperTrendPro(symbol, timeframe);
 
   const superTrendLogs = useAppStore((s) => s.superTrendLogs);
@@ -200,7 +203,7 @@ export function AiSuperTrendPro() {
                   <Layers size={12} />
                   {openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"}
                 </p>
-                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} />
+                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} options={options} />
               </div>
             </div>
           )}
@@ -362,10 +365,12 @@ function TradeSetupBody({
   snapshot,
   openEntry,
   symbol,
+  options,
 }: {
   snapshot: NonNullable<ReturnType<typeof useSuperTrendPro>["snapshot"]>;
   openEntry: ReturnType<typeof useSuperTrendPro>["log"][number] | null;
   symbol: TradableSymbol;
+  options: OptionsAnalytics | undefined;
 }) {
   const setup = snapshot.tradeSetup!;
   const entry = openEntry?.entry ?? setup.entry;
@@ -386,6 +391,13 @@ function TradeSetupBody({
   const nextTarget = targets[nextTargetIdx];
   const legFloor = nextTargetIdx === 0 ? entry : targets[nextTargetIdx - 1];
   const entryTiming = evaluateEntryTiming(dirSign * legFloor, dirSign * nextTarget, dirSign * trailingStop, dirSign * snapshot.lastPrice);
+
+  // The options translation of this futures setup: a bullish trend is played
+  // with the ATM Call, a bearish one with the ATM Put. Uses the same shared,
+  // honest premium projection (real per-strike delta + theta haircut) every
+  // other options card in the app uses -- never a flat guess.
+  const optSide: "CE" | "PE" = direction === "bullish" ? "CE" : "PE";
+  const optionProj = projectPremiumFromUnderlying(optSide, entry, stop, [targets[0], targets[1], targets[2]], options);
 
   return (
     <div>
@@ -411,6 +423,9 @@ function TradeSetupBody({
         ))}
       </div>
       <EntryTimingBadge verdict={entryTiming} theme="light" className="mt-2.5" />
+
+      <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} />
+
       {openEntry ? (
         <FuturesProfitEstimate
           entry={entry}
@@ -425,6 +440,50 @@ function TradeSetupBody({
           Buy/Strong Sell.
         </p>
       )}
+    </div>
+  );
+}
+
+// The options version of the futures setup above -- ATM Call for a bullish
+// trend, ATM Put for a bearish one, with premium entry/SL/targets projected
+// the same honest way (real delta + theta) as every other options card.
+function OptionsTradeCard({ symbol, optSide, proj }: { symbol: TradableSymbol; optSide: "CE" | "PE"; proj: ReturnType<typeof projectPremiumFromUnderlying> }) {
+  const accent = optSide === "CE" ? "#16A34A" : "#DC2626";
+
+  if (!proj) {
+    return (
+      <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px dashed var(--color-border)" }}>
+        <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] flex items-center gap-1.5">
+          <Layers size={12} /> Options Trade (ATM {optSide})
+        </p>
+        <p className="text-[11px] text-[var(--color-muted)] mt-1.5">
+          Live option chain unavailable right now — the futures levels above still stand. The ATM {optSide} entry/target/SL will fill in as soon as the chain is reachable.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-xl overflow-hidden" style={{ border: `1.5px solid ${accent}55` }}>
+      <div className="px-3.5 py-2 flex items-center justify-between" style={{ background: `${accent}12` }}>
+        <p className="text-[11px] font-black uppercase flex items-center gap-1.5" style={{ color: accent }}>
+          <Layers size={12} /> Options Trade — Buy {DISPLAY_NAME[symbol]} {proj.strike} {optSide}
+        </p>
+        <span className="text-[10px] font-bold" style={{ color: accent }}>{proj.rr !== null ? `R:R 1:${proj.rr}` : ""}</span>
+      </div>
+      <div className="p-3">
+        <div className="grid grid-cols-3 gap-2">
+          <Stat label={`Buy ${optSide} @`} value={`₹${proj.entry.toFixed(2)}`} color={accent} />
+          <Stat label="Stop Loss" value={`₹${proj.stop.toFixed(2)}`} color="#DC2626" />
+          <Stat label="Strike" value={`${proj.strike}`} />
+          <Stat label="Target 1" value={`₹${proj.targets[0].toFixed(2)}`} color="#16A34A" />
+          <Stat label="Target 2" value={`₹${proj.targets[1].toFixed(2)}`} color="#16A34A" />
+          <Stat label="Target 3" value={`₹${proj.targets[2].toFixed(2)}`} color="#16A34A" />
+        </div>
+        <p className="text-[9px] text-[var(--color-muted)] mt-2">
+          ATM {optSide} premium projected from the futures move using the strike's real delta ({proj.delta.toFixed(2)}) and a theta decay haircut — buy at or below the entry, never chase.
+        </p>
+      </div>
     </div>
   );
 }
