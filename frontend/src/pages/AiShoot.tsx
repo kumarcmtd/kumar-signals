@@ -6,6 +6,7 @@ import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog"
 import { useHitScoreSuite } from "../hooks/useHitScoreSuite";
 import { scanForHitScoreCalls, scanForNearMisses, HIT_SCORE_MIN, type HitScoreCandidate, type NearMissCandidate } from "../utils/hitScoreEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
+import { flattenClosedTrades, computePerformanceStats } from "../utils/tradeLogPnl";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { VolatilityMeter } from "../components/VolatilityMeter";
@@ -323,6 +324,20 @@ export function AiShoot() {
   const dayStats = useMemo(() => summarizeTradeLogsByDay(shootTradeLogsOnly), [shootTradeLogsOnly]);
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 
+  // Per-call history for this page's own SHOOT- trade logs (both symbols,
+  // all four timeframes), newest first -- so every call this page ever made
+  // and whether it hit target/breakeven/SL is tracked here, exactly like
+  // Level Cross's own Call History, not just the day-wise counts.
+  const shootPerf = useMemo(() => computePerformanceStats(flattenClosedTrades(shootTradeLogsOnly)), [shootTradeLogsOnly]);
+  const shootAllCalls = useMemo(() => {
+    const out: { symbol: TradableSymbol; entry: TradeLogEntry }[] = [];
+    for (const [k, v] of Object.entries(shootTradeLogsOnly)) {
+      const symbol: TradableSymbol = k.includes("NATURALGAS") ? "NATURALGAS" : "CRUDEOIL";
+      for (const e of v) out.push({ symbol, entry: e });
+    }
+    return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt).slice(0, 40);
+  }, [shootTradeLogsOnly]);
+
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 min-h-screen space-y-5" style={{ background: "linear-gradient(180deg,#FFF7ED,#FDF4FF 35%,#F0F9FF 70%,#ECFDF5)" }}>
       <section className="text-center pt-2 space-y-2">
@@ -393,6 +408,37 @@ export function AiShoot() {
           {nearMisses.map((c) => (
             <NearMissRow key={`${c.symbol}-${c.analysis.tf}`} candidate={c} />
           ))}
+        </section>
+      )}
+
+      {/* TRACK RECORD */}
+      <section className="rounded-3xl bg-white shadow-md p-4">
+        <p className="text-xs font-bold uppercase text-slate-500 mb-3 flex items-center gap-1.5">
+          <ShieldCheck size={13} className="text-emerald-500" /> AI-Shoot Track Record
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          <MiniStat label="Closed" value={String(shootPerf.totalClosed)} color="#475569" />
+          <MiniStat label="Accuracy" value={shootPerf.accuracyPct !== null ? `${shootPerf.accuracyPct}%` : "—"} color="#6366F1" />
+          <MiniStat label="Net Points" value={`${shootPerf.netPoints >= 0 ? "+" : ""}${shootPerf.netPoints}`} color={shootPerf.netPoints >= 0 ? "#10B981" : "#EF4444"} />
+        </div>
+        <p className="text-[10px] text-slate-400 mt-2">Tracked separately from every other page, advanced and closed server-side even when the app is shut. Starts from zero the day this page shipped.</p>
+      </section>
+
+      {/* PER-CALL HISTORY */}
+      {shootAllCalls.length > 0 && (
+        <section className="rounded-3xl bg-white shadow-md p-4">
+          <p className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1.5">
+            <Target size={13} className="text-orange-500" /> Call History — Both Symbols
+          </p>
+          <p className="text-[10px] text-slate-400 mb-3">Every AI-Shoot call, newest first — exact time and price it was called, and which target/breakeven/stop rule closed it.</p>
+          <div className="space-y-2">
+            {shootAllCalls.map(({ symbol, entry }) => (
+              <div key={entry.id}>
+                <p className="text-[9px] font-bold uppercase text-slate-400 mb-0.5">{DISPLAY_NAME[symbol]}</p>
+                <ShootTradeLogLine entry={entry} liveLtp={null} />
+              </div>
+            ))}
+          </div>
         </section>
       )}
 
