@@ -35,6 +35,7 @@ export function BestCall() {
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
 
   const crudeOil = useBestCallForSymbol("CRUDEOIL", journalSummary.winRate);
@@ -192,9 +193,15 @@ export function BestCall() {
             whichever target/breakeven/stop rule actually closed it.
           </p>
           <div className="space-y-2">
-            {allCalls.map(({ symbol, entry, verified }) => (
+            {(historyOpen ? allCalls : allCalls.slice(0, 6)).map(({ symbol, entry, verified }) => (
               <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} verified={verified} onOpen={() => setDetail({ symbol, entry })} />
             ))}
+            {allCalls.length > 6 && (
+              <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-indigo-600 py-1.5">
+                {historyOpen ? "Show less" : `Show all ${allCalls.length}`}
+                <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -163,6 +163,7 @@ function TwentyCandidateCard({
   const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const [chatOpen, setChatOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const bullish = candidate.analysis.bias === "bullish";
   const accent = bullish ? "#0EA5E9" : "#F43F5E";
   const symbolKey = candidate.symbol as TradableSymbol;
@@ -361,11 +362,17 @@ function TwentyCandidateCard({
                 </button>
               )}
             </div>
-            {[...log].reverse().map((entry) => (
+            {(logOpen ? [...log].reverse() : [...log].reverse().slice(0, 3)).map((entry) => (
               <button key={entry.id} onClick={() => onOpenDetail(symbolKey, entry)} className="w-full text-left">
                 <TwentyTradeLogLine entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
               </button>
             ))}
+            {log.length > 3 && (
+              <button onClick={() => setLogOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-sky-600 py-1.5">
+                {logOpen ? "Show less" : `Show all ${log.length}`}
+                <ChevronDown size={13} className={`transition-transform ${logOpen ? "rotate-180" : ""}`} />
+              </button>
+            )}
           </div>
         )}
 
@@ -576,6 +583,7 @@ export function AiTwentyTwenty() {
   const [loggedKey, setLoggedKey] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const crudeOil = useImmediateSuite("CRUDEOIL");
   const naturalGas = useImmediateSuite("NATURALGAS");
@@ -748,9 +756,15 @@ export function AiTwentyTwenty() {
           </p>
           <p className="text-[10px] text-slate-400 mb-3">Every Ai20-20 call ever made, newest first — exact time/price called, and once closed, exact time/price of whichever target/breakeven/stop rule actually closed it.</p>
           <div className="space-y-2">
-            {allCalls.map(({ symbol, entry, verified }) => (
+            {(historyOpen ? allCalls : allCalls.slice(0, 6)).map(({ symbol, entry, verified }) => (
               <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} verified={verified} onOpen={() => setDetail({ symbol, entry })} />
             ))}
+            {allCalls.length > 6 && (
+              <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-sky-600 py-1.5">
+                {historyOpen ? "Show less" : `Show all ${allCalls.length}`}
+                <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+              </button>
+            )}
           </div>
         </div>
       )}
