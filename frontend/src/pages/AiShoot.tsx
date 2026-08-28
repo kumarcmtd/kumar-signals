@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers, Eye } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers, Eye, ChevronDown } from "lucide-react";
 import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -127,7 +127,19 @@ function StatTile({ label, value, gradient }: { label: string; value: string; gr
   );
 }
 
+function ShowMoreButton({ open, total, onClick }: { open: boolean; total: number; onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-orange-600 py-1.5">
+      {open ? "Show less" : `Show all ${total}`}
+      <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+    </button>
+  );
+}
+
+const LOG_PREVIEW_COUNT = 3;
+
 function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScoreCandidate; tradeLogs: Record<string, TradeLogEntry[]>; options: OptionsAnalytics | undefined; keyPrefix: string }) {
+  const [logOpen, setLogOpen] = useState(false);
   const bullish = call.analysis.bias === "bullish";
   const accent = bullish ? "#10B981" : "#EF4444";
   const symbolKey = call.symbol as TradableSymbol;
@@ -206,9 +218,10 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
         {log.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-[10px] font-bold uppercase text-slate-400">Trade Log (newest first)</p>
-            {[...log].reverse().map((entry) => (
+            {(logOpen ? [...log].reverse() : [...log].reverse().slice(0, LOG_PREVIEW_COUNT)).map((entry) => (
               <ShootTradeLogLine key={entry.id} entry={entry} liveLtp={entry.id === openTrade?.id ? liveLtp : null} />
             ))}
+            {log.length > LOG_PREVIEW_COUNT && <ShowMoreButton open={logOpen} total={log.length} onClick={() => setLogOpen((o) => !o)} />}
           </div>
         )}
       </div>
@@ -249,7 +262,10 @@ function MiniStat({ label, value, color }: { label: string; value: string; color
   );
 }
 
+const HISTORY_PREVIEW_COUNT = 6;
+
 export function AiShoot() {
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { data: market } = useMarketStatus();
   const { data: trades } = usePortfolio();
   const journalSummary = useMemo(() => computePortfolioSummary(trades ?? []), [trades]);
@@ -432,12 +448,13 @@ export function AiShoot() {
           </p>
           <p className="text-[10px] text-slate-400 mb-3">Every AI-Shoot call, newest first — exact time and price it was called, and which target/breakeven/stop rule closed it.</p>
           <div className="space-y-2">
-            {shootAllCalls.map(({ symbol, entry }) => (
+            {(historyOpen ? shootAllCalls : shootAllCalls.slice(0, HISTORY_PREVIEW_COUNT)).map(({ symbol, entry }) => (
               <div key={entry.id}>
                 <p className="text-[9px] font-bold uppercase text-slate-400 mb-0.5">{DISPLAY_NAME[symbol]}</p>
                 <ShootTradeLogLine entry={entry} liveLtp={null} />
               </div>
             ))}
+            {shootAllCalls.length > HISTORY_PREVIEW_COUNT && <ShowMoreButton open={historyOpen} total={shootAllCalls.length} onClick={() => setHistoryOpen((o) => !o)} />}
           </div>
         </section>
       )}

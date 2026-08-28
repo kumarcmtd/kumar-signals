@@ -430,9 +430,12 @@ function CallDetailModal({ symbol, entry, onClose }: { symbol: TradableSymbol; e
   );
 }
 
+const HISTORY_PREVIEW_COUNT = 6;
+
 export function LevelCrossScan() {
   const scanner = useLevelCrossScanner();
   const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const levelCrossLogsOnly = useMemo(() => {
@@ -522,9 +525,15 @@ export function LevelCrossScan() {
             Every Level Cross call ever made, newest first -- exact time and price it was called, and once closed, exact time and price of whichever target/breakeven/stop rule actually closed it.
           </p>
           <div className="space-y-2">
-            {allCalls.map(({ symbol, entry }) => (
+            {(historyOpen ? allCalls : allCalls.slice(0, HISTORY_PREVIEW_COUNT)).map(({ symbol, entry }) => (
               <CallHistoryRow key={entry.id} symbol={symbol} entry={entry} onOpen={() => setDetail({ symbol, entry })} />
             ))}
+            {allCalls.length > HISTORY_PREVIEW_COUNT && (
+              <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-teal-700 py-1.5">
+                {historyOpen ? "Show less" : `Show all ${allCalls.length}`}
+                <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+              </button>
+            )}
           </div>
         </section>
       )}
