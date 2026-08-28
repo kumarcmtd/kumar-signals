@@ -69,6 +69,12 @@ export function ConfluenceCallCard({
   const biasColor = call.direction === "bullish" ? "#16A34A" : "#DC2626";
   const confColor = CONFIDENCE_COLOR(call.confidence);
 
+  // The single best buy price across the three engines. You're always LONG
+  // the premium here (a CE or a PE), so the cheapest confirmed entry is the
+  // best fill -- lowest of the three source entries. SL/targets are already
+  // the safest merge the engine built (highest stop, nearest target).
+  const bestBuy = Number(Math.min(...call.sources.map((s) => s.entry)).toFixed(2));
+
   return (
     <div className="rounded-3xl overflow-hidden shadow-lg" style={{ border: `2px solid ${confColor}` }}>
       <div className="px-4 pt-3.5 pb-3 text-white" style={{ background: "linear-gradient(135deg,#F59E0B,#EC4899 55%,#7C3AED)" }}>
@@ -116,6 +122,18 @@ export function ConfluenceCallCard({
           </span>
         </div>
 
+        <div className="mx-4 mt-3 grid grid-cols-3 gap-2">
+          <StatTile label="Best Buy Price" value={`₹${bestBuy}`} color="#2563EB" />
+          <StatTile label="Stop Loss" value={`₹${effStop}`} color="#DC2626" />
+          <StatTile label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#0EA5E9" />
+          <StatTile label="Target 1" value={`₹${call.suggestedTargets[0]}`} color="#16A34A" hit={displayEntry.targetsHit[0]} />
+          <StatTile label="Target 2" value={`₹${call.suggestedTargets[1]}`} color="#16A34A" hit={displayEntry.targetsHit[1]} />
+          <StatTile label="Target 3" value={`₹${call.suggestedTargets[2]}`} color="#16A34A" hit={displayEntry.targetsHit[2]} />
+        </div>
+        <p className="mx-4 mt-1.5 text-[10px] text-slate-400">
+          Best Buy is the cheapest of the three confirmed entries; Stop &amp; Targets are the safest merge across all three engines. Buy at or below Best Buy — never chase above it.
+        </p>
+
         <PriceScale entry={displayEntry} current={liveLtp} />
         <ProfitEstimate trade={displayEntry} current={liveLtp} lotSize={lotSize} />
         {rebound && <ReboundStrengthCard rebound={rebound} />}
@@ -135,6 +153,20 @@ export function ConfluenceCallCard({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, color, hit }: { label: string; value: string; color: string; hit?: boolean }) {
+  return (
+    <div className="rounded-xl px-2.5 py-2 border" style={{ background: hit ? `${color}12` : "var(--color-surface-soft)", borderColor: hit ? `${color}55` : "var(--color-border)" }}>
+      <p className="text-[9px] text-slate-400 flex items-center gap-0.5">
+        {hit ? "✓ " : ""}
+        {label}
+      </p>
+      <p className="text-xs font-bold" style={{ color }}>
+        {value}
+      </p>
     </div>
   );
 }
