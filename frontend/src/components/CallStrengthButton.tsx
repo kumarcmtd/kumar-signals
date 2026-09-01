@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Gauge, ChevronDown, Check, X } from "lucide-react";
+import { ChevronDown, Check, X } from "lucide-react";
 import type { Candle } from "../types";
-import { assessCallStrength, type CallStrengthContext, type CallStrengthTier } from "../utils/callStrength";
+import { assessCallStrength, strengthSignal, type CallStrengthContext, type CallStrengthTier } from "../utils/callStrength";
 
 const TIER_COLOR: Record<CallStrengthTier, string> = {
   strong: "#16A34A",
@@ -10,9 +10,27 @@ const TIER_COLOR: Record<CallStrengthTier, string> = {
   weak: "#DC2626",
 };
 
-// A tap-to-check "does this call still have potential?" button. Computed live
-// off the same real candles every time it's opened, so it always reflects the
-// market right now -- not a number frozen when the call was first raised.
+// The at-a-glance signal-bars glyph (like phone signal): four ascending bars,
+// the lit ones in the signal's colour, so the call's health reads instantly
+// without opening the panel.
+function SignalBars({ litBars, color }: { litBars: number; color: string }) {
+  const heights = [7, 10, 13, 16];
+  return (
+    <span className="inline-flex items-end gap-[2px]" style={{ height: 16 }} aria-hidden>
+      {heights.map((h, i) => (
+        <span
+          key={i}
+          style={{ width: 4, height: h, borderRadius: 1, background: i < litBars ? color : "var(--color-border)" }}
+        />
+      ))}
+    </span>
+  );
+}
+
+// A tap-to-check "does this call still have potential?" button, now with a
+// live signal-bars indicator shown right on the button. Both the indicator and
+// the expanded detail are computed off the same real candles every render, so
+// they always reflect the market right now -- not a number frozen at entry.
 export function CallStrengthButton({
   candles,
   direction,
@@ -25,18 +43,30 @@ export function CallStrengthButton({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const result = open ? assessCallStrength(candles, direction, ctx) : null;
+  const result = assessCallStrength(candles, direction, ctx);
+  const signal = result ? strengthSignal(result.score) : null;
 
   return (
     <div className={className}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-bold border"
-        style={{ background: "var(--color-surface-soft)", borderColor: "var(--color-border)", color: "var(--color-ink)" }}
+        className="w-full flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-bold border"
+        style={{ background: "var(--color-surface-soft)", borderColor: signal ? `${signal.color}55` : "var(--color-border)", color: "var(--color-ink)" }}
       >
-        <Gauge size={14} className="text-violet-600" />
-        Check Call Strength
-        <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        <span className="flex items-center gap-1.5">Check Call Strength</span>
+        <span className="flex items-center gap-1.5">
+          {signal ? (
+            <>
+              <SignalBars litBars={signal.litBars} color={signal.color} />
+              <span className="text-[11px] font-black" style={{ color: signal.color }}>
+                {signal.label}
+              </span>
+            </>
+          ) : (
+            <span className="text-[10px] text-[var(--color-muted)]">—</span>
+          )}
+          <ChevronDown size={13} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
       </button>
 
       {open && (

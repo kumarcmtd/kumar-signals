@@ -57,6 +57,25 @@ function tierFromScore(score: number): CallStrengthTier {
   return "weak";
 }
 
+// A single at-a-glance signal (like phone signal bars) so the trader reads the
+// call's health without opening the full panel. Six levels: three shades of
+// green (backs the call) and three of red (against it), each with a lit-bar
+// count out of 4 for the cell-signal look.
+export interface StrengthSignal {
+  label: string; // "Green ++", "Green +", "Green", "Red", "Red +", "Red ++"
+  color: string;
+  litBars: number; // 1-4
+}
+
+export function strengthSignal(score: number): StrengthSignal {
+  if (score >= 80) return { label: "Green ++", color: "#15803D", litBars: 4 };
+  if (score >= 66) return { label: "Green +", color: "#16A34A", litBars: 3 };
+  if (score >= 50) return { label: "Green", color: "#22C55E", litBars: 3 };
+  if (score >= 40) return { label: "Red", color: "#F97316", litBars: 2 };
+  if (score >= 25) return { label: "Red +", color: "#EF4444", litBars: 1 };
+  return { label: "Red ++", color: "#B91C1C", litBars: 1 };
+}
+
 // direction: the option's directional bet -- "bullish" for a CE, "bearish"
 // for a PE. Every factor is measured in the call's favour.
 export function assessCallStrength(candles: Candle[], direction: "bullish" | "bearish", ctx: CallStrengthContext): CallStrengthResult | null {

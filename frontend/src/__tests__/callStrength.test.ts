@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assessCallStrength } from "../utils/callStrength";
+import { assessCallStrength, strengthSignal } from "../utils/callStrength";
 import type { Candle } from "../types";
 
 // Build a candle series with a controllable per-bar drift so we can make the
@@ -63,6 +63,17 @@ test("premium sitting near the stop drags the score down vs sitting near target"
   const nearTarget = assessCallStrength(series(1.0), "bullish", ctxNow({ current: 225 }));
   assert.ok(nearStop && nearTarget);
   assert.ok(nearTarget!.score > nearStop!.score);
+});
+
+test("strengthSignal maps scores to the six green/red levels", () => {
+  assert.equal(strengthSignal(90).label, "Green ++");
+  assert.equal(strengthSignal(70).label, "Green +");
+  assert.equal(strengthSignal(55).label, "Green");
+  assert.equal(strengthSignal(44).label, "Red");
+  assert.equal(strengthSignal(30).label, "Red +");
+  assert.equal(strengthSignal(10).label, "Red ++");
+  // higher score never has fewer lit bars than a lower one
+  assert.ok(strengthSignal(90).litBars >= strengthSignal(10).litBars);
 });
 
 test("a call open for days adds a theta-decay caution reason", () => {
