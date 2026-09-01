@@ -10,6 +10,7 @@ import { PriceScale, ProfitEstimate, DetailRow, tickMarks, fmtWhen } from "../co
 import { GlobalMarketHours } from "../components/GlobalMarketHours";
 import { WhyTodayCard } from "../components/WhyTodayCard";
 import { CallStrengthButton } from "../components/CallStrengthButton";
+import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -175,6 +176,8 @@ function SymbolStrategyCard({ symbol }: { symbol: AiOwnSymbol }) {
             direction={latest.optSide === "CE" ? "bullish" : "bearish"}
             ctx={{ entry: latest.entry, stop: effStop, targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
           />
+
+          <ExpectedHoldBadge entries={tradeLog} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
 
           <div className="rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)" }}>
             <DetailRow label="Entry" value={`₹${latest.entry}`} />

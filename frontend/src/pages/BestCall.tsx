@@ -16,6 +16,7 @@ import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { CallStrengthButton } from "../components/CallStrengthButton";
+import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -554,12 +555,13 @@ function BestCallCard({
       </div>
 
       {!latest.closed && (
-        <div className="px-4 mt-2">
+        <div className="px-4 mt-2 space-y-2">
           <CallStrengthButton
             candles={data.underlyingCandles}
             direction={direction}
             ctx={{ entry: latest.entry, stop: effStop, targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
           />
+          <ExpectedHoldBadge entries={log} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
         </div>
       )}
 
