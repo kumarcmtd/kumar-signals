@@ -6,6 +6,7 @@ import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { checkReboundStrength } from "../utils/reboundStrength";
 import { computeTradeLight } from "../utils/tradeLight";
+import { CallStrengthButton } from "../components/CallStrengthButton";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -251,6 +252,14 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
 
         <PriceScale entry={latest} current={liveLtp} />
         <ProfitEstimate trade={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
+
+        {!latest.closed && (
+          <CallStrengthButton
+            candles={candles}
+            direction={direction}
+            ctx={{ entry: latest.entry, stop: effectiveStopFor(latest), targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
+          />
+        )}
 
         {displayReasons.length > 0 && (
           <div className="space-y-1.5">

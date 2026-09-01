@@ -7,6 +7,7 @@ import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE, type AiT
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
+import { CallStrengthButton } from "../components/CallStrengthButton";
 import { formatTipCard } from "../utils/tipFormat";
 import { calculatePotentialLeft } from "../utils/kimiPlaybook";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
@@ -348,6 +349,16 @@ function TwentyCandidateCard({
           {rebound && <ReboundStrengthCard rebound={rebound} />}
           <VolumeSupportCard volume={volumeSupport} />
         </>
+      )}
+
+      {openTrade && (
+        <div className="px-4 pt-3">
+          <CallStrengthButton
+            candles={candles}
+            direction={direction}
+            ctx={{ entry: openTrade.entry, stop: effectiveStopFor(openTrade), targets: openTrade.targets, targetsHit: openTrade.targetsHit, current: liveLtp, openedAt: openTrade.openedAt }}
+          />
+        </div>
       )}
 
       <div className="px-4 pb-4">

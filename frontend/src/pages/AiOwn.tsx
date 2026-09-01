@@ -9,6 +9,7 @@ import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, DetailRow, tickMarks, fmtWhen } from "../components/CallCardKit";
 import { GlobalMarketHours } from "../components/GlobalMarketHours";
 import { WhyTodayCard } from "../components/WhyTodayCard";
+import { CallStrengthButton } from "../components/CallStrengthButton";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -168,6 +169,12 @@ function SymbolStrategyCard({ symbol }: { symbol: AiOwnSymbol }) {
 
           <PriceScale entry={latest} current={liveLtp} />
           <ProfitEstimate trade={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
+
+          <CallStrengthButton
+            candles={scanner.candles}
+            direction={latest.optSide === "CE" ? "bullish" : "bearish"}
+            ctx={{ entry: latest.entry, stop: effStop, targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
+          />
 
           <div className="rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)" }}>
             <DetailRow label="Entry" value={`₹${latest.entry}`} />

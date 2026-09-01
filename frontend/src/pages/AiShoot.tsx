@@ -14,8 +14,9 @@ import { ConfluenceCallCard } from "../components/ConfluenceCallCard";
 import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
+import { CallStrengthButton } from "../components/CallStrengthButton";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
-import type { OptionsAnalytics } from "../types";
+import type { OptionsAnalytics, Candle } from "../types";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -138,7 +139,7 @@ function ShowMoreButton({ open, total, onClick }: { open: boolean; total: number
 
 const LOG_PREVIEW_COUNT = 3;
 
-function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScoreCandidate; tradeLogs: Record<string, TradeLogEntry[]>; options: OptionsAnalytics | undefined; keyPrefix: string }) {
+function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call: HitScoreCandidate; tradeLogs: Record<string, TradeLogEntry[]>; options: OptionsAnalytics | undefined; keyPrefix: string; candles: Candle[] }) {
   const [logOpen, setLogOpen] = useState(false);
   const bullish = call.analysis.bias === "bullish";
   const accent = bullish ? "#10B981" : "#EF4444";
@@ -189,6 +190,14 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix }: { call: HitScore
           <MiniStat label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#0EA5E9" />
         </div>
         {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="light" />}
+
+        {openTrade && (
+          <CallStrengthButton
+            candles={candles}
+            direction={bullish ? "bullish" : "bearish"}
+            ctx={{ entry: openTrade.entry, stop: effectiveStopFor(openTrade), targets: openTrade.targets, targetsHit: openTrade.targetsHit, current: liveLtp, openedAt: openTrade.openedAt }}
+          />
+        )}
 
         <div className="space-y-1.5">
           <p className="text-[10px] font-bold uppercase text-slate-400">Why this made the cut</p>
@@ -408,7 +417,14 @@ export function AiShoot() {
       ) : (
         <div className="space-y-3">
           {calls.map((call) => (
-            <ShootCallCard key={`${call.symbol}-${call.analysis.tf}`} call={call} tradeLogs={tradeLogs} options={board[call.symbol as TradableSymbol].options} keyPrefix={keyPrefix} />
+            <ShootCallCard
+              key={`${call.symbol}-${call.analysis.tf}`}
+              call={call}
+              tradeLogs={tradeLogs}
+              options={board[call.symbol as TradableSymbol].options}
+              keyPrefix={keyPrefix}
+              candles={board[call.symbol as TradableSymbol].entries.find((e) => e.tf === call.analysis.tf)?.candles ?? []}
+            />
           ))}
         </div>
       )}

@@ -6,6 +6,7 @@ import { checkVolumeSupport } from "../utils/volumeSupport";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "./EntryTimingBadge";
 import { PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard } from "./CallCardKit";
+import { CallStrengthButton } from "./CallStrengthButton";
 import type { ConfluenceCall } from "../utils/confluenceEngine";
 import type { TradeLogEntry } from "../store/appStore";
 import type { Candle, OptionsAnalytics } from "../types";
@@ -136,6 +137,13 @@ export function ConfluenceCallCard({
 
         <PriceScale entry={displayEntry} current={liveLtp} />
         <ProfitEstimate trade={displayEntry} current={liveLtp} lotSize={lotSize} />
+        <div className="mx-4 mt-2">
+          <CallStrengthButton
+            candles={candles}
+            direction={call.direction}
+            ctx={{ entry: displayEntry.entry, stop: effStop, targets: displayEntry.targets, targetsHit: displayEntry.targetsHit, current: liveLtp, openedAt: displayEntry.openedAt }}
+          />
+        </div>
         {rebound && <ReboundStrengthCard rebound={rebound} />}
         <VolumeSupportCard volume={volumeSupport} />
 

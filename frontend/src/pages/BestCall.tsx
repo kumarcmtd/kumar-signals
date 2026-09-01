@@ -15,6 +15,7 @@ import { checkVolumeSupport } from "../utils/volumeSupport";
 import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
+import { CallStrengthButton } from "../components/CallStrengthButton";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -551,6 +552,16 @@ function BestCallCard({
       <div className="px-4 mt-2">
         <NewsImpactCard symbol={symbol} />
       </div>
+
+      {!latest.closed && (
+        <div className="px-4 mt-2">
+          <CallStrengthButton
+            candles={data.underlyingCandles}
+            direction={direction}
+            ctx={{ entry: latest.entry, stop: effStop, targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
+          />
+        </div>
+      )}
 
       <div className="px-4 pt-3 pb-4">
         <div className="flex items-center justify-between">
