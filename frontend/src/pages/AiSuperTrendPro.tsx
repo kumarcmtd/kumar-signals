@@ -271,10 +271,10 @@ export function AiSuperTrendPro() {
           <SectionCard title="Risk &amp; Volatility">
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col items-center">
-                <CircularGauge value={RISK_SCORE[snapshot.riskLevel]} size={92} label="Risk" sublabel={snapshot.riskLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" />
+                <CircularGauge value={RISK_SCORE[snapshot.riskLevel]} size={92} label="Risk" sublabel={snapshot.riskLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" invert />
               </div>
               <div className="flex flex-col items-center">
-                <CircularGauge value={VOL_SCORE[snapshot.volatilityLevel]} size={92} label="Volatility" sublabel={snapshot.volatilityLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" />
+                <CircularGauge value={VOL_SCORE[snapshot.volatilityLevel]} size={92} label="Volatility" sublabel={snapshot.volatilityLevel} trackColor="var(--color-border)" labelColor="var(--color-muted)" invert />
               </div>
             </div>
           </SectionCard>

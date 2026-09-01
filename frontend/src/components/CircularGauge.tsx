@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 
-function gaugeColor(score: number): string {
+// Default polarity: a HIGH score is good (green), e.g. confidence/quality.
+// invert = true flips it for metrics where a HIGH score is BAD -- risk and
+// volatility -- so 95 Very High reads red, not a reassuring green.
+function gaugeColor(score: number, invert: boolean): string {
+  if (invert) {
+    if (score >= 70) return "#FF4D4F"; // high risk -> red
+    if (score >= 45) return "#FFC107"; // medium -> amber
+    return "#00E676"; // low risk -> green
+  }
   if (score >= 85) return "#00E676";
   if (score >= 65) return "#00C2FF";
   if (score >= 45) return "#FFC107";
@@ -18,6 +26,7 @@ export function CircularGauge({
   suffix = "",
   trackColor = "rgba(255,255,255,.08)",
   labelColor = "#9AA4B2",
+  invert = false,
 }: {
   value: number;
   size?: number;
@@ -26,6 +35,7 @@ export function CircularGauge({
   suffix?: string;
   trackColor?: string;
   labelColor?: string;
+  invert?: boolean;
 }) {
   const [animated, setAnimated] = useState(0);
   const target = Math.max(0, Math.min(100, value));
@@ -49,7 +59,7 @@ export function CircularGauge({
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - animated / 100);
-  const color = gaugeColor(target);
+  const color = gaugeColor(target, invert);
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
