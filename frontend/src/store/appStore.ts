@@ -115,6 +115,12 @@ interface AppState {
   // a no-op if that key's last entry is already closed, so it can't
   // resurrect or overwrite real history.
   forceCloseTradeLog: (key: string) => void;
+  // Bulk-closes every still-open call across ALL pages that was opened on a
+  // PREVIOUS IST day (a stale "runner" left over from yesterday or earlier).
+  // Books each at its entry (status closed_manual -> no fabricated P&L), the
+  // same honest way forceCloseTradeLog does. Returns how many it cleared so
+  // the caller can confirm. Never touches a call opened today.
+  clearStaleTradeLogs: () => number;
 
   alerts: AlertEntry[];
   addAlerts: (entries: AlertEntry[]) => void;
@@ -133,9 +139,16 @@ interface AppState {
   recordVerifyProSnapshot: (id: string, snapshot: VerifyProSnapshot) => void;
 }
 
+// Midnight of the current calendar day in IST, as an epoch ms. A call whose
+// openedAt is before this was raised on a previous IST trading day.
+function istDayStartMs(): number {
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+  return new Date(`${ymd}T00:00:00+05:30`).getTime();
+}
+
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       selectedInstrument: "CRUDEOIL",
       setSelectedInstrument: (symbol) => set({ selectedInstrument: symbol }),
 
@@ -156,6 +169,23 @@ export const useAppStore = create<AppState>()(
           const closed: TradeLogEntry = { ...last, closed: true, closedAt: Date.now(), status: "closed_manual" };
           return { tradeLogs: { ...s.tradeLogs, [key]: [...history.slice(0, -1), closed] } };
         }),
+      clearStaleTradeLogs: () => {
+        const dayStart = istDayStartMs();
+        const s = get();
+        const next: Record<string, TradeLogEntry[]> = {};
+        let cleared = 0;
+        for (const [k, history] of Object.entries(s.tradeLogs)) {
+          const last = history[history.length - 1];
+          if (last && !last.closed && last.openedAt < dayStart) {
+            next[k] = [...history.slice(0, -1), { ...last, closed: true, closedAt: Date.now(), status: "closed_manual" }];
+            cleared++;
+          } else {
+            next[k] = history;
+          }
+        }
+        if (cleared > 0) set({ tradeLogs: next });
+        return cleared;
+      },
 
       alerts: [],
       addAlerts: (entries) =>
