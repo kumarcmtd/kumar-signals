@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers, Eye, ChevronDown } from "lucide-react";
+import { Rocket, TrendingUp, TrendingDown, Sparkles, Target, ShieldCheck, Layers, Eye, ChevronDown, Trash2 } from "lucide-react";
 import { useMarketStatus, usePortfolio } from "../api/hooks";
 import { computePortfolioSummary } from "../utils/portfolioStats";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
@@ -276,6 +276,70 @@ function MiniStat({ label, value, color }: { label: string; value: string; color
 }
 
 const HISTORY_PREVIEW_COUNT = 6;
+const CLEAR_STALE_PASSWORD = "SHANVI";
+
+function istDayStartMs(): number {
+  const ymd = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  return new Date(`${ymd}T00:00:00+05:30`).getTime();
+}
+
+// One password-gated button that closes every still-running call left over
+// from an earlier day, across ALL pages at once. Each is booked at its entry
+// (no fake P&L). SHANVI is a soft accidental-tap guard, same as Force Stop.
+function ClearStaleCallsButton() {
+  const tradeLogs = useAppStore((s) => s.tradeLogs);
+  const clearStaleTradeLogs = useAppStore((s) => s.clearStaleTradeLogs);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const dayStart = istDayStartMs();
+  const staleCount = Object.values(tradeLogs).filter((h) => {
+    const last = h[h.length - 1];
+    return last && !last.closed && last.openedAt < dayStart;
+  }).length;
+
+  const handleClear = () => {
+    if (staleCount === 0) {
+      setStatus("No leftover calls from earlier days — everything running is from today.");
+      return;
+    }
+    const pw = window.prompt(`Enter password to clear ${staleCount} still-running call${staleCount > 1 ? "s" : ""} from earlier days:`);
+    if (pw === null) return;
+    if (pw !== CLEAR_STALE_PASSWORD) {
+      setStatus("Incorrect password — nothing was cleared.");
+      return;
+    }
+    const cleared = clearStaleTradeLogs();
+    setStatus(cleared > 0 ? `Cleared ${cleared} leftover call${cleared > 1 ? "s" : ""} from earlier days. Today's calls are untouched.` : "Nothing to clear.");
+  };
+
+  return (
+    <section className="rounded-3xl bg-white shadow-md p-4">
+      <p className="text-sm font-bold flex items-center gap-2">
+        <Trash2 size={16} className="text-rose-500" /> Clear old running calls
+      </p>
+      <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+        Closes every call still marked "running" that was opened on an earlier day, across every page at once. Today's live calls are never touched — each is booked at its entry, so no fake profit or loss.
+      </p>
+      <p className="text-[12px] mt-2">
+        {staleCount > 0 ? (
+          <span className="font-bold text-rose-600">
+            {staleCount} leftover call{staleCount > 1 ? "s" : ""} from earlier days
+          </span>
+        ) : (
+          <span className="text-slate-400">No leftover calls right now</span>
+        )}
+      </p>
+      <button
+        onClick={handleClear}
+        className="mt-2.5 w-full rounded-xl py-2.5 text-sm font-bold text-white"
+        style={{ background: staleCount > 0 ? "linear-gradient(135deg,#F43F5E,#DC2626)" : "#94A3B8" }}
+      >
+        Clear {staleCount > 0 ? staleCount : ""} Old Running Call{staleCount === 1 ? "" : "s"}
+      </button>
+      {status && <p className="text-[11px] mt-2 text-slate-500">{status}</p>}
+    </section>
+  );
+}
 
 export function AiShoot() {
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -401,6 +465,8 @@ export function AiShoot() {
         <VolatilityMeter symbol="CRUDEOIL" />
         <VolatilityMeter symbol="NATURALGAS" />
       </div>
+
+      <ClearStaleCallsButton />
 
       {anyLiveDataUnavailable && (
         <div className="rounded-2xl bg-white border border-rose-200 p-4 text-center shadow-sm">
