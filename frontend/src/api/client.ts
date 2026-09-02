@@ -1,5 +1,13 @@
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, ExpiryAlert } from "../types";
 import type { WhyCommodity } from "../utils/whyTodaySummary";
+import type { EiaScoreResult } from "../utils/newsScoring";
+
+export interface EnergyDataResponse {
+  available: boolean;
+  crude: EiaScoreResult | null;
+  ngStorage: EiaScoreResult | null;
+  error?: string;
+}
 
 export interface WhyTodayResponse {
   crude: WhyCommodity;
@@ -47,6 +55,7 @@ export const api = {
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   expiryAlerts: () => getJSON<{ alerts: ExpiryAlert[] }>("/expiry-alerts"),
   whyToday: () => getJSON<WhyTodayResponse>("/why-today"),
+  energy: () => getJSON<EnergyDataResponse>("/energy"),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),

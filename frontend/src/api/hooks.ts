@@ -131,6 +131,17 @@ export function useWhyToday() {
   });
 }
 
+// EIA weekly crude inventory / NG storage -- the number itself plus a
+// bullish/bearish read. Updates on the worker's ~8-min server cache; a
+// 5-minute client refetch is plenty (it only changes once a week on release).
+export function useEnergyData() {
+  return useQuery({
+    queryKey: ["energy-data"],
+    queryFn: api.energy,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
 export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],
