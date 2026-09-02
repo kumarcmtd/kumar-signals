@@ -101,6 +101,9 @@ export function ConfluenceCallCard({
               <Bias size={16} style={{ color: biasColor }} />
               {(DISPLAY_NAME[call.symbol] ?? call.symbol).toUpperCase()} {call.primary.strike} {call.optSide}
             </p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              Called {new Date(displayEntry.openedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })} at ₹{displayEntry.entry}
+            </p>
             {!call.sameStrike && <p className="text-[10px] text-slate-400">Sources differ slightly on strike -- SL/targets below are the safest merge across all of them.</p>}
           </div>
           <div className="text-right">
