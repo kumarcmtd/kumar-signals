@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Only one deploy per branch at a time; a newer push cancels an older,
+# still-running deploy (e.g. one stuck on a slow npm install) instead of
+# leaving both to run.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -13,19 +20,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          # Cache the npm downloads so a degraded registry can't stall the
+          # install once the cache is warm.
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
       # Install frontend deps FIRST: the worker's type graph reaches a couple
       # of shared frontend modules (e.g. the trade-log stats/types), so the
       # root worker typecheck needs frontend/node_modules present to resolve
       # them. Installing here also serves the test + build steps below.
+      #
+      # npm's registry occasionally stalls (a socket that hangs without ever
+      # erroring, so npm's own fetch-retries never trigger). Wrap each install
+      # in a hard timeout and retry up to 3x: a hung fetch is killed at 4
+      # minutes and restarted on a fresh connection instead of hanging the
+      # whole job for 15+ minutes.
       - name: Install frontend dependencies
-        run: cd frontend && npm ci
+        run: |
+          cd frontend
+          for i in 1 2 3; do
+            timeout 240 npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000 && break
+            echo "::warning::frontend npm ci attempt $i stalled/failed — retrying"
+            sleep 5
+          done
       # Gate the deploy on the worker typecheck and the engine test suite. A
       # failure in either fails the job, so a bug like the original impossible
       # reward:risk gate (which shipped silently and blocked every call since
       # launch) can never reach production undetected again.
       - name: Worker typecheck
         run: |
-          npm ci
+          for i in 1 2 3; do
+            timeout 240 npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000 && break
+            echo "::warning::root npm ci attempt $i stalled/failed — retrying"
+            sleep 5
+          done
           npm run typecheck
       - name: Frontend tests + build
         run: |
