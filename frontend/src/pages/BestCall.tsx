@@ -17,6 +17,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -123,6 +124,8 @@ export function BestCall() {
       </div>
 
       <ExpiryAlertBanner />
+
+      <LevelProximityWarning />
 
       <div className="grid grid-cols-2 gap-2">
         <VolatilityMeter symbol="CRUDEOIL" />

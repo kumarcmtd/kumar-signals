@@ -8,6 +8,7 @@ import { checkReboundStrength } from "../utils/reboundStrength";
 import { computeTradeLight } from "../utils/tradeLight";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -486,6 +487,8 @@ export function LevelCrossScan() {
       </div>
 
       <ExpiryAlertBanner />
+
+      <LevelProximityWarning />
 
       <div className="grid grid-cols-2 gap-2">
         <VolatilityMeter symbol="CRUDEOIL" />

@@ -9,6 +9,7 @@ import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { formatTipCard } from "../utils/tipFormat";
 import { calculatePotentialLeft } from "../utils/kimiPlaybook";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
@@ -712,6 +713,8 @@ export function AiTwentyTwenty() {
       </div>
 
       <ExpiryAlertBanner />
+
+      <LevelProximityWarning />
 
       <div className="grid grid-cols-2 gap-2">
         <VolatilityMeter symbol="CRUDEOIL" />

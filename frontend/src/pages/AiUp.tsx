@@ -10,6 +10,7 @@ import { VolatilityMeter } from "../components/VolatilityMeter";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
 const SYMBOLS: AiUpSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -187,6 +188,8 @@ export function AiUp() {
           then catches the snap-back, both ways. No turn, no trade.
         </p>
       </section>
+
+      <LevelProximityWarning />
 
       {SYMBOLS.map((s) => (
         <SymbolReversalCard key={s} symbol={s} />
