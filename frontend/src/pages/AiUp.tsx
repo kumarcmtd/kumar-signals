@@ -5,7 +5,7 @@ import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
-import { PriceScale, ProfitEstimate, DetailRow, tickMarks, fmtWhen } from "../components/CallCardKit";
+import { PriceScale, ProfitEstimate, fmtWhen } from "../components/CallCardKit";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { CallStrengthButton } from "../components/CallStrengthButton";
@@ -25,6 +25,21 @@ function StatTile({ label, value, color }: { label: string; value: string; color
         {value}
       </p>
       <p className="text-[10px] text-slate-400 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+// A colourful entry/stop/target tile. Targets light up green with a ✓ once hit.
+function LevelTile({ label, value, color, hit }: { label: string; value: string; color: string; hit?: boolean }) {
+  return (
+    <div className="rounded-xl px-2.5 py-2 border" style={{ background: hit ? `${color}18` : `${color}0A`, borderColor: `${color}44` }}>
+      <p className="text-[9px] font-bold uppercase tracking-wide flex items-center gap-0.5" style={{ color }}>
+        {hit ? "✓ " : ""}
+        {label}
+      </p>
+      <p className="text-sm font-black tabular-nums mt-0.5" style={{ color }}>
+        {value}
+      </p>
     </div>
   );
 }
@@ -105,10 +120,13 @@ function SymbolReversalCard({ symbol }: { symbol: AiUpSymbol }) {
           <ExpectedHoldBadge entries={tradeLog} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
           <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
 
-          <div className="rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)" }}>
-            <DetailRow label="Entry" value={`₹${latest.entry}`} />
-            <DetailRow label="Targets" value={latest.targets.map((t, i) => `T${i + 1} ₹${t} ${tickMarks(latest.targetTouches?.[i] ?? 0)}`).join("  ")} />
-            <DetailRow label="Stop (effective)" value={`₹${effStop}`} valueColor="#DC2626" />
+          <div className="grid grid-cols-3 gap-2">
+            <LevelTile label="Entry" value={`₹${latest.entry}`} color="#2563EB" />
+            <LevelTile label="Stop" value={`₹${effStop}`} color="#DC2626" />
+            <LevelTile label="Live" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#0EA5E9" />
+            <LevelTile label="Target 1" value={`₹${latest.targets[0]}`} color="#16A34A" hit={latest.targetsHit[0]} />
+            <LevelTile label="Target 2" value={`₹${latest.targets[1]}`} color="#16A34A" hit={latest.targetsHit[1]} />
+            <LevelTile label="Target 3" value={`₹${latest.targets[2]}`} color="#16A34A" hit={latest.targetsHit[2]} />
           </div>
 
           {latest.meta?.reasons && latest.meta.reasons.length > 0 && (
