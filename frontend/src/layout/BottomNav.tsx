@@ -27,13 +27,13 @@ const PRIMARY: NavItem[] = [
   { to: "/best-call", label: "Best Call", icon: Crosshair },
   { to: "/ai-20-20", label: "Ai20-20", icon: Target },
   { to: "/level-cross-scan", label: "Level Cross", icon: Waypoints },
+  { to: "/ai-up", label: "AI-Up", icon: Repeat },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
-      { to: "/ai-up", label: "AI-Up", icon: Repeat },
       { to: "/ai-own", label: "AI Own", icon: Sparkles },
       { to: "/ai-verify-pro", label: "Verify Pro", icon: BadgeCheck },
       { to: "/news-trade-ai", label: "News AI", icon: Radio },
