@@ -17,6 +17,7 @@ import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -201,6 +202,7 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
               ctx={{ entry: openTrade.entry, stop: effectiveStopFor(openTrade), targets: openTrade.targets, targetsHit: openTrade.targetsHit, current: liveLtp, openedAt: openTrade.openedAt }}
             />
             <ExpectedHoldBadge entries={log} open={{ entry: openTrade.entry, current: liveLtp, openedAt: openTrade.openedAt, nextTarget: heroNextTarget ?? openTrade.targets[0] }} />
+            <DepthPressureBadge symbol={symbolKey} optSide={openTrade.optSide} />
           </>
         )}
 

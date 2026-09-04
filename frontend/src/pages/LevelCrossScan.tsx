@@ -9,6 +9,7 @@ import { computeTradeLight } from "../utils/tradeLight";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
+import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -263,6 +264,7 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
               ctx={{ entry: latest.entry, stop: effectiveStopFor(latest), targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }}
             />
             <ExpectedHoldBadge entries={log} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget: nextTarget ?? latest.targets[0] }} />
+            <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
           </>
         )}
 

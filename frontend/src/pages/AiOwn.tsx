@@ -12,6 +12,7 @@ import { WhyTodayCard } from "../components/WhyTodayCard";
 import { EiaInventoryCard } from "../components/EiaInventoryCard";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -179,6 +180,8 @@ function SymbolStrategyCard({ symbol }: { symbol: AiOwnSymbol }) {
           />
 
           <ExpectedHoldBadge entries={tradeLog} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
+
+          <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
 
           <div className="rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)" }}>
             <DetailRow label="Entry" value={`₹${latest.entry}`} />
