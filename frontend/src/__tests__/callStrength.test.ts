@@ -65,14 +65,17 @@ test("premium sitting near the stop drags the score down vs sitting near target"
   assert.ok(nearTarget!.score > nearStop!.score);
 });
 
-test("strengthSignal maps scores to the six green/red levels", () => {
+test("strengthSignal: green only at 70+, yellow in the middle, red when weak", () => {
   assert.equal(strengthSignal(90).label, "Green ++");
-  assert.equal(strengthSignal(70).label, "Green +");
-  assert.equal(strengthSignal(55).label, "Green");
-  assert.equal(strengthSignal(44).label, "Red");
+  assert.equal(strengthSignal(72).label, "Green +");
+  assert.equal(strengthSignal(69).label, "Yellow +"); // just under 70 is NOT green
+  assert.equal(strengthSignal(50).label, "Yellow"); // the screenshot case
   assert.equal(strengthSignal(30).label, "Red +");
   assert.equal(strengthSignal(10).label, "Red ++");
-  // higher score never has fewer lit bars than a lower one
+  // nothing below 70 is ever green
+  for (const s of [69, 60, 50, 40, 30, 10]) {
+    assert.ok(!strengthSignal(s).label.startsWith("Green"), `${s} should not be green`);
+  }
   assert.ok(strengthSignal(90).litBars >= strengthSignal(10).litBars);
 });
 

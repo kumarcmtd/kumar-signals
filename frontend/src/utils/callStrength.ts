@@ -51,7 +51,7 @@ const TIER_HEADLINE: Record<CallStrengthTier, string> = {
 };
 
 function tierFromScore(score: number): CallStrengthTier {
-  if (score >= 68) return "strong";
+  if (score >= 70) return "strong"; // green only at 70+
   if (score >= 50) return "holding";
   if (score >= 35) return "weakening";
   return "weak";
@@ -68,11 +68,13 @@ export interface StrengthSignal {
 }
 
 export function strengthSignal(score: number): StrengthSignal {
-  if (score >= 80) return { label: "Green ++", color: "#15803D", litBars: 4 };
-  if (score >= 66) return { label: "Green +", color: "#16A34A", litBars: 3 };
-  if (score >= 50) return { label: "Green", color: "#22C55E", litBars: 3 };
-  if (score >= 40) return { label: "Red", color: "#F97316", litBars: 2 };
-  if (score >= 25) return { label: "Red +", color: "#EF4444", litBars: 1 };
+  // Green only once the score clears 70; the 40-69 middle is yellow (hold and
+  // watch, not a go), and below 40 is red (turning against the call).
+  if (score >= 85) return { label: "Green ++", color: "#15803D", litBars: 4 };
+  if (score >= 70) return { label: "Green +", color: "#16A34A", litBars: 4 };
+  if (score >= 55) return { label: "Yellow +", color: "#CA8A04", litBars: 3 };
+  if (score >= 40) return { label: "Yellow", color: "#EAB308", litBars: 2 };
+  if (score >= 25) return { label: "Red +", color: "#EF4444", litBars: 2 };
   return { label: "Red ++", color: "#B91C1C", litBars: 1 };
 }
 
