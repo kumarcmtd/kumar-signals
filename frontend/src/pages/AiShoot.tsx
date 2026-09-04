@@ -13,6 +13,7 @@ import { VolatilityMeter } from "../components/VolatilityMeter";
 import { ConfluenceCallCard } from "../components/ConfluenceCallCard";
 import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
+import { TradeConsensusLights } from "../components/TradeConsensusLights";
 import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import { CallStrengthButton } from "../components/CallStrengthButton";
@@ -451,6 +452,8 @@ export function AiShoot() {
           {market ? (market.isOpen ? "Market Open" : "Market Closed") : "…"}
         </p>
       </section>
+
+      <TradeConsensusLights />
 
       <LevelProximityWarning />
 

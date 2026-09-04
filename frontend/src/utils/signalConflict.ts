@@ -75,6 +75,23 @@ function dedupeByPage(sides: ConflictSide[]): ConflictSide[] {
   return Array.from(byPage.values()).sort((a, b) => a.openedAt - b.openedAt);
 }
 
+// Every page's currently-open CE and PE legs for one symbol, de-duped to one
+// entry per page. Used by the top-of-AI-Shoot consensus light to see which
+// way the whole app is leaning on a symbol right now.
+export function liveSidesForSymbol(tradeLogs: Record<string, TradeLogEntry[]>, symbol: TradableSymbol): { ce: ConflictSide[]; pe: ConflictSide[] } {
+  const ce: ConflictSide[] = [];
+  const pe: ConflictSide[] = [];
+  for (const [key, entries] of Object.entries(tradeLogs)) {
+    if (!key.includes(symbol)) continue;
+    const open = lastOpen(entries);
+    if (!open) continue;
+    const side: ConflictSide = { page: pageLabelForKey(key), strike: open.strike, entry: open.entry, openedAt: open.openedAt };
+    if (open.optSide === "CE") ce.push(side);
+    else if (open.optSide === "PE") pe.push(side);
+  }
+  return { ce: dedupeByPage(ce), pe: dedupeByPage(pe) };
+}
+
 export function detectSignalConflicts(tradeLogs: Record<string, TradeLogEntry[]>): SignalConflict[] {
   const out: SignalConflict[] = [];
 
