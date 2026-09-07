@@ -19,6 +19,7 @@ import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/a
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
+import { ProfitMilestones } from "../components/ProfitMilestones";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -204,6 +205,7 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
             />
             <ExpectedHoldBadge entries={log} open={{ entry: openTrade.entry, current: liveLtp, openedAt: openTrade.openedAt, nextTarget: heroNextTarget ?? openTrade.targets[0] }} />
             <DepthPressureBadge symbol={symbolKey} optSide={openTrade.optSide} />
+            <ProfitMilestones entry={openTrade} current={liveLtp} lotSize={LOT_SIZE[symbolKey]} />
           </>
         )}
 

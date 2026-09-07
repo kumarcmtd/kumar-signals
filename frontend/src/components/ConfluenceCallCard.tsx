@@ -9,6 +9,7 @@ import { PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard } fr
 import { CallStrengthButton } from "./CallStrengthButton";
 import { ExpectedHoldBadge } from "./ExpectedHoldBadge";
 import { DepthPressureBadge } from "./DepthPressureBadge";
+import { ProfitMilestones } from "./ProfitMilestones";
 import type { ConfluenceCall } from "../utils/confluenceEngine";
 import type { TradeLogEntry } from "../store/appStore";
 import type { Candle, OptionsAnalytics } from "../types";
@@ -153,6 +154,7 @@ export function ConfluenceCallCard({
             open={{ entry: displayEntry.entry, current: liveLtp, openedAt: displayEntry.openedAt, nextTarget: displayEntry.targetsHit[0] ? (displayEntry.targetsHit[1] ? displayEntry.targets[2] : displayEntry.targets[1]) : displayEntry.targets[0] }}
           />
           <DepthPressureBadge symbol={call.symbol} optSide={call.optSide} />
+          <ProfitMilestones entry={displayEntry} current={liveLtp} lotSize={lotSize} />
         </div>
         {rebound && <ReboundStrengthCard rebound={rebound} />}
         <VolumeSupportCard volume={volumeSupport} />

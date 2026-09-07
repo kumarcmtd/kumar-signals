@@ -12,6 +12,7 @@ import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
+import { ProfitMilestones } from "../components/ProfitMilestones";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
 const SYMBOLS: AiUpSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -119,6 +120,7 @@ function SymbolReversalCard({ symbol }: { symbol: AiUpSymbol }) {
           <CallStrengthButton candles={candles} direction={dir} ctx={{ entry: latest.entry, stop: effStop, targets: latest.targets, targetsHit: latest.targetsHit, current: liveLtp, openedAt: latest.openedAt }} />
           <ExpectedHoldBadge entries={tradeLog} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
           <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
+          <ProfitMilestones entry={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
 
           <div className="grid grid-cols-3 gap-2">
             <LevelTile label="Entry" value={`₹${latest.entry}`} color="#2563EB" />
