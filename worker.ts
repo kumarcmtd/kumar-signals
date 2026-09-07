@@ -1318,14 +1318,39 @@ interface NewsFetchResult {
 // zero out the entire feed, which is exactly what production showed --
 // every eia.gov feed failing together), so oilprice.com is included as an
 // independent Tier-3 fallback source.
+// AI Flash's whole premise is that a headline reaches the trader while the
+// move is still tradable, and the four EIA feeds below -- authoritative as
+// they are -- publish on a government cadence (daily/weekly), so on their own
+// they are structurally incapable of being fast. The fast market wires below
+// are what actually make an intraday flash feed possible; EIA remains the
+// Tier-1 anchor for accuracy. Every feed is independently optional: a source
+// that 404s, rate-limits, or changes its URL contributes zero articles and
+// reports its own failure in sourceStatus (surfaced on the AI Flash page), so
+// a dead feed degrades the page rather than breaking it.
 const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
+  // Tier 1 -- official/government. Slow but authoritative.
   { url: "https://www.eia.gov/rss/todayinenergy.xml", source: "EIA - Today in Energy" },
   { url: "https://www.eia.gov/rss/petroleum.xml", source: "EIA - This Week in Petroleum" },
   { url: "https://www.eia.gov/rss/natural_gas.xml", source: "EIA - Natural Gas Weekly" },
   { url: "https://www.eia.gov/rss/press_rss.xml", source: "EIA - Press Releases" },
+  // Tier 2 -- major financial wires, the fast movers.
+  { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=CL%3DF&region=US&lang=en-US", source: "Yahoo Finance - WTI Crude" },
+  { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NG%3DF&region=US&lang=en-US", source: "Yahoo Finance - Natural Gas" },
+  { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BZ%3DF&region=US&lang=en-US", source: "Yahoo Finance - Brent Crude" },
+  { url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836134", source: "CNBC - Energy" },
+  { url: "https://feeds.marketwatch.com/marketwatch/marketpulse/", source: "MarketWatch - Market Pulse" },
+  { url: "https://www.investing.com/rss/commodities_Oil.rss", source: "Investing.com - Crude Oil" },
+  { url: "https://www.investing.com/rss/commodities_Gas.rss", source: "Investing.com - Natural Gas" },
+  { url: "https://www.investing.com/rss/news_11.rss", source: "Investing.com - Commodities" },
+  // Tier 3 -- energy trade press. Often first on outages/pipeline/LNG news.
   { url: "https://oilprice.com/rss/main", source: "OilPrice.com" },
+  { url: "https://www.rigzone.com/news/rss/rigzone_latest.aspx", source: "Rigzone" },
+  { url: "https://www.naturalgasintel.com/feed/", source: "Natural Gas Intelligence" },
+  { url: "https://www.hellenicshippingnews.com/feed/", source: "Hellenic Shipping News" },
 ];
-const RSS_FETCH_TIMEOUT_MS = 8000;
+// Tightened from 8s: with a wider feed list these run in parallel, so the
+// slowest single feed sets the floor on how fast a flash can surface.
+const RSS_FETCH_TIMEOUT_MS = 6000;
 
 function xmlUnescape(s: string): string {
   return s
@@ -1412,8 +1437,13 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
   }
 }
 
-const NEWS_CACHE_TTL_SECONDS = 90;
-const NEWS_CACHE_KV_KEY = "news:combined:v2";
+// 60s is Cloudflare KV's hard minimum for expirationTtl -- anything lower is
+// rejected outright -- so this is as fresh as a KV-cached feed can legally be,
+// which is what AI Flash wants. The key is versioned because the feed list
+// above changed: a v2 payload cached from the old five-source list would
+// otherwise keep serving until it aged out.
+const NEWS_CACHE_TTL_SECONDS = 60;
+const NEWS_CACHE_KV_KEY = "news:combined:v3";
 
 async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
@@ -2631,10 +2661,17 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (url.pathname === "/api/news") {
           const symbolParam = url.searchParams.get("symbol");
           const news = await fetchEnergyNews(env);
-          if (!symbolParam) return json(news);
+          // fetchedAt is the time this response was assembled, which -- because
+          // fetchEnergyNews may return a KV hit up to NEWS_CACHE_TTL_SECONDS
+          // old -- is an upper bound on freshness, not proof of it. AI Flash
+          // labels it as "checked", and every article carries its own real
+          // publishedAt for the age shown on the item itself.
+          const fetchedAt = new Date().toISOString();
+          if (!symbolParam) return json({ ...news, fetchedAt });
           const marketKey: AffectedMarket = symbolParam.toUpperCase() === "NG" ? "NG" : symbolParam.toUpperCase() === "CRUDE" ? "CRUDE" : "BOTH";
           return json({
             ...news,
+            fetchedAt,
             articles: news.articles.filter((a) => a.affectedMarket === marketKey || a.affectedMarket === "BOTH"),
             events: news.events.filter((e) => e.affectedMarket === marketKey || e.affectedMarket === "BOTH"),
           });

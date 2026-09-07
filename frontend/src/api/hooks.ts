@@ -110,6 +110,18 @@ export function useNewsTrade() {
   });
 }
 
+// AI Flash's feed. The server caches news for 60s (Cloudflare KV's hard
+// minimum), so polling faster than that would only re-serve the same cached
+// payload -- 30s keeps the on-screen "X min ago" ages ticking and picks up a
+// new server cache generation within seconds of it existing.
+export function useNewsFeed() {
+  return useQuery({
+    queryKey: ["news-feed"],
+    queryFn: api.newsFeed,
+    refetchInterval: 30_000,
+  });
+}
+
 // Expiry doesn't change intraday, so this doesn't need News/Depth's fast
 // cadence -- a 5-minute refetch (matching the worker's own Cron interval)
 // is plenty to catch the daysLeft boundary rolling over.
