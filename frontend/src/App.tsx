@@ -30,6 +30,7 @@ import { LevelCrossScan } from "./pages/LevelCrossScan";
 import { AiOwn } from "./pages/AiOwn";
 import { AiUp } from "./pages/AiUp";
 import { AiFlash } from "./pages/AiFlash";
+import { AiEdge } from "./pages/AiEdge";
 
 function App() {
   return (
@@ -66,6 +67,7 @@ function App() {
           <Route path="/ai-own" element={<AiOwn />} />
           <Route path="/ai-up" element={<AiUp />} />
           <Route path="/ai-flash" element={<AiFlash />} />
+          <Route path="/ai-edge" element={<AiEdge />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>
