@@ -31,9 +31,20 @@ export type SourceTier = 1 | 2 | 3 | 4;
 // human-readable source name (RSS items often carry a friendly feed name
 // like "EIA - Today in Energy" or "Reuters" with no domain in sight), so a
 // feed item missing a link still classifies correctly.
+// IMPORTANT: every feed added to TRUSTED_RSS_FEEDS in worker.ts must also be
+// matched here. Anything unmatched falls through to Tier 4, which halves its
+// bullish/bearish magnitude and caps its confidence -- so a legitimate wire
+// left off this list is silently discounted to nothing.
 const TIER1_MATCH = ["eia.gov", "opec.org", "federalreserve.gov", "stlouisfed.org", "energy.gov", "whitehouse.gov", "treasury.gov", "state.gov", "iea.org", "eia -", "eia.", " eia ", "opec"];
-const TIER2_MATCH = ["reuters.com", "bloomberg.com", "cnbc.com", "ft.com", "wsj.com", "marketwatch.com", "spglobal.com", "platts.com", "ap.org", "apnews.com", "reuters", "bloomberg", "cnbc", "wall street journal", "associated press"];
-const TIER3_MATCH = ["oilprice.com", "rigzone.com", "naturalgasintel.com", "investing.com", "moneycontrol.com", "livemint.com", "businessline.com", "energyintel.com", "hellenicshippingnews.com", "oilprice", "rigzone"];
+const TIER2_MATCH = [
+  "reuters.com", "bloomberg.com", "cnbc.com", "ft.com", "wsj.com", "marketwatch.com", "spglobal.com", "platts.com", "ap.org", "apnews.com",
+  "reuters", "bloomberg", "cnbc", "wall street journal", "associated press", "marketwatch",
+  // Yahoo Finance syndicates the major wires and is the fastest of the free
+  // feeds on WTI/Brent/NG; Trading Economics and Dow Jones "Market Talk" are
+  // the two the trader specifically asked to be covered.
+  "finance.yahoo.com", "yahoo finance", "tradingeconomics.com", "trading economics", "dowjones.com", "dow jones", "market talk",
+];
+const TIER3_MATCH = ["oilprice.com", "rigzone.com", "naturalgasintel.com", "investing.com", "moneycontrol.com", "livemint.com", "businessline.com", "energyintel.com", "hellenicshippingnews.com", "oilprice", "rigzone", "ogj.com", "oil & gas journal", "hellenic shipping", "natural gas intelligence"];
 
 export function classifySourceTier(source: string, url?: string): SourceTier {
   const hay = `${source} ${url ?? ""}`.toLowerCase();

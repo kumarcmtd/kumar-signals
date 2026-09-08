@@ -1338,7 +1338,18 @@ const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
   { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=NG%3DF&region=US&lang=en-US", source: "Yahoo Finance - Natural Gas" },
   { url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=BZ%3DF&region=US&lang=en-US", source: "Yahoo Finance - Brent Crude" },
   { url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=19836134", source: "CNBC - Energy" },
+  // MarketWatch is Dow Jones-owned and carries the same "Market Talk" desk
+  // copy that shows up on broker terminals, which is the closest a free feed
+  // gets to Dow Jones Newswires itself (a licensed, paywalled wire).
   { url: "https://feeds.marketwatch.com/marketwatch/marketpulse/", source: "MarketWatch - Market Pulse" },
+  { url: "https://feeds.marketwatch.com/marketwatch/realtimeheadlines/", source: "MarketWatch - Real-time Headlines" },
+  { url: "https://feeds.marketwatch.com/marketwatch/topstories/", source: "MarketWatch - Top Stories" },
+  // Trading Economics publishes an RSS index at /rss/feeds.aspx; these are its
+  // documented news endpoints. If the query-string form is wrong they simply
+  // report as down in the page's source-health panel rather than breaking it.
+  { url: "https://tradingeconomics.com/rss/news.aspx", source: "Trading Economics - News" },
+  { url: "https://tradingeconomics.com/rss/news.aspx?i=crude+oil", source: "Trading Economics - Crude Oil" },
+  { url: "https://tradingeconomics.com/rss/news.aspx?i=natural+gas", source: "Trading Economics - Natural Gas" },
   { url: "https://www.investing.com/rss/commodities_Oil.rss", source: "Investing.com - Crude Oil" },
   { url: "https://www.investing.com/rss/commodities_Gas.rss", source: "Investing.com - Natural Gas" },
   { url: "https://www.investing.com/rss/news_11.rss", source: "Investing.com - Commodities" },
@@ -1443,7 +1454,7 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // above changed: a v2 payload cached from the old five-source list would
 // otherwise keep serving until it aged out.
 const NEWS_CACHE_TTL_SECONDS = 60;
-const NEWS_CACHE_KV_KEY = "news:combined:v3";
+const NEWS_CACHE_KV_KEY = "news:combined:v4";
 
 async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
