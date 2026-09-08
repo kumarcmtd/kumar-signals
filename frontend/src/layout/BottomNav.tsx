@@ -28,13 +28,13 @@ const PRIMARY: NavItem[] = [
   { to: "/ai-20-20", label: "Ai20-20", icon: Target },
   { to: "/level-cross-scan", label: "Level Cross", icon: Waypoints },
   { to: "/ai-up", label: "AI-Up", icon: Repeat },
+  { to: "/ai-flash", label: "AI Flash", icon: Siren },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
-      { to: "/ai-flash", label: "AI Flash", icon: Siren },
       { to: "/ai-own", label: "AI Own", icon: Sparkles },
       { to: "/ai-verify-pro", label: "Verify Pro", icon: BadgeCheck },
       { to: "/news-trade-ai", label: "News AI", icon: Radio },
@@ -164,7 +164,7 @@ export function BottomNav() {
   const onSecondaryPage = !PRIMARY_PATHS.has(location.pathname);
 
   const tabClass = (active: boolean) =>
-    `relative flex flex-col items-center gap-0.5 py-2.5 px-1 text-[10px] leading-tight text-center font-medium transition-colors flex-1 min-w-0 ${
+    `relative flex flex-col items-center gap-0.5 py-2.5 px-0.5 text-[10px] leading-tight text-center font-medium transition-colors flex-1 min-w-0 ${
       active ? "text-[var(--color-primary)]" : "text-[var(--color-muted)]"
     }`;
 
