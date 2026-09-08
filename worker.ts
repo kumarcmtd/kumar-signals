@@ -11,7 +11,7 @@ import { findEliteSignal } from "./frontend/src/utils/eliteSignal";
 import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEngine";
 import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
-import { scoreArticles, scoreEiaChange, clusterEvents, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
+import { scoreArticles, scoreEiaChange, clusterEvents, stripPublisherSuffix, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
 import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
 import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
@@ -1327,7 +1327,14 @@ interface NewsFetchResult {
 // that 404s, rate-limits, or changes its URL contributes zero articles and
 // reports its own failure in sourceStatus (surfaced on the AI Flash page), so
 // a dead feed degrades the page rather than breaking it.
-const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
+interface RssFeedConfig {
+  url: string;
+  source: string;
+  /** Strip Google News's " - Publisher" headline suffix. See stripPublisherSuffix. */
+  stripPublisherSuffix?: boolean;
+}
+
+const TRUSTED_RSS_FEEDS: RssFeedConfig[] = [
   // Tier 1 -- official/government. Slow but authoritative.
   { url: "https://www.eia.gov/rss/todayinenergy.xml", source: "EIA - Today in Energy" },
   { url: "https://www.eia.gov/rss/petroleum.xml", source: "EIA - This Week in Petroleum" },
@@ -1350,6 +1357,22 @@ const TRUSTED_RSS_FEEDS: { url: string; source: string }[] = [
   { url: "https://tradingeconomics.com/rss/news.aspx", source: "Trading Economics - News" },
   { url: "https://tradingeconomics.com/rss/news.aspx?i=crude+oil", source: "Trading Economics - Crude Oil" },
   { url: "https://tradingeconomics.com/rss/news.aspx?i=natural+gas", source: "Trading Economics - Natural Gas" },
+  // Reuters retired its public RSS feeds in 2020 and offers no free
+  // replacement; the remaining options are paid third-party feed generators
+  // (an extra dependency and an extra point of failure in the hot path) or
+  // Google News, which is itself a free public RSS endpoint and indexes
+  // Reuters within minutes. site: narrows it to Reuters only, when:2d bounds
+  // it to the same 48h window the scorer already discards past.
+  {
+    url: "https://news.google.com/rss/search?q=%28oil+OR+crude+OR+WTI+OR+Brent+OR+OPEC%29+site%3Areuters.com+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Reuters - Oil (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=%28%22natural+gas%22+OR+LNG+OR+%22Henry+Hub%22%29+site%3Areuters.com+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Reuters - Natural Gas (via Google News)",
+    stripPublisherSuffix: true,
+  },
   { url: "https://www.investing.com/rss/commodities_Oil.rss", source: "Investing.com - Crude Oil" },
   { url: "https://www.investing.com/rss/commodities_Gas.rss", source: "Investing.com - Natural Gas" },
   { url: "https://www.investing.com/rss/news_11.rss", source: "Investing.com - Commodities" },
@@ -1376,7 +1399,7 @@ function xmlUnescape(s: string): string {
 // Regex-based on purpose: malformed/partial XML just yields fewer or zero
 // matched items rather than throwing, which is exactly the "never crash
 // the whole dashboard on a bad feed" behavior this needs.
-function parseRssFeed(xml: string, sourceName: string): RawNewsArticle[] {
+function parseRssFeed(xml: string, sourceName: string, stripSuffix = false): RawNewsArticle[] {
   const items: RawNewsArticle[] = [];
   const itemBlocks = xml.match(/<item\b[\s\S]*?<\/item>/gi) ?? xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
   for (const block of itemBlocks) {
@@ -1389,8 +1412,9 @@ function parseRssFeed(xml: string, sourceName: string): RawNewsArticle[] {
       "";
     const pubDate = block.match(/<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1] ?? block.match(/<(?:published|updated)\b[^>]*>([\s\S]*?)<\/(?:published|updated)>/i)?.[1] ?? "";
     const parsedDate = pubDate ? new Date(pubDate) : new Date();
+    const cleanTitle = xmlUnescape(title);
     items.push({
-      headline: xmlUnescape(title),
+      headline: stripSuffix ? stripPublisherSuffix(cleanTitle) : cleanTitle,
       summary: xmlUnescape(desc).slice(0, 400),
       source: sourceName,
       publishedAt: Number.isFinite(parsedDate.getTime()) ? parsedDate.toISOString() : new Date().toISOString(),
@@ -1400,7 +1424,7 @@ function parseRssFeed(xml: string, sourceName: string): RawNewsArticle[] {
   return items;
 }
 
-async function fetchOneRssFeed(feed: { url: string; source: string }): Promise<{ source: string; ok: boolean; count: number; error?: string; articles: RawNewsArticle[] }> {
+async function fetchOneRssFeed(feed: RssFeedConfig): Promise<{ source: string; ok: boolean; count: number; error?: string; articles: RawNewsArticle[] }> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RSS_FETCH_TIMEOUT_MS);
@@ -1418,7 +1442,7 @@ async function fetchOneRssFeed(feed: { url: string; source: string }): Promise<{
     clearTimeout(timer);
     if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
     const xml = await res.text();
-    const articles = parseRssFeed(xml, feed.source);
+    const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true);
     return { source: feed.source, ok: true, count: articles.length, articles };
   } catch (e: any) {
     return { source: feed.source, ok: false, count: 0, error: e?.name === "AbortError" ? "Timed out" : (e?.message ?? "Fetch failed"), articles: [] };
@@ -1454,7 +1478,7 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // above changed: a v2 payload cached from the old five-source list would
 // otherwise keep serving until it aged out.
 const NEWS_CACHE_TTL_SECONDS = 60;
-const NEWS_CACHE_KV_KEY = "news:combined:v4";
+const NEWS_CACHE_KV_KEY = "news:combined:v5";
 
 async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);

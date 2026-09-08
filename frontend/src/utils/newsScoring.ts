@@ -46,6 +46,16 @@ const TIER2_MATCH = [
 ];
 const TIER3_MATCH = ["oilprice.com", "rigzone.com", "naturalgasintel.com", "investing.com", "moneycontrol.com", "livemint.com", "businessline.com", "energyintel.com", "hellenicshippingnews.com", "oilprice", "rigzone", "ogj.com", "oil & gas journal", "hellenic shipping", "natural gas intelligence"];
 
+// Google News appends " - Publisher" to every headline it syndicates. That
+// suffix is an artifact of the aggregator, not part of the headline, and
+// leaving it on breaks cross-feed de-duplication: the same Reuters story
+// arriving via Google News and via Yahoo Finance would fingerprint
+// differently and show as two separate rows. Requires whitespace around the
+// dash, so hyphenated words ("Iran-Oman", "3-Month") are never touched.
+export function stripPublisherSuffix(headline: string): string {
+  return headline.replace(/\s+-\s+[^-]{2,40}$/, "").trim() || headline;
+}
+
 export function classifySourceTier(source: string, url?: string): SourceTier {
   const hay = `${source} ${url ?? ""}`.toLowerCase();
   if (TIER1_MATCH.some((d) => hay.includes(d))) return 1;
