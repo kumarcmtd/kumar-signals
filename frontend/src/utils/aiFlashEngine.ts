@@ -62,6 +62,20 @@ export function formatAge(ageMin: number): string {
   return `${d}d ago`;
 }
 
+// The exact wall-clock stamp for a story, e.g. "5:08 AM · Sep 8". A relative
+// age ("12 min ago") answers "is this fresh?", but only an absolute time
+// answers "did this land before or after the candle I'm looking at?" -- so
+// the feed shows both. Rendered in the reader's own timezone (IST on the
+// trader's phone), matching how the rest of the app formats times; timeZone
+// is injectable purely so tests don't depend on the runner's TZ.
+export function formatStamp(publishedAt: string, timeZone?: string): string {
+  const d = new Date(publishedAt);
+  if (!Number.isFinite(d.getTime())) return "";
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+  const date = d.toLocaleDateString("en-US", { day: "numeric", month: "short", timeZone });
+  return `${time} · ${date}`;
+}
+
 export interface FlashItem {
   id: string;
   headline: string;
@@ -71,6 +85,8 @@ export interface FlashItem {
   publishedAt: string;
   ageMin: number;
   ageLabel: string;
+  /** Absolute wall-clock stamp, e.g. "5:08 AM · Sep 8". */
+  stamp: string;
   heat: FlashHeat;
   direction: FlashDirection;
   /** 0-100, how hard this one item pushes its direction. */
@@ -149,6 +165,7 @@ export function buildFlashItems(articles: ScoredNewsArticle[], market: FlashMark
         publishedAt: a.publishedAt,
         ageMin,
         ageLabel: formatAge(ageMin),
+        stamp: formatStamp(a.publishedAt),
         heat: heatFor(ageMin),
         direction: directionOf(net),
         strength: Math.min(100, Math.abs(net)),

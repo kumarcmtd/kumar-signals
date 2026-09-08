@@ -118,6 +118,11 @@ export function FlashRow({ item }: { item: FlashItem }) {
         >
           {heat.label}
         </span>
+        {/* Absolute stamp first, matching how a broker terminal prints it,
+            then the relative age -- one answers "when exactly", the other
+            answers "is this still fresh". */}
+        <span className="text-[10px] font-bold text-white/70">{item.stamp}</span>
+        <span className="text-[10px] text-white/20">·</span>
         <span className="text-[10px] font-bold text-white/45">{item.ageLabel}</span>
         <span className="text-[10px] text-white/20">·</span>
         <span className="text-[10px] text-white/40 truncate max-w-[45%]">{item.source}</span>

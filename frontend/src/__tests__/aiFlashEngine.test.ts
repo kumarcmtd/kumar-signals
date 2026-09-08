@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ageMinutes, flashRecencyPct, heatFor, formatAge, directionOf, biasForScore, buildFlashItems, scoreFlash, analyzeFlash, FLASH_HALF_LIFE_MIN } from "../utils/aiFlashEngine";
+import { ageMinutes, flashRecencyPct, heatFor, formatAge, formatStamp, directionOf, biasForScore, buildFlashItems, scoreFlash, analyzeFlash, FLASH_HALF_LIFE_MIN } from "../utils/aiFlashEngine";
 import type { ScoredNewsArticle } from "../utils/newsScoring";
 
 const NOW = Date.UTC(2026, 8, 7, 12, 0, 0);
@@ -142,6 +142,26 @@ test("genuinely different stories are not collapsed together", () => {
   const a = article({ headline: "Cold blast sweeps US Midwest lifting heating demand", url: "https://x/1", affectedMarket: "NG" });
   const b = article({ headline: "Freeport LNG restarts second liquefaction train", url: "https://x/2", affectedMarket: "NG" });
   assert.equal(buildFlashItems([a, b], "NG", NOW).length, 2);
+});
+
+test("each story carries an absolute wall-clock stamp, not just a relative age", () => {
+  // Pinned to IST because that is the trader's timezone and MCX's; passing it
+  // explicitly keeps the assertion independent of the test runner's own TZ.
+  const IST = "Asia/Kolkata";
+  // 2026-09-08T12:00Z is 5:30 PM IST the same day.
+  assert.equal(formatStamp("2026-09-08T12:00:00.000Z", IST), "5:30 PM · Sep 8");
+  // A story filed just before IST midnight must show the correct local date.
+  assert.equal(formatStamp("2026-09-08T18:35:00.000Z", IST), "12:05 AM · Sep 9");
+});
+
+test("an unparseable publish date yields an empty stamp rather than 'Invalid Date'", () => {
+  assert.equal(formatStamp("not-a-date"), "");
+});
+
+test("the stamp travels on the item alongside the relative age", () => {
+  const items = buildFlashItems([article({ publishedAt: "2026-09-08T12:00:00.000Z" })], "CRUDE", NOW);
+  assert.ok(items[0].stamp.length > 0, "every row needs a wall-clock stamp");
+  assert.ok(items[0].ageLabel.length > 0, "and keeps its relative age too");
 });
 
 test("bias thresholds map scores to labels", () => {

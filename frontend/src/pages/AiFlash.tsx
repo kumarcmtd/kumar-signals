@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { Zap, RefreshCw, AlertTriangle } from "lucide-react";
 import { useNewsFeed } from "../api/hooks";
-import { analyzeFlash, formatAge, ageMinutes, type FlashMarket } from "../utils/aiFlashEngine";
+import { analyzeFlash, formatAge, formatStamp, ageMinutes, type FlashMarket } from "../utils/aiFlashEngine";
 import { FlashScoreCard, FlashRow, TopDriverCard, FlashSourceHealth } from "../components/AiFlashKit";
 
 const MARKETS: { key: FlashMarket; label: string; short: string }[] = [
@@ -60,6 +60,9 @@ export function AiFlash() {
             {checkedAge !== null ? `Checked ${formatAge(checkedAge)}` : "Refresh"}
           </button>
         </div>
+        {data?.fetchedAt && (
+          <p className="text-[10px] text-white/30 mt-1">Feed last checked at {formatStamp(data.fetchedAt)}</p>
+        )}
         <p className="text-[11px] text-white/40 mt-1.5 leading-snug">
           Newest energy headlines first, each scored bullish or bearish, with one 0-100 pressure score per commodity. Built for speed: fresh news counts roughly double a 90-minute-old story.
         </p>
