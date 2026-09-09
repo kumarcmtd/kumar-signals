@@ -13,10 +13,17 @@
 // this study entirely self-contained on real MCX candles -- no external
 // overnight feed, nothing inferred.
 //
-// Base rates come from the daily candle history the app already fetches
-// (270 calendar days, roughly 180 sessions). Every number on this page is
-// counted from those sessions. Where the sample is too thin to mean anything
-// it says so instead of printing a confident percentage.
+// The scored window is the FIRST TWO HOURS, 9:00-11:00 AM IST -- not the whole
+// session. Scoring by the 11:30 PM close answered the wrong question for a
+// trader who is in and out in the morning: a gap can fade at 9:30 and still
+// close green, which the daily candle records as a continuation. The worker's
+// /api/gap-study builds these windows from 30-minute bars and this module
+// scores them.
+//
+// Sample size is bounded by the contract, not by the lookback: MCX futures
+// roll monthly, so a contract only has as much history as it has existed.
+// Everything here reports the count it actually found, and refuses a verdict
+// below MIN_GAP_SAMPLE rather than printing a confident percentage on noise.
 
 import type { Candle } from "../types";
 
@@ -24,7 +31,7 @@ import type { Candle } from "../types";
 export const FLAT_GAP_PCT = 0.3;
 /** Above this, the overnight move was substantial. */
 export const STRONG_GAP_PCT = 1.0;
-/** A day that closes within this of its open didn't really go anywhere. */
+/** A morning that ends within this of the open didn't really go anywhere. */
 export const FLAT_DAY_PCT = 0.25;
 /** Below this many matching sessions, no verdict is offered. */
 export const MIN_GAP_SAMPLE = 10;
@@ -48,20 +55,26 @@ export function bucketForGap(gapPct: number): GapBucket {
   return mag >= STRONG_GAP_PCT ? "strong_down" : "down";
 }
 
+/** One session's 9:00-11:00 AM window, as returned by /api/gap-study. */
+export interface MorningGapRecord {
+  date: string;
+  gapPct: number;
+  openPrice: number;
+  closePrice: number;
+  movePct: number;
+  highPct: number;
+  lowPct: number;
+}
+
 export interface GapSession {
   date: string;
-  prevClose: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
   /** Open vs previous close, in percent. The overnight global move. */
   gapPct: number;
   bucket: GapBucket;
-  /** Close vs open, in percent. What happened AFTER the gap. */
-  dayMovePct: number;
+  /** 11:00 AM price vs the 9:00 AM open, in percent. */
+  movePct: number;
   /**
-   * Day move re-signed so positive always means "kept going in the gap's
+   * Move re-signed so positive always means "kept going in the gap's
    * direction". Lets up-gaps and down-gaps be pooled and read the same way.
    */
   followThroughPct: number;
@@ -72,39 +85,26 @@ export interface GapSession {
   outcome: DayOutcome;
 }
 
-export function buildGapSessions(daily: Candle[]): GapSession[] {
+export function sessionsFromRecords(records: MorningGapRecord[]): GapSession[] {
   const out: GapSession[] = [];
-  for (let i = 1; i < daily.length; i++) {
-    const prev = daily[i - 1];
-    const d = daily[i];
-    if (!(prev.close > 0) || !(d.open > 0)) continue;
-
-    const gapPct = ((d.open - prev.close) / prev.close) * 100;
-    const dayMovePct = ((d.close - d.open) / d.open) * 100;
+  for (const r of records) {
+    if (!(r.openPrice > 0)) continue;
     // A flat gap has no direction to follow through on; treat it as up-signed
     // so the arithmetic stays defined (its verdicts are read separately).
-    const dir = gapPct === 0 ? 1 : Math.sign(gapPct);
-    const upExcursion = ((d.high - d.open) / d.open) * 100;
-    const downExcursion = ((d.open - d.low) / d.open) * 100;
-
-    const followThroughPct = dayMovePct * dir;
+    const dir = r.gapPct === 0 ? 1 : Math.sign(r.gapPct);
+    const followThroughPct = r.movePct * dir;
     let outcome: DayOutcome;
-    if (Math.abs(dayMovePct) < FLAT_DAY_PCT) outcome = "flat";
+    if (Math.abs(r.movePct) < FLAT_DAY_PCT) outcome = "flat";
     else outcome = followThroughPct > 0 ? "continued" : "faded";
 
     out.push({
-      date: d.date,
-      prevClose: prev.close,
-      open: d.open,
-      high: d.high,
-      low: d.low,
-      close: d.close,
-      gapPct: Number(gapPct.toFixed(2)),
-      bucket: bucketForGap(gapPct),
-      dayMovePct: Number(dayMovePct.toFixed(2)),
+      date: r.date,
+      gapPct: r.gapPct,
+      bucket: bucketForGap(r.gapPct),
+      movePct: r.movePct,
       followThroughPct: Number(followThroughPct.toFixed(2)),
-      favourablePct: Number((dir > 0 ? upExcursion : downExcursion).toFixed(2)),
-      adversePct: Number((dir > 0 ? downExcursion : upExcursion).toFixed(2)),
+      favourablePct: Number((dir > 0 ? r.highPct : r.lowPct).toFixed(2)),
+      adversePct: Number((dir > 0 ? r.lowPct : r.highPct).toFixed(2)),
       outcome,
     });
   }
@@ -174,10 +174,10 @@ export function studyBucket(sessions: GapSession[], bucket: GapBucket): GapStudy
     verdictReason = "Global barely moved overnight, so the open carries no directional lean of its own.";
   } else if (continuedPct >= 55) {
     verdict = "follow";
-    verdictReason = `Kept going in the same direction on ${continuedPct}% of these days.`;
+    verdictReason = `Still going the same way at 11 AM on ${continuedPct}% of these days.`;
   } else if (fadedPct >= 55) {
     verdict = "fade";
-    verdictReason = `Reversed back against the gap on ${fadedPct}% of these days.`;
+    verdictReason = `Reversed back against the gap by 11 AM on ${fadedPct}% of these days.`;
   } else {
     verdict = "mixed";
     verdictReason = `Split roughly evenly — ${continuedPct}% continued, ${fadedPct}% faded. No reliable edge either way.`;
@@ -189,29 +189,6 @@ export function studyBucket(sessions: GapSession[], bucket: GapBucket): GapStudy
     avgFollowThroughPct, medianFollowThroughPct, avgFavourablePct, avgAdversePct,
     verdict, verdictReason,
   };
-}
-
-export interface TodayGap {
-  date: string;
-  gapPct: number;
-  bucket: GapBucket;
-  prevClose: number;
-  open: number;
-}
-
-/**
- * The most recent session's gap. During a live session this is today's open
- * against yesterday's close; outside market hours it is the last completed
- * session, so the caller shows the date rather than implying it is always
- * "today".
- */
-export function latestGap(daily: Candle[]): TodayGap | null {
-  if (daily.length < 2) return null;
-  const prev = daily[daily.length - 2];
-  const cur = daily[daily.length - 1];
-  if (!(prev.close > 0) || !(cur.open > 0)) return null;
-  const gapPct = Number((((cur.open - prev.close) / prev.close) * 100).toFixed(2));
-  return { date: cur.date, gapPct, bucket: bucketForGap(gapPct), prevClose: prev.close, open: cur.open };
 }
 
 // ---- When in the day the move actually happens ----

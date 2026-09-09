@@ -1,29 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  bucketForGap, buildGapSessions, studyBucket, latestGap, istHourOf, windowIdFor, analyzeSessionWindows,
-  MIN_GAP_SAMPLE, FLAT_GAP_PCT, STRONG_GAP_PCT,
+  bucketForGap, sessionsFromRecords, studyBucket, istHourOf, windowIdFor, analyzeSessionWindows,
+  MIN_GAP_SAMPLE, FLAT_GAP_PCT, STRONG_GAP_PCT, type MorningGapRecord,
 } from "../utils/overnightGapEngine";
 import type { Candle } from "../types";
 
-function candle(date: string, open: number, high: number, low: number, close: number, volume = 1000): Candle {
-  return { date, open, high, low, close, volume, oi: 0 } as Candle;
+// One session's 9:00-11:00 AM window, as the worker's /api/gap-study returns
+// it: gapPct is the overnight move, movePct is 11 AM against the 9 AM open.
+function rec(gapPct: number, movePct: number, over: Partial<MorningGapRecord> = {}): MorningGapRecord {
+  const openPrice = 100;
+  return {
+    date: "2026-09-08",
+    gapPct,
+    openPrice,
+    closePrice: openPrice * (1 + movePct / 100),
+    movePct,
+    highPct: Math.max(0, movePct),
+    lowPct: Math.max(0, -movePct),
+    ...over,
+  };
 }
 
-// Builds a run of daily candles where each session gaps by gapPct from the
-// prior close and then closes dayMovePct away from its own open.
-function series(specs: { gapPct: number; dayMovePct: number }[], start = 100): Candle[] {
-  const out: Candle[] = [candle("2026-01-01T00:00:00+05:30", start, start, start, start)];
-  let prevClose = start;
-  specs.forEach((s, i) => {
-    const open = prevClose * (1 + s.gapPct / 100);
-    const close = open * (1 + s.dayMovePct / 100);
-    const high = Math.max(open, close) * 1.002;
-    const low = Math.min(open, close) * 0.998;
-    out.push(candle(`2026-02-${String(i + 1).padStart(2, "0")}T00:00:00+05:30`, open, high, low, close));
-    prevClose = close;
-  });
-  return out;
+function candle(date: string, open: number, high: number, low: number, close: number, volume = 1000): Candle {
+  return { date, open, high, low, close, volume, oi: 0 } as Candle;
 }
 
 test("gap buckets split on the documented thresholds", () => {
@@ -35,68 +35,54 @@ test("gap buckets split on the documented thresholds", () => {
   assert.equal(bucketForGap(-STRONG_GAP_PCT), "strong_down");
 });
 
-test("the gap is measured as open against the PREVIOUS close, not the same day's close", () => {
-  const daily = [
-    candle("2026-01-01T00:00:00+05:30", 100, 101, 99, 100),
-    candle("2026-01-02T00:00:00+05:30", 102, 103, 101, 101),
-  ];
-  const [s] = buildGapSessions(daily);
-  assert.equal(s.gapPct, 2); // 100 -> 102 open
-  assert.equal(s.dayMovePct, -0.98); // 102 open -> 101 close
+test("the scored move is 11 AM against the 9 AM open, not the session close", () => {
+  const [s] = sessionsFromRecords([rec(2, -0.98)]);
+  assert.equal(s.gapPct, 2);
+  assert.equal(s.movePct, -0.98);
+  assert.equal(s.outcome, "faded");
 });
 
 test("follow-through is re-signed so up-gaps and down-gaps read the same way", () => {
   // A down gap that keeps falling is a CONTINUATION, not a negative reading.
-  const daily = [
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 98, 98, 96, 96.5),
-  ];
-  const [s] = buildGapSessions(daily);
+  const [s] = sessionsFromRecords([rec(-2, -1.5)]);
   assert.equal(s.bucket, "strong_down");
-  assert.ok(s.dayMovePct < 0, "raw move is negative");
+  assert.ok(s.movePct < 0, "raw move is negative");
   assert.ok(s.followThroughPct > 0, "but as follow-through it is positive");
   assert.equal(s.outcome, "continued");
 });
 
-test("a gap that reverses is classified as faded", () => {
-  const daily = [
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 102, 102.5, 100, 100.5),
-  ];
-  const [s] = buildGapSessions(daily);
+test("a gap that reverses within the morning is classified as faded", () => {
+  const [s] = sessionsFromRecords([rec(2, -1.2)]);
   assert.equal(s.bucket, "strong_up");
   assert.equal(s.outcome, "faded");
 });
 
-test("a day that goes nowhere after the gap is flat, not a weak continuation", () => {
-  const daily = [
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 102, 102.2, 101.9, 102.05),
-  ];
-  assert.equal(buildGapSessions(daily)[0].outcome, "flat");
+test("a morning that goes nowhere is flat, not a weak continuation", () => {
+  assert.equal(sessionsFromRecords([rec(2, 0.05)])[0].outcome, "flat");
+});
+
+test("a gap can fade by 11 AM even on a session that would later close green", () => {
+  // The exact case daily candles got wrong: down 0.9% at 11, up 1.5% by the
+  // close. Scored on the close it looks like a continuation; scored on the
+  // morning -- the window actually traded -- it is a fade.
+  const [s] = sessionsFromRecords([rec(1.4, -0.9)]);
+  assert.equal(s.outcome, "faded");
 });
 
 test("favourable and adverse excursions are relative to the gap's direction", () => {
   // Up gap: favourable is the run above the open, adverse the dip below it.
-  const up = buildGapSessions([
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 102, 104.04, 100.98, 103),
-  ])[0];
-  assert.equal(up.favourablePct, 2); // 102 -> 104.04
-  assert.equal(up.adversePct, 1); // 102 -> 100.98
+  const up = sessionsFromRecords([rec(2, 1, { highPct: 2, lowPct: 1 })])[0];
+  assert.equal(up.favourablePct, 2);
+  assert.equal(up.adversePct, 1);
 
   // Down gap: the roles swap, so a falling market still reads "favourable".
-  const down = buildGapSessions([
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 98, 98.98, 96.04, 96.5),
-  ])[0];
-  assert.equal(down.favourablePct, 2); // 98 -> 96.04
-  assert.equal(down.adversePct, 1); // 98 -> 98.98
+  const down = sessionsFromRecords([rec(-2, -1, { highPct: 1, lowPct: 2 })])[0];
+  assert.equal(down.favourablePct, 2);
+  assert.equal(down.adversePct, 1);
 });
 
 test("a bucket that mostly continues is rated follow", () => {
-  const specs = Array.from({ length: 12 }, (_, i) => ({ gapPct: 1.5, dayMovePct: i < 9 ? 1 : -1 }));
-  const study = studyBucket(buildGapSessions(series(specs)), "strong_up");
+  const study = studyBucket(sessionsFromRecords(Array.from({ length: 12 }, (_, i) => rec(1.5, i < 9 ? 1 : -1))), "strong_up");
   assert.equal(study.sessions, 12);
   assert.equal(study.continued, 9);
   assert.equal(study.continuedPct, 75);
@@ -105,35 +91,31 @@ test("a bucket that mostly continues is rated follow", () => {
 });
 
 test("a bucket that mostly reverses is rated fade", () => {
-  const specs = Array.from({ length: 12 }, (_, i) => ({ gapPct: 1.5, dayMovePct: i < 9 ? -1 : 1 }));
-  const study = studyBucket(buildGapSessions(series(specs)), "strong_up");
+  const study = studyBucket(sessionsFromRecords(Array.from({ length: 12 }, (_, i) => rec(1.5, i < 9 ? -1 : 1))), "strong_up");
   assert.equal(study.fadedPct, 75);
   assert.equal(study.verdict, "fade");
 });
 
 test("an evenly split bucket is rated mixed, never forced into a direction", () => {
-  const specs = Array.from({ length: 12 }, (_, i) => ({ gapPct: 1.5, dayMovePct: i % 2 === 0 ? 1 : -1 }));
-  const study = studyBucket(buildGapSessions(series(specs)), "strong_up");
+  const study = studyBucket(sessionsFromRecords(Array.from({ length: 12 }, (_, i) => rec(1.5, i % 2 === 0 ? 1 : -1))), "strong_up");
   assert.equal(study.verdict, "mixed");
   assert.match(study.verdictReason, /No reliable edge/);
 });
 
 test("a thin sample gets no verdict, however lopsided it looks", () => {
   // Five perfect continuations must not print a confident "follow".
-  const specs = Array.from({ length: 5 }, () => ({ gapPct: 1.5, dayMovePct: 1 }));
-  const study = studyBucket(buildGapSessions(series(specs)), "strong_up");
+  const study = studyBucket(sessionsFromRecords(Array.from({ length: 5 }, () => rec(1.5, 1))), "strong_up");
   assert.equal(study.sessions, 5);
   assert.equal(study.verdict, "insufficient");
   assert.match(study.verdictReason, /too few to call/);
 });
 
 test(`exactly ${MIN_GAP_SAMPLE} matching sessions is enough to be judged`, () => {
-  const specs = Array.from({ length: MIN_GAP_SAMPLE }, () => ({ gapPct: 1.5, dayMovePct: 1 }));
-  assert.equal(studyBucket(buildGapSessions(series(specs)), "strong_up").verdict, "follow");
+  assert.equal(studyBucket(sessionsFromRecords(Array.from({ length: MIN_GAP_SAMPLE }, () => rec(1.5, 1))), "strong_up").verdict, "follow");
 });
 
 test("a bucket with no matching sessions says so rather than dividing by zero", () => {
-  const study = studyBucket(buildGapSessions(series([{ gapPct: 1.5, dayMovePct: 1 }])), "strong_down");
+  const study = studyBucket(sessionsFromRecords([rec(1.5, 1)]), "strong_down");
   assert.equal(study.sessions, 0);
   assert.equal(study.continuedPct, null);
   assert.equal(study.avgFollowThroughPct, null);
@@ -141,22 +123,13 @@ test("a bucket with no matching sessions says so rather than dividing by zero", 
 });
 
 test("a flat overnight is never dressed up as a signal", () => {
-  const specs = Array.from({ length: 12 }, () => ({ gapPct: 0.05, dayMovePct: 1 }));
-  const study = studyBucket(buildGapSessions(series(specs)), "flat");
+  const study = studyBucket(sessionsFromRecords(Array.from({ length: 12 }, () => rec(0.05, 1))), "flat");
   assert.equal(study.verdict, "mixed");
   assert.match(study.verdictReason, /no directional lean/);
 });
 
-test("latestGap reads the most recent session and needs two candles", () => {
-  assert.equal(latestGap([]), null);
-  assert.equal(latestGap([candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100)]), null);
-  const g = latestGap([
-    candle("2026-01-01T00:00:00+05:30", 100, 100, 100, 100),
-    candle("2026-01-02T00:00:00+05:30", 101.5, 102, 101, 101.8),
-  ])!;
-  assert.equal(g.gapPct, 1.5);
-  assert.equal(g.bucket, "strong_up");
-  assert.equal(g.date, "2026-01-02T00:00:00+05:30");
+test("a record with no usable open is skipped rather than dividing by zero", () => {
+  assert.equal(sessionsFromRecords([rec(1.5, 1, { openPrice: 0 })]).length, 0);
 });
 
 test("session hour is read off the exchange's own +05:30 stamp, not the local clock", () => {

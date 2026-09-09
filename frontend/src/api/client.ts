@@ -1,6 +1,7 @@
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
 import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
+import type { MorningGapRecord } from "../utils/overnightGapEngine";
 
 export interface EnergyDataResponse {
   available: boolean;
@@ -11,6 +12,14 @@ export interface EnergyDataResponse {
 
 export interface NewsFeedResponse extends NewsFetchResponse {
   fetchedAt: string;
+}
+
+export interface GapStudyResponse {
+  available: boolean;
+  windowLabel: string;
+  latest: { date: string; gapPct: number; open: number; prevClose: number } | null;
+  sessions: MorningGapRecord[];
+  error?: string;
 }
 
 export interface WhyTodayResponse {
@@ -64,6 +73,7 @@ export const api = {
   expiryAlerts: () => getJSON<{ alerts: ExpiryAlert[] }>("/expiry-alerts"),
   whyToday: () => getJSON<WhyTodayResponse>("/why-today"),
   energy: () => getJSON<EnergyDataResponse>("/energy"),
+  gapStudy: (symbol: InstrumentSymbol) => getJSON<GapStudyResponse>(`/gap-study?symbol=${symbol}`),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),

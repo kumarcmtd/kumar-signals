@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import { Moon, TrendingUp, TrendingDown, Minus, ChevronDown, Clock } from "lucide-react";
-import { useCandles } from "../api/hooks";
+import { useMemo, useState, useEffect } from "react";
+import { Moon, TrendingUp, TrendingDown, Minus, ChevronDown, Clock, Maximize2, Minimize2 } from "lucide-react";
+import { useGapStudy, useCandles } from "../api/hooks";
 import {
-  buildGapSessions, studyBucket, latestGap, analyzeSessionWindows, BUCKET_LABEL,
+  sessionsFromRecords, studyBucket, bucketForGap, analyzeSessionWindows, BUCKET_LABEL,
   type GapVerdict, type GapBucket,
 } from "../utils/overnightGapEngine";
 import type { InstrumentSymbol } from "../types";
@@ -11,8 +11,8 @@ import type { InstrumentSymbol } from "../types";
 // the app's signal palette -- the neon greens/ambers used on the dark pages
 // are unreadable as text on white.
 const VERDICT_STYLE: Record<GapVerdict, { color: string; headline: string }> = {
-  follow: { color: "#15803D", headline: "Move usually CONTINUED" },
-  fade: { color: "#DC2626", headline: "Move usually FADED BACK" },
+  follow: { color: "#15803D", headline: "Usually STILL GOING at 11 AM" },
+  fade: { color: "#DC2626", headline: "Usually FADED BACK by 11 AM" },
   mixed: { color: "#B45309", headline: "No reliable edge — wait" },
   insufficient: { color: "#64748B", headline: "Not enough history to call" },
 };
@@ -22,31 +22,77 @@ const GAP_COLOR = (bucket: GapBucket) =>
 
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(2)}%`;
 
-// Answers the question the gap itself cannot: MCX reopens on Asian hours
-// alone, so "global moved overnight" and "the move is tradable at 9 AM" are
-// not the same statement. Everything here is counted from real candles --
-// where there isn't enough history, it says so rather than guessing.
+// Collapsed state is per-symbol and remembered, so a trader who only wants the
+// one-line version doesn't have to re-collapse it on every visit. localStorage
+// can throw outright in a private window, so every access is guarded.
+function useRemembered(key: string, initial: boolean): [boolean, (v: boolean) => void] {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw !== null) setValue(raw === "1");
+    } catch {
+      // Storage unavailable -- fall back to the default, don't crash the page.
+    }
+  }, [key]);
+  const set = (v: boolean) => {
+    setValue(v);
+    try {
+      localStorage.setItem(key, v ? "1" : "0");
+    } catch {
+      /* not persisting is fine */
+    }
+  };
+  return [value, set];
+}
+
+// What global did while MCX was shut, and what happened over the FIRST TWO
+// HOURS on the sessions that started the same way -- not where the session
+// eventually closed 14 hours later, which is a different question entirely.
 export function OvernightImpactCard({ symbol, displayName }: { symbol: InstrumentSymbol; displayName: string }) {
-  const daily = useCandles(symbol, "1D");
+  const { data, isLoading } = useGapStudy(symbol);
   const intraday = useCandles(symbol, "15");
+  const [collapsed, setCollapsed] = useRemembered(`overnight-collapsed:${symbol}`, false);
   const [open, setOpen] = useState(false);
 
-  const dailyCandles = daily.data?.candles;
-  const intradayCandles = intraday.data?.candles;
+  const sessions = useMemo(() => sessionsFromRecords(data?.sessions ?? []), [data?.sessions]);
+  const latest = data?.latest ?? null;
+  const study = useMemo(() => (latest ? studyBucket(sessions, bucketForGap(latest.gapPct)) : null), [sessions, latest]);
+  const windows = useMemo(() => (intraday.data?.candles ? analyzeSessionWindows(intraday.data.candles) : null), [intraday.data?.candles]);
 
-  const gap = useMemo(() => (dailyCandles ? latestGap(dailyCandles) : null), [dailyCandles]);
-  const sessions = useMemo(() => (dailyCandles ? buildGapSessions(dailyCandles) : []), [dailyCandles]);
-  const study = useMemo(() => (gap ? studyBucket(sessions, gap.bucket) : null), [sessions, gap]);
-  const windows = useMemo(() => (intradayCandles ? analyzeSessionWindows(intradayCandles) : null), [intradayCandles]);
+  if (isLoading) return <div className="h-16 rounded-2xl bg-white/60 shadow-sm motion-safe:animate-pulse" />;
+  if (!latest || !study) return null;
 
-  if (daily.isLoading) return <div className="h-24 rounded-2xl bg-white/60 shadow-sm motion-safe:animate-pulse" />;
-  if (!gap || !study) return null;
-
-  const gapColor = GAP_COLOR(gap.bucket);
+  const bucket = bucketForGap(latest.gapPct);
+  const gapColor = GAP_COLOR(bucket);
   const v = VERDICT_STYLE[study.verdict];
-  const Arrow = gap.gapPct > 0 ? TrendingUp : gap.gapPct < 0 ? TrendingDown : Minus;
+  const Arrow = latest.gapPct > 0 ? TrendingUp : latest.gapPct < 0 ? TrendingDown : Minus;
   const morning = windows?.shares.find((s) => s.id === "morning");
-  const sessionDate = new Date(gap.date).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+  const sessionDate = new Date(latest.date).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+
+  // Collapsed: one line carrying the gap and the verdict, nothing else.
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={() => setCollapsed(false)}
+        className="w-full rounded-2xl px-3 py-2 flex items-center gap-2 bg-white shadow-sm"
+        style={{ border: `1.5px solid ${gapColor}66` }}
+        aria-label={`Expand overnight impact for ${displayName}`}
+      >
+        <Moon size={12} style={{ color: gapColor }} className="shrink-0" />
+        <span className="text-[11px] font-bold text-slate-600 shrink-0">{displayName}</span>
+        <Arrow size={13} style={{ color: gapColor }} className="shrink-0" />
+        <span className="text-[12px] font-black shrink-0" style={{ color: gapColor }}>
+          {signed(latest.gapPct)}
+        </span>
+        <span className="text-[10px] font-bold truncate" style={{ color: v.color }}>
+          {study.verdict === "insufficient" ? "too few to call" : v.headline.replace("Usually ", "")}
+        </span>
+        <Maximize2 size={12} className="text-slate-300 ml-auto shrink-0" />
+      </button>
+    );
+  }
 
   return (
     <div className="rounded-2xl overflow-hidden shadow-md" style={{ border: `2px solid ${gapColor}` }}>
@@ -56,21 +102,27 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
             <Moon size={13} />
             <span className="text-[10px] font-black uppercase tracking-wide truncate">Overnight global · {displayName}</span>
           </span>
-          <span className="text-[9px] text-white/70 shrink-0">{sessionDate} open</span>
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-[9px] text-white/70">{sessionDate} open</span>
+            <button type="button" onClick={() => setCollapsed(true)} aria-label={`Minimise overnight impact for ${displayName}`} className="p-0.5 -m-0.5 text-white/80">
+              <Minimize2 size={13} />
+            </button>
+          </span>
         </div>
 
         <div className="flex items-baseline gap-2 mt-1">
           <Arrow size={17} />
-          <span className="text-xl font-black">{signed(gap.gapPct)}</span>
-          <span className="text-[11px] font-bold">{BUCKET_LABEL[gap.bucket]}</span>
+          <span className="text-xl font-black">{signed(latest.gapPct)}</span>
+          <span className="text-[11px] font-bold">{BUCKET_LABEL[bucket]}</span>
         </div>
         <p className="text-[10px] text-white/80 mt-0.5">
-          Global markets repriced while MCX was shut — it reopened at ₹{gap.open.toFixed(2)} against ₹{gap.prevClose.toFixed(2)}.
+          Reopened at ₹{latest.open.toFixed(2)} against ₹{latest.prevClose.toFixed(2)} — global repriced it while MCX was shut.
         </p>
       </div>
 
       <div className="px-3.5 py-2.5 bg-white">
-        <p className="text-[12.5px] font-black" style={{ color: v.color }}>
+        <p className="text-[9px] font-black uppercase tracking-wide text-slate-400">First 2 hours · 9:00–11:00 AM</p>
+        <p className="text-[12.5px] font-black mt-0.5" style={{ color: v.color }}>
           {v.headline}
         </p>
         <p className="text-[10.5px] text-slate-500 mt-0.5 leading-snug">{study.verdictReason}</p>
@@ -80,17 +132,6 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
             <Stat label="Continued" value={`${study.continuedPct}%`} color="#15803D" />
             <Stat label="Faded" value={`${study.fadedPct}%`} color="#DC2626" />
             <Stat label="Flat" value={`${study.flatPct}%`} color="#64748B" />
-          </div>
-        )}
-
-        {/* The "should I wait for Europe / US?" answer, measured not asserted. */}
-        {morning && windows?.available && (
-          <div className="mt-2.5 rounded-xl px-2.5 py-2 flex items-start gap-1.5" style={{ background: "#F0F9FF", border: "1px solid #BAE6FD" }}>
-            <Clock size={12} className="text-[#0284C7] shrink-0 mt-0.5" />
-            <p className="text-[10px] text-slate-600 leading-snug">
-              The 9:00 AM–12:30 PM window is Asia-only and carries just <span className="font-black text-[#0284C7]">{morning.volumeSharePct}%</span> of the day's volume. The real move usually
-              lands after Europe (12:30 PM) and the US (6:00 PM) arrive.
-            </p>
           </div>
         )}
 
@@ -106,17 +147,26 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
         {open && (
           <div className="text-[10px] text-slate-500 leading-relaxed space-y-1.5 pb-1">
             <p>
-              Counted from <span className="font-bold text-slate-700">{sessions.length} past sessions</span> of this symbol's own daily candles, of which{" "}
-              <span className="font-bold text-slate-700">{study.sessions}</span> opened with a similar {BUCKET_LABEL[gap.bucket].toLowerCase()} gap.
+              Counted from <span className="font-bold text-slate-700">{sessions.length} past sessions</span> of this contract's own 30-minute bars, of which{" "}
+              <span className="font-bold text-slate-700">{study.sessions}</span> opened with a similar {BUCKET_LABEL[bucket].toLowerCase()} gap. MCX futures roll monthly, so a contract only has as
+              much history as it has existed.
             </p>
             {study.avgFollowThroughPct !== null && (
               <p>
-                After the open those days moved a further <span className="font-bold text-slate-700">{signed(study.avgFollowThroughPct)}</span> on average in the gap's direction (median{" "}
+                Between 9 and 11 those mornings moved a further <span className="font-bold text-slate-700">{signed(study.avgFollowThroughPct)}</span> on average in the gap's direction (median{" "}
                 {signed(study.medianFollowThroughPct ?? 0)}), with a typical best run of {study.avgFavourablePct?.toFixed(2)}% and a typical pullback against it of{" "}
                 {study.avgAdversePct?.toFixed(2)}%.
               </p>
             )}
-            {windows?.available && <p>Session split measured over {windows.sessions} full intraday sessions.</p>}
+            {morning && windows?.available && (
+              <p className="flex items-start gap-1">
+                <Clock size={11} className="text-[#0284C7] shrink-0 mt-0.5" />
+                <span>
+                  For context, this 9:00–12:30 stretch is Asia-only and carries just <span className="font-bold text-slate-700">{morning.volumeSharePct}%</span> of the day's volume — the bigger move
+                  often waits for Europe (12:30 PM) and the US (6:00 PM). Measured over {windows.sessions} full sessions.
+                </span>
+              </p>
+            )}
             <p className="text-slate-400">
               The overnight global move is read as the gap itself — MCX's open against its own previous close is the market repricing everything that happened while it was shut. Base rates describe
               the past only; they are not a forecast.

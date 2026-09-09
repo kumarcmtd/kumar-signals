@@ -122,6 +122,18 @@ export function useNewsFeed() {
   });
 }
 
+// The 9-11 AM gap study is built from completed sessions and cached 6h on the
+// server, so it only meaningfully changes once a day. A slow client cadence is
+// plenty; today's own gap is in the same payload and settles at the open.
+export function useGapStudy(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["gap-study", symbol],
+    queryFn: () => api.gapStudy(symbol),
+    staleTime: 10 * 60_000,
+    refetchInterval: 15 * 60_000,
+  });
+}
+
 // Expiry doesn't change intraday, so this doesn't need News/Depth's fast
 // cadence -- a 5-minute refetch (matching the worker's own Cron interval)
 // is plenty to catch the daysLeft boundary rolling over.
