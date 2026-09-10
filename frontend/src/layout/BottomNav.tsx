@@ -28,13 +28,14 @@ const PRIMARY: NavItem[] = [
   { to: "/ai-20-20", label: "Ai20-20", icon: Target },
   { to: "/level-cross-scan", label: "Level Cross", icon: Waypoints },
   { to: "/ai-up", label: "AI-Up", icon: Repeat },
-  { to: "/ai-flash", label: "AI Flash", icon: Siren },
+  { to: "/ai-supertrend-pro", label: "SuperTrend", icon: Zap },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
+      { to: "/ai-flash", label: "AI Flash", icon: Siren },
       { to: "/ai-edge", label: "AI Edge", icon: Scale },
       { to: "/ai-own", label: "AI Own", icon: Sparkles },
       { to: "/ai-verify-pro", label: "Verify Pro", icon: BadgeCheck },
@@ -46,7 +47,6 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { to: "/ai-strategy-verification", label: "AI Verify", icon: ClipboardCheck },
       { to: "/ai-risk", label: "AI-Risk", icon: Flame },
-      { to: "/ai-supertrend-pro", label: "SuperTrend Pro", icon: Zap },
       { to: "/ai-test-v2", label: "AI-Test V2", icon: FlaskConical },
       { to: "/ai-test-pro", label: "AI-Test Pro", icon: Crown },
       { to: "/ai-elite", label: "AI Elite", icon: ShieldCheck },
