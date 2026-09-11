@@ -185,7 +185,7 @@ export interface AiTwentyPremium {
 // before (T2 = 1.6x T1, T3 = 2.25x T1, stop = 0.6x T1) so Crude Oil's own
 // numbers stay familiar; only Natural Gas's point target shrinks to
 // something its own premiums can realistically reach.
-const PROFIT_PER_LOT = 2000;
+export const PROFIT_PER_LOT = 2000;
 const T2_RATIO = 1.6;
 const T3_RATIO = 2.25;
 const STOP_RATIO = 0.6;

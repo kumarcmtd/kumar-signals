@@ -3,7 +3,7 @@ import { Target, TrendingUp, TrendingDown, Gauge, ListChecks, RefreshCcw, Copy, 
 import { useMarketStatus, useCreateTrade, useSignal } from "../api/hooks";
 import { useTradeLog, liveLtpFor, effectiveStopFor } from "../hooks/useTradeLog";
 import { useImmediateSuite } from "../hooks/useImmediateSuite";
-import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
+import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE, PROFIT_PER_LOT, type AiTwentyCandidate } from "../utils/aiTwentyTwentyEngine";
 import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
@@ -12,6 +12,8 @@ import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
+import { CallReviewCard } from "../components/CallReviewCard";
+import { reviewCall, medianWinnerMinutes } from "../utils/callReviewEngine";
 import { formatTipCard } from "../utils/tipFormat";
 import { calculatePotentialLeft } from "../utils/kimiPlaybook";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
@@ -183,6 +185,14 @@ function TwentyCandidateCard({
   const categories = candidate.analysis.categories;
   const lotSize = LOT_SIZE[symbolKey];
   const direction: "bullish" | "bearish" = bullish ? "bullish" : "bearish";
+  // Per-day theta for the exact leg being held, pulled from the option chain
+  // this page already loads. No additional request.
+  const thetaForOpenTrade = useMemo(() => {
+    if (!openTrade || !options || options.error) return null;
+    const row = options.rows.find((r) => r.strike === openTrade.strike);
+    const leg = row ? (openTrade.optSide === "CE" ? row.call : row.put) : null;
+    return typeof leg?.theta === "number" && Number.isFinite(leg.theta) ? leg.theta : null;
+  }, [openTrade, options]);
   const inBetween = !!openTrade && liveLtp !== null && liveLtp < openTrade.entry && liveLtp > effectiveStopFor(openTrade);
   const rebound = inBetween ? checkReboundStrength(candles, direction) : null;
   const volumeSupport = openTrade ? checkVolumeSupport(candles, direction) : null;
@@ -357,6 +367,24 @@ function TwentyCandidateCard({
 
       {openTrade && (
         <div className="px-4 pt-3 space-y-2">
+          <CallReviewCard
+            review={reviewCall({
+              optSide: openTrade.optSide,
+              direction,
+              entry: openTrade.entry,
+              stop: effectiveStopFor(openTrade),
+              targets: openTrade.targets,
+              targetsHit: openTrade.targetsHit,
+              current: liveLtp,
+              peak: openTrade.highWaterMark,
+              openedAt: openTrade.openedAt,
+              lotSize,
+              goalRs: PROFIT_PER_LOT,
+              thetaPerDay: thetaForOpenTrade,
+              candles,
+              medianWinnerMinutes: medianWinnerMinutes(log.filter((e) => e.closed)),
+            })}
+          />
           <CallStrengthButton
             candles={candles}
             direction={direction}
