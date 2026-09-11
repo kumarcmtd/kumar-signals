@@ -1,14 +1,14 @@
 import { useState } from "react";
-import { ThumbsUp, AlertTriangle, XCircle, Eye, Clock, HelpCircle, ChevronDown, Stethoscope, TrendingDown } from "lucide-react";
+import { ThumbsUp, AlertTriangle, LogOut, Eye, Clock, HelpCircle, ChevronDown, Stethoscope, TrendingDown } from "lucide-react";
 import { formatMinutes, type CallReview, type ReviewVerdict, type FactorSide } from "../utils/callReviewEngine";
 
 const VERDICT_STYLE: Record<ReviewVerdict, { color: string; soft: string; ring: string; Icon: typeof ThumbsUp; action: string }> = {
-  hold: { color: "#15803D", soft: "#DCFCE7", ring: "#16A34A", Icon: ThumbsUp, action: "HOLD" },
-  trim: { color: "#B45309", soft: "#FEF3C7", ring: "#F59E0B", Icon: AlertTriangle, action: "TAKE SOME" },
-  exit: { color: "#B91C1C", soft: "#FEE2E2", ring: "#EF4444", Icon: XCircle, action: "GET OUT" },
-  watch: { color: "#0369A1", soft: "#E0F2FE", ring: "#0EA5E9", Icon: Eye, action: "WATCH" },
-  early: { color: "#475569", soft: "#F1F5F9", ring: "#CBD5E1", Icon: Clock, action: "TOO EARLY" },
-  unknown: { color: "#475569", soft: "#F1F5F9", ring: "#CBD5E1", Icon: HelpCircle, action: "NO DATA" },
+  hold: { color: "#15803D", soft: "#DCFCE7", ring: "#16A34A", Icon: ThumbsUp, action: "KEEP HOLDING" },
+  trim: { color: "#B45309", soft: "#FEF3C7", ring: "#F59E0B", Icon: AlertTriangle, action: "BOOK SOME PROFIT" },
+  exit: { color: "#B91C1C", soft: "#FEE2E2", ring: "#EF4444", Icon: LogOut, action: "CLOSE IT" },
+  watch: { color: "#0369A1", soft: "#E0F2FE", ring: "#0EA5E9", Icon: Eye, action: "KEEP WATCHING" },
+  early: { color: "#475569", soft: "#F1F5F9", ring: "#CBD5E1", Icon: Clock, action: "JUST STARTED" },
+  unknown: { color: "#475569", soft: "#F1F5F9", ring: "#CBD5E1", Icon: HelpCircle, action: "NO PRICE YET" },
 };
 
 const SIDE_COLOR: Record<FactorSide, string> = { for: "#16A34A", against: "#DC2626", neutral: "#94A3B8" };
@@ -50,7 +50,7 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
           <>
             <div className="flex items-end justify-between gap-2">
               <div>
-                <p className="text-[9px] font-bold uppercase text-slate-400">Right now · 1 lot</p>
+                <p className="text-[9px] font-bold uppercase text-slate-400">Profit now · 1 lot</p>
                 <p className="text-2xl font-black leading-none mt-0.5" style={{ color: pnlPositive ? "#15803D" : "#DC2626" }}>
                   {pnlPositive ? "+" : "−"}
                   {rs(review.pnlRs)}
@@ -58,7 +58,7 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
               </div>
               {review.peakRs !== null && review.peakRs > 0 && (
                 <div className="text-right">
-                  <p className="text-[9px] font-bold uppercase text-slate-400">Best it reached</p>
+                  <p className="text-[9px] font-bold uppercase text-slate-400">Best so far</p>
                   <p className="text-[15px] font-black text-slate-500 leading-none mt-0.5">+{rs(review.peakRs)}</p>
                 </div>
               )}
@@ -70,7 +70,7 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
                 <div className="h-full rounded-full transition-all" style={{ width: `${goal}%`, background: v.color }} />
               </div>
               <p className="text-[9px] text-slate-400 mt-1">
-                {review.goalProgressPct === null ? "—" : `${review.goalProgressPct}% of the way to this page's goal`} · open {formatMinutes(review.minutesOpen)}
+                {review.goalProgressPct === null ? "—" : `${review.goalProgressPct}% of the way to the ₹2,000 target`} · open {formatMinutes(review.minutesOpen)}
               </p>
             </div>
 
@@ -81,7 +81,7 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
                 <TrendingDown size={12} className="shrink-0 mt-0.5" style={{ color: review.giveBackPct >= 35 ? "#DC2626" : "#94A3B8" }} />
                 <p className="text-[10.5px] text-slate-600 leading-snug">
                   <span className="font-black" style={{ color: review.giveBackPct >= 35 ? "#DC2626" : "#475569" }}>
-                    {review.giveBackPct}% of the run given back
+                    {review.giveBackPct}% of your profit is gone
                   </span>{" "}
                   — from +{rs(review.peakRs ?? 0)} down to +{rs(review.pnlRs)}.
                 </p>
@@ -91,14 +91,14 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
         )}
 
         <div className="mt-2.5 rounded-xl px-2.5 py-2" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
-          <p className="text-[9px] font-bold uppercase text-slate-400">What ends this call</p>
+          <p className="text-[9px] font-bold uppercase text-slate-400">Exit level</p>
           <p className="text-[10.5px] text-slate-600 leading-snug mt-0.5">{review.invalidation}</p>
         </div>
 
         {review.factors.length > 0 && (
           <>
             <button type="button" onClick={() => setOpen((o) => !o)} className="w-full mt-1.5 flex items-center justify-center gap-1 text-[10px] font-bold text-slate-400 py-1.5">
-              {open ? "Hide the evidence" : `Why — ${review.factors.length} live checks`}
+              {open ? "Hide details" : `Why — ${review.factors.length} things checked`}
               <ChevronDown size={11} className={open ? "rotate-180 transition-transform" : "transition-transform"} />
             </button>
             {open && (
@@ -112,8 +112,8 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
                   </div>
                 ))}
                 <p className="text-[9.5px] text-slate-400 leading-relaxed pt-1">
-                  Read live from this page's own 5-minute candles, option chain and trade log — no extra data is fetched for this. Time decay is the chain's current theta applied to how long you have
-                  held, so it is a close estimate rather than an exact debit.
+                  Checked live from this page's own 5-minute chart, option prices and your trade history — nothing extra is downloaded for this. The time-value figure is an estimate based on
+                  today's rate, not an exact amount.
                 </p>
               </div>
             )}

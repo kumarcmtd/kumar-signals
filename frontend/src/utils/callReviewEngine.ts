@@ -126,13 +126,13 @@ export function reviewCall(input: ReviewInput): CallReview {
   const adxNow = input.candles.length ? adxOf(input.candles) : null;
   const tapeWith = st ? st.direction === input.direction : null;
   if (tapeWith === true) {
-    factors.push({ id: "tape", label: "5-minute tape", side: "for", detail: `Still ${input.direction} on the 5-minute — the move that triggered this call has not turned.` });
+    factors.push({ id: "tape", label: "5-minute chart", side: "for", detail: `Still going ${input.direction === "bullish" ? "up" : "down"} on the 5-minute chart — the move that started this call is still alive.` });
   } else if (tapeWith === false) {
-    factors.push({ id: "tape", label: "5-minute tape", side: "against", detail: `The 5-minute has flipped against a ${input.optSide}. The reason for this call is gone.` });
+    factors.push({ id: "tape", label: "5-minute chart", side: "against", detail: `The 5-minute chart has turned the other way. The reason for taking this ${input.optSide} is gone.` });
   }
   if (adxNow !== null) {
-    if (adxNow >= 25) factors.push({ id: "adx", label: "Trend strength", side: "for", detail: `ADX ${adxNow.toFixed(0)} — there is a real trend carrying this, not chop.` });
-    else if (adxNow < 18) factors.push({ id: "adx", label: "Trend strength", side: "against", detail: `ADX ${adxNow.toFixed(0)} — the move has gone flat. Premium bleeds in chop.` });
+    if (adxNow >= 25) factors.push({ id: "adx", label: "Trend strength", side: "for", detail: `Trend strength ${adxNow.toFixed(0)} — there is a real move here, not sideways.` });
+    else if (adxNow < 18) factors.push({ id: "adx", label: "Trend strength", side: "against", detail: `Trend strength ${adxNow.toFixed(0)} — price has gone sideways, and your premium loses value while it does.` });
   }
 
   // --- Money ---
@@ -147,26 +147,26 @@ export function reviewCall(input: ReviewInput): CallReview {
   if (giveBackPct !== null && giveBackPct >= GIVE_BACK_WARN_PCT && peakRs > 0) {
     factors.push({
       id: "giveback",
-      label: "Given back",
+      label: "Profit lost",
       side: "against",
-      detail: `Peaked at +₹${peakRs.toLocaleString("en-IN")}, now +₹${Math.max(0, pnlRs ?? 0).toLocaleString("en-IN")} — ${giveBackPct}% of the run handed back.`,
+      detail: `It reached +₹${peakRs.toLocaleString("en-IN")}, now +₹${Math.max(0, pnlRs ?? 0).toLocaleString("en-IN")} — ${giveBackPct}% of the profit is gone.`,
     });
   }
   if (thetaBurnedRs !== null && thetaBurnedRs > 0) {
     const heavy = pnlRs !== null && pnlRs <= 0 && thetaBurnedRs >= Math.abs(rupees(input.entry * 0.03, input.lotSize));
     factors.push({
       id: "theta",
-      label: "Time decay",
+      label: "Time value",
       side: heavy ? "against" : "neutral",
-      detail: `About ₹${thetaBurnedRs.toLocaleString("en-IN")} of the premium has gone to time decay in ${formatMinutes(minutesOpen)}.`,
+      detail: `About ₹${thetaBurnedRs.toLocaleString("en-IN")} lost to time value in ${formatMinutes(minutesOpen)} — options lose a little value every hour you hold them.`,
     });
   }
   if (input.medianWinnerMinutes !== null && minutesOpen > input.medianWinnerMinutes * 2 && (pnlRs ?? 0) <= 0) {
     factors.push({
       id: "stale",
-      label: "Time in trade",
+      label: "Time held",
       side: "against",
-      detail: `Open ${formatMinutes(minutesOpen)} — more than twice the ${formatMinutes(input.medianWinnerMinutes)} this page's winners usually need, and still not in profit.`,
+      detail: `Held ${formatMinutes(minutesOpen)} — more than double the ${formatMinutes(input.medianWinnerMinutes)} this page's winning calls usually take, and still not in profit.`,
     });
   }
 
@@ -201,10 +201,10 @@ function decide(a: {
   const { input, minutesOpen, pnlRs, peakRs, giveBackPct, goalProgressPct, tapeWith } = a;
 
   if (pnlRs === null) {
-    return { verdict: "unknown", headline: "No live premium", reason: "The option chain is unreachable, so this call cannot be reviewed right now. Nothing is being guessed." };
+    return { verdict: "unknown", headline: "Waiting for price", reason: "Live option price is not coming right now, so there is nothing to check yet. No number here is made up." };
   }
   if (minutesOpen < TOO_EARLY_MIN) {
-    return { verdict: "early", headline: "Too early to judge", reason: `Open ${formatMinutes(minutesOpen)}. Give it room — reviewing a call this young is reading noise.` };
+    return { verdict: "early", headline: "Just started", reason: `Only ${formatMinutes(minutesOpen)} old. Give it some time — too soon to tell anything.` };
   }
 
   // Handing back a real run is the single most expensive habit on a fast
@@ -212,56 +212,56 @@ function decide(a: {
   if (giveBackPct !== null && peakRs >= input.goalRs && giveBackPct >= GIVE_BACK_EXIT_PCT) {
     return {
       verdict: "exit",
-      headline: "You are giving back the win",
-      reason: `This hit +₹${peakRs.toLocaleString("en-IN")}, past the ₹${input.goalRs.toLocaleString("en-IN")} goal, and has handed back ${giveBackPct}% of it. The trade already did its job.`,
+      headline: "Profit is coming down",
+      reason: `This reached +₹${peakRs.toLocaleString("en-IN")}, above the ₹${input.goalRs.toLocaleString("en-IN")} target, and ${giveBackPct}% of that profit is already gone. This call has done its job — a good time to close it.`,
     };
   }
   if (goalProgressPct !== null && goalProgressPct >= 100) {
     return {
       verdict: "trim",
       headline: "Target reached",
-      reason: `Up ₹${pnlRs.toLocaleString("en-IN")} on 1 lot, at or past this page's ₹${input.goalRs.toLocaleString("en-IN")} goal. This is what you came for.`,
+      reason: `Up ₹${pnlRs.toLocaleString("en-IN")} on 1 lot, at or above the ₹${input.goalRs.toLocaleString("en-IN")} target. This is the profit you were waiting for.`,
     };
   }
   if (giveBackPct !== null && giveBackPct >= GIVE_BACK_EXIT_PCT && peakRs > 0) {
     return {
       verdict: "trim",
-      headline: "Momentum has rolled over",
-      reason: `Peaked at +₹${peakRs.toLocaleString("en-IN")} and given back ${giveBackPct}% of it. The run is over even though the stop has not been hit.`,
+      headline: "The move has stopped",
+      reason: `It reached +₹${peakRs.toLocaleString("en-IN")} and ${giveBackPct}% of that is gone. The move has stopped, even though the stop loss is not hit yet.`,
     };
   }
   if (tapeWith === false && pnlRs <= 0) {
     return {
       verdict: "exit",
-      headline: "The reason for this call is gone",
-      reason: `The 5-minute tape has flipped against the ${input.optSide} and the position is not in profit. There is nothing left backing it.`,
+      headline: "The move has turned",
+      reason: `The 5-minute chart has turned against this ${input.optSide} and you are not in profit. Nothing is supporting this call now.`,
     };
   }
   if (tapeWith === false) {
     return {
       verdict: "trim",
-      headline: "Tape turned while you are ahead",
-      reason: `The 5-minute has flipped against the ${input.optSide} but you are still up ₹${pnlRs.toLocaleString("en-IN")}. Taking something here is the cautious read.`,
+      headline: "Trend changed, but you are in profit",
+      reason: `The 5-minute chart has turned against this ${input.optSide}, but you are still up ₹${pnlRs.toLocaleString("en-IN")}. Booking part of it now is the safe choice.`,
     };
   }
   if (giveBackPct !== null && giveBackPct >= GIVE_BACK_WARN_PCT) {
     return {
       verdict: "watch",
-      headline: "Slipping from the high",
-      reason: `${giveBackPct}% of the run is already gone. Not broken yet — but this is where a winner quietly turns into a scratch.`,
+      headline: "Coming down from the high",
+      reason: `${giveBackPct}% of your profit is already gone. Still fine for now — but this is how a good trade slowly turns into nothing.`,
     };
   }
   if (pnlRs > 0) {
     return {
       verdict: "hold",
-      headline: "Working",
-      reason: `Up ₹${pnlRs.toLocaleString("en-IN")} with the tape still onside${goalProgressPct !== null ? ` — ${goalProgressPct}% of the way to the ₹${input.goalRs.toLocaleString("en-IN")} goal` : ""}.`,
+      headline: "Going well",
+      reason: `Up ₹${pnlRs.toLocaleString("en-IN")} and the 5-minute chart is still going your way${goalProgressPct !== null ? ` — ${goalProgressPct}% of the way to the ₹${input.goalRs.toLocaleString("en-IN")} target` : ""}.`,
     };
   }
   return {
     verdict: "watch",
-    headline: "Not working yet",
-    reason: `Down ₹${Math.abs(pnlRs).toLocaleString("en-IN")}, but the tape has not turned against the ${input.optSide}. The stop is still the line that matters.`,
+    headline: "Not moving yet",
+    reason: `Down ₹${Math.abs(pnlRs).toLocaleString("en-IN")}, but the 5-minute chart has not turned against this ${input.optSide}. Watch the stop loss — that is the line that matters.`,
   };
 }
 
@@ -288,7 +288,7 @@ function healthScore(a: {
 function invalidationFor(input: ReviewInput): string {
   const nextIdx = input.targetsHit.findIndex((h) => !h);
   const nextTarget = input.targets[nextIdx === -1 ? input.targets.length - 1 : nextIdx];
-  return `Premium back to ₹${input.stop.toFixed(2)} ends this call. ₹${nextTarget.toFixed(2)} is the next level that pays.`;
+  return `If the premium falls back to ₹${input.stop.toFixed(2)}, close this call. ₹${nextTarget.toFixed(2)} is the next profit level.`;
 }
 
 export function formatMinutes(mins: number): string {

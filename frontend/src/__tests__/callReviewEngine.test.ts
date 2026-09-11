@@ -54,7 +54,7 @@ const factor = (r: ReturnType<typeof reviewCall>, id: string) => r.factors.find(
 test("a call barely open is not judged at all", () => {
   const r = reviewCall(call({ openedAt: minsAgo(1) }));
   assert.equal(r.verdict, "early");
-  assert.match(r.reason, /reading noise/);
+  assert.match(r.reason, /too soon to tell/);
 });
 
 test(`${TOO_EARLY_MIN} minutes is old enough to review`, () => {
@@ -78,8 +78,8 @@ test("give-back is measured against the RUN, not against the premium", () => {
 test("handing back a run that already cleared the goal is an exit", () => {
   const r = reviewCall(call({ current: 209, peak: 224 }));
   assert.equal(r.verdict, "exit");
-  assert.match(r.headline, /giving back the win/i);
-  assert.match(r.reason, /already did its job/);
+  assert.match(r.headline, /Profit is coming down/i);
+  assert.match(r.reason, /done its job/);
 });
 
 test("reaching the flat goal says take it, rather than inventing a new target", () => {
@@ -92,13 +92,13 @@ test("a rolled-over run short of the goal is a trim, not an exit", () => {
   // Peaked +₹1,500 (under the ₹2,000 goal), now +₹400 = 73% given back.
   const r = reviewCall(call({ current: 204, peak: 215 }));
   assert.equal(r.verdict, "trim");
-  assert.match(r.headline, /rolled over/);
+  assert.match(r.headline, /The move has stopped/);
 });
 
 test("the tape flipping against a losing call is the clearest exit there is", () => {
   const r = reviewCall(call({ current: 195, peak: 202, candles: trendingCandles("down") }));
   assert.equal(r.verdict, "exit");
-  assert.match(r.headline, /reason for this call is gone/);
+  assert.match(r.headline, /The move has turned/);
   assert.equal(factor(r, "tape")?.side, "against");
 });
 
@@ -113,7 +113,7 @@ test("give-back does not apply once the call is underwater", () => {
 test("the tape flipping while ahead is a trim, not a panic exit", () => {
   const r = reviewCall(call({ current: 212, peak: 213, candles: trendingCandles("down") }));
   assert.equal(r.verdict, "trim");
-  assert.match(r.headline, /while you are ahead/);
+  assert.match(r.headline, /but you are in profit/);
 });
 
 test("a PE is judged against a falling tape, mirroring the CE case", () => {
@@ -126,14 +126,14 @@ test("a PE is judged against a falling tape, mirroring the CE case", () => {
 test("a working call with the tape onside is simply held", () => {
   const r = reviewCall(call({ current: 208, peak: 208 }));
   assert.equal(r.verdict, "hold");
-  assert.match(r.reason, /way to the/);
+  assert.match(r.reason, /way to the ₹2,000 target/);
 });
 
 test("an early slip from the high is a warning, not yet an instruction", () => {
   // Peaked +₹1,200, now +₹700 = 42% back: past the warn line, under the exit one.
   const r = reviewCall(call({ current: 207, peak: 212 }));
   assert.equal(r.verdict, "watch");
-  assert.match(r.headline, /Slipping from the high/);
+  assert.match(r.headline, /Coming down from the high/);
 });
 
 test("time decay is reported in rupees for the time actually held", () => {
@@ -148,13 +148,13 @@ test("no live premium reviews nothing rather than guessing", () => {
   assert.equal(r.verdict, "unknown");
   assert.equal(r.pnlRs, null);
   assert.equal(r.health, 0);
-  assert.match(r.reason, /Nothing is being guessed/);
+  assert.match(r.reason, /No number here is made up/);
 });
 
 test("a losing call open far longer than this page's winners is flagged as stale", () => {
   const r = reviewCall(call({ current: 196, peak: 201, openedAt: minsAgo(90), medianWinnerMinutes: 20 }));
   assert.equal(factor(r, "stale")?.side, "against");
-  assert.match(factor(r, "stale")!.detail, /twice the 20 min/);
+  assert.match(factor(r, "stale")!.detail, /double the 20 min/);
 });
 
 test("health rises with profit and falls when the run is handed back", () => {
@@ -165,8 +165,8 @@ test("health rises with profit and falls when the run is handed back", () => {
 
 test("the invalidation line names the real stop and the next paying level", () => {
   const r = reviewCall(call({ targetsHit: [true, false, false] }));
-  assert.match(r.invalidation, /₹180\.00 ends this call/);
-  assert.match(r.invalidation, /₹240\.00 is the next level/);
+  assert.match(r.invalidation, /falls back to ₹180\.00, close this call/);
+  assert.match(r.invalidation, /₹240\.00 is the next profit level/);
 });
 
 test("the median winner hold needs a real sample before it is used", () => {
