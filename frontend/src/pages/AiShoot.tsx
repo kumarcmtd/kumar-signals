@@ -14,14 +14,12 @@ import { ConfluenceCallCard } from "../components/ConfluenceCallCard";
 import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { TradeConsensusLights } from "../components/TradeConsensusLights";
-import { OvernightImpactCard } from "../components/OvernightImpactCard";
 import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
-import { CallAuditFor } from "../components/CallAuditCard";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -208,7 +206,6 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
             <ExpectedHoldBadge entries={log} open={{ entry: openTrade.entry, current: liveLtp, openedAt: openTrade.openedAt, nextTarget: heroNextTarget ?? openTrade.targets[0] }} />
             <DepthPressureBadge symbol={symbolKey} optSide={openTrade.optSide} />
             <ProfitMilestones entry={openTrade} current={liveLtp} lotSize={LOT_SIZE[symbolKey]} />
-          <CallAuditFor symbol={symbolKey} entry={openTrade} candles={candles} options={options} liveLtp={liveLtp} log={log} className="mt-1" />
           </>
         )}
 
@@ -459,13 +456,6 @@ export function AiShoot() {
       </section>
 
       <TradeConsensusLights />
-
-      {/* What global did while MCX was shut, and what happened AFTER the open
-          on the sessions that started the same way. */}
-      <div className="space-y-2.5">
-        <OvernightImpactCard symbol="CRUDEOIL" displayName="Crude Oil" />
-        <OvernightImpactCard symbol="NATURALGAS" displayName="Natural Gas" />
-      </div>
 
       <LevelProximityWarning />
 

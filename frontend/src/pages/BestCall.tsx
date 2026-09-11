@@ -20,7 +20,6 @@ import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
-import { CallAuditFor } from "../components/CallAuditCard";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
@@ -570,7 +569,6 @@ function BestCallCard({
           <ExpectedHoldBadge entries={log} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
           <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
           <ProfitMilestones entry={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
-          <CallAuditFor symbol={symbol} entry={latest} candles={data.underlyingCandles} options={data.options} liveLtp={liveLtp} log={log} className="mt-1" />
         </div>
       )}
 

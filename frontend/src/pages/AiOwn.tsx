@@ -14,7 +14,6 @@ import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
-import { CallAuditFor } from "../components/CallAuditCard";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
@@ -185,7 +184,6 @@ function SymbolStrategyCard({ symbol }: { symbol: AiOwnSymbol }) {
 
           <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
           <ProfitMilestones entry={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
-          <CallAuditFor symbol={symbol} entry={latest} candles={scanner.candles} options={options} liveLtp={liveLtp} log={tradeLog} className="mt-1" />
 
           <div className="rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)" }}>
             <DetailRow label="Entry" value={`₹${latest.entry}`} />
