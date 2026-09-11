@@ -368,3 +368,87 @@ export function buildAuditInput(args: {
     trackRecord: args.trackRecord,
   };
 }
+
+// ---- Adapter for the standard TradeLogEntry call pages ----
+// Best Call, AI-Shoot, Ai20-20, Level Cross and AI-Up all describe a call the
+// same way -- a strike, a side, and premium entry/stop/targets -- so one
+// adapter audits all of them. SuperTrend needs its own path only because it
+// derives its option leg from a futures setup.
+//
+// The setup-side inputs are recomputed here from the page's own candles rather
+// than taken from whatever that page happens to believe: the trend read must be
+// INDEPENDENT of the call being audited, or "is this call with the trend?"
+// would just be asking the call to confirm itself.
+
+export interface TradeLogCallLike {
+  strike: number;
+  optSide: "CE" | "PE";
+  entry: number;
+  stop: number;
+  targets: number[];
+  targetsHit: boolean[];
+  openedAt: number;
+}
+
+export function auditTradeLogCall(args: {
+  call: TradeLogCallLike;
+  /** Independent trend read for this page's timeframe. */
+  trend: Direction | null;
+  /** Independent higher-timeframe trend, normally from daily candles. */
+  higherTfTrend: Direction | null;
+  adx: number | null;
+  /** How much live evidence still backs the call (Check Call Strength's score). */
+  strengthPct: number | null;
+  options: ChainLike | undefined;
+  /** Per-strike greeks, read from the same chain row the call points at. */
+  delta: number | null;
+  thetaPerDay: number | null;
+  trackRecord: { closed: number; wins: number } | null;
+  now?: number;
+}): CallAudit {
+  const { call } = args;
+
+  // Reward to Target 2 over risk to the stop -- deliberately the same
+  // convention projectPremiumFromUnderlying uses, so "R:R" means the same
+  // thing on every card in the app. Target 1 and the stop are both built from
+  // the same ATR step on most engines, which makes R:R to Target 1
+  // structurally ~1:1 and therefore meaningless.
+  const risk = call.entry - call.stop;
+  const reward = (call.targets[1] ?? call.targets[0]) - call.entry;
+  const rr = risk > 0 && reward > 0 ? Number((reward / risk).toFixed(2)) : risk > 0 ? 0 : null;
+
+  return auditCall(
+    buildAuditInput({
+      optSide: call.optSide,
+      // A null trend read is reported as unknown rather than assumed neutral,
+      // which would otherwise fail the alignment check on missing data.
+      trend: args.trend ?? (call.optSide === "CE" ? "bullish" : "bearish"),
+      higherTfTrend: args.trend === null ? null : args.higherTfTrend,
+      adx: args.adx,
+      tradeQualityPct: args.strengthPct,
+      strike: call.strike,
+      premium: call.entry,
+      delta: args.delta,
+      thetaPerDay: args.thetaPerDay,
+      rr,
+      options: args.options,
+      trackRecord: args.trackRecord,
+      now: args.now,
+    })
+  );
+}
+
+/** Pulls the greeks for the exact strike+side a call points at. */
+export function legGreeksFor(
+  options: { rows: { strike: number; call: { delta?: number; theta?: number }; put: { delta?: number; theta?: number } }[] } | undefined,
+  strike: number,
+  optSide: "CE" | "PE"
+): { delta: number | null; thetaPerDay: number | null } {
+  const row = options?.rows.find((r) => r.strike === strike);
+  if (!row) return { delta: null, thetaPerDay: null };
+  const leg = optSide === "CE" ? row.call : row.put;
+  return {
+    delta: typeof leg.delta === "number" && Number.isFinite(leg.delta) ? Math.abs(leg.delta) : null,
+    thetaPerDay: typeof leg.theta === "number" && Number.isFinite(leg.theta) ? leg.theta : null,
+  };
+}

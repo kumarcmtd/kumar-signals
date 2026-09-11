@@ -12,6 +12,7 @@ import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
+import { CallAuditFor } from "../components/CallAuditCard";
 import { formatTipCard } from "../utils/tipFormat";
 import { calculatePotentialLeft } from "../utils/kimiPlaybook";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
@@ -365,6 +366,7 @@ function TwentyCandidateCard({
           <ExpectedHoldBadge entries={log} open={{ entry: openTrade.entry, current: liveLtp, openedAt: openTrade.openedAt, nextTarget: heroNextTarget ?? openTrade.targets[0] }} />
           <DepthPressureBadge symbol={symbolKey} optSide={openTrade.optSide} />
           <ProfitMilestones entry={openTrade} current={liveLtp} lotSize={lotSize} />
+          <CallAuditFor symbol={symbolKey} entry={openTrade} candles={candles} options={options} liveLtp={liveLtp} log={log} className="mt-1" />
         </div>
       )}
 

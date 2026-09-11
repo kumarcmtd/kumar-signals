@@ -13,6 +13,7 @@ import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
+import { CallAuditFor } from "../components/CallAuditCard";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 
 const SYMBOLS: AiUpSymbol[] = ["CRUDEOIL", "NATURALGAS"];
@@ -121,6 +122,7 @@ function SymbolReversalCard({ symbol }: { symbol: AiUpSymbol }) {
           <ExpectedHoldBadge entries={tradeLog} open={{ entry: latest.entry, current: liveLtp, openedAt: latest.openedAt, nextTarget }} />
           <DepthPressureBadge symbol={symbol} optSide={latest.optSide} />
           <ProfitMilestones entry={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />
+          <CallAuditFor symbol={symbol} entry={latest} candles={candles} options={options} liveLtp={liveLtp} log={tradeLog} className="mt-1" />
 
           <div className="grid grid-cols-3 gap-2">
             <LevelTile label="Entry" value={`₹${latest.entry}`} color="#2563EB" />

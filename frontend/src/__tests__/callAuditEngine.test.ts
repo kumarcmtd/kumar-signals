@@ -164,3 +164,68 @@ test("medianOf ignores nulls and non-positive values", () => {
   assert.equal(medianOf([]), null);
   assert.equal(medianOf([null, 0]), null);
 });
+
+// ---- The shared TradeLogEntry adapter used by the five call pages ----
+
+import { auditTradeLogCall, legGreeksFor, daysUntilExpiry } from "../utils/callAuditEngine";
+
+const call = { strike: 9100, optSide: "CE" as const, entry: 100, stop: 80, targets: [120, 160, 200], targetsHit: [false, false, false], openedAt: 1_000 };
+
+function chain(over: { delta?: number; theta?: number; iv?: number; oi?: number } = {}) {
+  const leg = { delta: over.delta ?? 0.5, theta: over.theta ?? -1, iv: over.iv ?? 30, oi: over.oi ?? 10_000, volume: 1_000 };
+  return { expiry: new Date(Date.now() + 14 * 86_400_000).toISOString(), rows: [{ strike: 9100, call: leg, put: leg }] };
+}
+
+test("R:R is measured to Target 2, matching the convention used across the app", () => {
+  // entry 100, stop 80 (risk 20), T2 160 (reward 60) => 1:3, not T1's 1:1.
+  const a = auditTradeLogCall({
+    call, trend: "bullish", higherTfTrend: "bullish", adx: 30, strengthPct: 80,
+    options: chain(), delta: 0.5, thetaPerDay: -1, trackRecord: null,
+  });
+  const rr = a.checks.find((c) => c.id === "rr")!;
+  assert.equal(rr.status, "pass");
+  assert.match(rr.detail, /1:3\.00/);
+});
+
+test("the adapter judges the call against an INDEPENDENT trend, not the call's own side", () => {
+  // A CE audited while the measured trend is bearish must fail alignment --
+  // if the trend were derived from the call it could never disagree.
+  const a = auditTradeLogCall({
+    call, trend: "bearish", higherTfTrend: "bearish", adx: 30, strengthPct: 80,
+    options: chain(), delta: 0.5, thetaPerDay: -1, trackRecord: null,
+  });
+  assert.equal(a.checks.find((c) => c.id === "trendAlign")!.status, "fail");
+});
+
+test("an unavailable trend read reports unknown rather than assuming agreement", () => {
+  const a = auditTradeLogCall({
+    call, trend: null, higherTfTrend: null, adx: null, strengthPct: null,
+    options: chain(), delta: 0.5, thetaPerDay: -1, trackRecord: null,
+  });
+  assert.equal(a.checks.find((c) => c.id === "trendAlign")!.status, "unknown");
+});
+
+test("a stop above the entry yields no R:R rather than a negative one", () => {
+  const a = auditTradeLogCall({
+    call: { ...call, stop: 120 }, trend: "bullish", higherTfTrend: "bullish", adx: 30, strengthPct: 80,
+    options: chain(), delta: 0.5, thetaPerDay: -1, trackRecord: null,
+  });
+  assert.equal(a.checks.find((c) => c.id === "rr")!.status, "unknown");
+});
+
+test("legGreeksFor reads the right side of the right strike, and copes with a missing one", () => {
+  const rows = [{ strike: 9100, call: { delta: 0.55, theta: -2 }, put: { delta: -0.45, theta: -3 } }];
+  assert.deepEqual(legGreeksFor({ rows }, 9100, "CE"), { delta: 0.55, thetaPerDay: -2 });
+  // Put delta is negative on the wire; the audit wants its magnitude.
+  assert.deepEqual(legGreeksFor({ rows }, 9100, "PE"), { delta: 0.45, thetaPerDay: -3 });
+  assert.deepEqual(legGreeksFor({ rows }, 9200, "CE"), { delta: null, thetaPerDay: null });
+  assert.deepEqual(legGreeksFor(undefined, 9100, "CE"), { delta: null, thetaPerDay: null });
+});
+
+test("daysUntilExpiry counts whole days forward and never goes negative", () => {
+  const now = Date.UTC(2026, 8, 11);
+  assert.equal(daysUntilExpiry("2026-09-18T00:00:00Z", now), 7);
+  assert.equal(daysUntilExpiry("2026-09-01T00:00:00Z", now), 0);
+  assert.equal(daysUntilExpiry("nonsense", now), null);
+  assert.equal(daysUntilExpiry(undefined, now), null);
+});

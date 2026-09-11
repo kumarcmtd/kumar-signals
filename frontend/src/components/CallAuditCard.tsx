@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { CheckCircle2, AlertTriangle, XCircle, HelpCircle, ChevronDown, ShieldCheck, History } from "lucide-react";
+import { useCallAudit } from "../hooks/useCallAudit";
 import type { CallAudit, AuditGrade, AuditStatus } from "../utils/callAuditEngine";
+import type { Candle, InstrumentSymbol, OptionsAnalytics } from "../types";
+import type { TradeLogEntry } from "../utils/tradeLogCore";
 
 export const GRADE_STYLE: Record<AuditGrade, { color: string; soft: string; ring: string }> = {
   "A+": { color: "#15803D", soft: "#DCFCE7", ring: "#16A34A" },
@@ -123,4 +126,32 @@ export function CallAuditCard({
       </div>
     </div>
   );
+}
+
+/**
+ * Drop-in audit for a standard TradeLogEntry call. A component rather than a
+ * bare hook so pages can render it inside the conditional blocks where their
+ * call cards already live -- calling useCallAudit there directly would break
+ * the rules of hooks.
+ */
+export function CallAuditFor({
+  symbol,
+  entry,
+  candles,
+  options,
+  liveLtp,
+  log,
+  className,
+}: {
+  symbol: InstrumentSymbol;
+  entry: TradeLogEntry | null | undefined;
+  candles: Candle[];
+  options: OptionsAnalytics | undefined;
+  liveLtp: number | null;
+  log?: TradeLogEntry[];
+  className?: string;
+}) {
+  const audit = useCallAudit({ symbol, entry, candles, options, liveLtp, log });
+  if (!audit || audit.knownChecks === 0) return null;
+  return <CallAuditCard audit={audit} className={className} />;
 }

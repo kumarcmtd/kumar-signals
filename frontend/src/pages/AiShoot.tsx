@@ -21,6 +21,7 @@ import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
+import { CallAuditFor } from "../components/CallAuditCard";
 import type { TimeframeAnalysis, Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
 
@@ -207,6 +208,7 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
             <ExpectedHoldBadge entries={log} open={{ entry: openTrade.entry, current: liveLtp, openedAt: openTrade.openedAt, nextTarget: heroNextTarget ?? openTrade.targets[0] }} />
             <DepthPressureBadge symbol={symbolKey} optSide={openTrade.optSide} />
             <ProfitMilestones entry={openTrade} current={liveLtp} lotSize={LOT_SIZE[symbolKey]} />
+          <CallAuditFor symbol={symbolKey} entry={openTrade} candles={candles} options={options} liveLtp={liveLtp} log={log} className="mt-1" />
           </>
         )}
 
