@@ -301,3 +301,67 @@ export function analyzeSessionWindows(intraday: Candle[]): WindowStudy {
 
   return { shares: totals, sessions: fullDays.length, available: true };
 }
+
+// ---- Global benchmark vs MCX ----
+// MCX crude is a rupee contract on a dollar barrel, so its gap is the global
+// move PLUS whatever the rupee did, plus local positioning. Comparing the two
+// says whether MCX has finished pricing the overnight move or still has room.
+//
+// Two honest limits, both surfaced on the card rather than buried: the
+// benchmark's change is measured against its OWN previous close (a near but
+// not identical window to "since MCX shut"), and no USD/INR rate is applied,
+// so part of any gap between the two is simply currency.
+
+export type ReactionVerdict = "priced_in" | "under" | "over" | "against" | "unknown";
+
+export interface GlobalVsMcx {
+  globalPct: number;
+  mcxPct: number;
+  /** MCX minus global, in percentage points. */
+  diffPct: number;
+  verdict: ReactionVerdict;
+  headline: string;
+  detail: string;
+}
+
+/** Inside this many percentage points the two are treated as the same move. */
+export const REACTION_TOLERANCE_PCT = 0.2;
+
+export function compareGlobalToMcx(globalPct: number | null | undefined, mcxPct: number | null | undefined): GlobalVsMcx | null {
+  if (typeof globalPct !== "number" || !Number.isFinite(globalPct)) return null;
+  if (typeof mcxPct !== "number" || !Number.isFinite(mcxPct)) return null;
+
+  const diffPct = Number((mcxPct - globalPct).toFixed(2));
+  const sameDirection = globalPct === 0 || mcxPct === 0 ? true : Math.sign(globalPct) === Math.sign(mcxPct);
+  const gap = Math.abs(diffPct);
+
+  if (gap <= REACTION_TOLERANCE_PCT) {
+    return {
+      globalPct, mcxPct, diffPct, verdict: "priced_in",
+      headline: "MCX has priced global in",
+      detail: `MCX opened within ${REACTION_TOLERANCE_PCT}% of the global move — the overnight news is already in the price.`,
+    };
+  }
+
+  if (!sameDirection) {
+    return {
+      globalPct, mcxPct, diffPct, verdict: "against",
+      headline: "MCX moved against global",
+      detail: "MCX opened the opposite way to the global benchmark — usually the rupee, or local positioning, rather than the commodity itself.",
+    };
+  }
+
+  // Same direction: did MCX travel less of the move, or more?
+  const under = Math.abs(mcxPct) < Math.abs(globalPct);
+  return under
+    ? {
+        globalPct, mcxPct, diffPct, verdict: "under",
+        headline: "MCX under-reacted",
+        detail: `MCX opened ${gap.toFixed(2)}% short of the global move. It may still have catching up to do — or the rupee absorbed the difference.`,
+      }
+    : {
+        globalPct, mcxPct, diffPct, verdict: "over",
+        headline: "MCX over-reacted",
+        detail: `MCX opened ${gap.toFixed(2)}% beyond the global move — it has run further than the benchmark justifies on its own.`,
+      };
+}

@@ -2,8 +2,8 @@ import { useMemo, useState, useEffect } from "react";
 import { Moon, TrendingUp, TrendingDown, Minus, ChevronDown, Clock, Maximize2, Minimize2 } from "lucide-react";
 import { useGapStudy, useCandles } from "../api/hooks";
 import {
-  sessionsFromRecords, studyBucket, bucketForGap, analyzeSessionWindows, BUCKET_LABEL,
-  type GapVerdict, type GapBucket,
+  sessionsFromRecords, studyBucket, bucketForGap, analyzeSessionWindows, compareGlobalToMcx, BUCKET_LABEL,
+  type GapVerdict, type GapBucket, type ReactionVerdict,
 } from "../utils/overnightGapEngine";
 import type { InstrumentSymbol } from "../types";
 
@@ -19,6 +19,14 @@ const VERDICT_STYLE: Record<GapVerdict, { color: string; headline: string }> = {
 
 const GAP_COLOR = (bucket: GapBucket) =>
   bucket === "strong_up" || bucket === "up" ? "#16A34A" : bucket === "strong_down" || bucket === "down" ? "#DC2626" : "#64748B";
+
+const REACTION_TONE: Record<ReactionVerdict, { color: string; soft: string; ring: string }> = {
+  priced_in: { color: "#475569", soft: "#F1F5F9", ring: "#CBD5E1" },
+  under: { color: "#0369A1", soft: "#E0F2FE", ring: "#BAE6FD" },
+  over: { color: "#B45309", soft: "#FEF3C7", ring: "#FDE68A" },
+  against: { color: "#B91C1C", soft: "#FEE2E2", ring: "#FECACA" },
+  unknown: { color: "#64748B", soft: "#F1F5F9", ring: "#CBD5E1" },
+};
 
 const signed = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(2)}%`;
 
@@ -68,6 +76,7 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
   const v = VERDICT_STYLE[study.verdict];
   const Arrow = latest.gapPct > 0 ? TrendingUp : latest.gapPct < 0 ? TrendingDown : Minus;
   const morning = windows?.shares.find((s) => s.id === "morning");
+  const vsGlobal = compareGlobalToMcx(data?.global?.changePct, latest.gapPct);
   const sessionDate = new Date(latest.date).toLocaleDateString("en-US", { day: "numeric", month: "short" });
 
   // Collapsed: one line carrying the gap and the verdict, nothing else.
@@ -103,7 +112,7 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
             <span className="text-[10px] font-black uppercase tracking-wide truncate">Overnight global · {displayName}</span>
           </span>
           <span className="flex items-center gap-2 shrink-0">
-            <span className="text-[9px] text-white/70">{sessionDate} open</span>
+            <span className="text-[9px] text-white/70">{sessionDate} open{latest.live ? " · live" : ""}</span>
             <button type="button" onClick={() => setCollapsed(true)} aria-label={`Minimise overnight impact for ${displayName}`} className="p-0.5 -m-0.5 text-white/80">
               <Minimize2 size={13} />
             </button>
@@ -126,6 +135,23 @@ export function OvernightImpactCard({ symbol, displayName }: { symbol: Instrumen
           {v.headline}
         </p>
         <p className="text-[10.5px] text-slate-500 mt-0.5 leading-snug">{study.verdictReason}</p>
+
+        {vsGlobal && (
+          <div className="mt-2 rounded-xl px-2.5 py-2" style={{ background: REACTION_TONE[vsGlobal.verdict].soft, border: `1px solid ${REACTION_TONE[vsGlobal.verdict].ring}` }}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-black" style={{ color: REACTION_TONE[vsGlobal.verdict].color }}>
+                {vsGlobal.headline}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500 shrink-0">
+                {signed(vsGlobal.globalPct)} vs {signed(vsGlobal.mcxPct)}
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-snug mt-0.5">{vsGlobal.detail}</p>
+            <p className="text-[9px] text-slate-400 mt-1">
+              {data?.global?.name} against its own previous close — a near but not identical window to "since MCX shut", and no USD/INR move is applied, so part of any difference is simply currency.
+            </p>
+          </div>
+        )}
 
         {study.sessions > 0 && (
           <div className="flex gap-1.5 mt-2">

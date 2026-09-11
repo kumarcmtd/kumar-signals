@@ -17,7 +17,8 @@ export interface NewsFeedResponse extends NewsFetchResponse {
 export interface GapStudyResponse {
   available: boolean;
   windowLabel: string;
-  latest: { date: string; gapPct: number; open: number; prevClose: number } | null;
+  latest: { date: string; gapPct: number; open: number; prevClose: number; live: boolean } | null;
+  global: { name: string; changePct: number | null } | null;
   sessions: MorningGapRecord[];
   error?: string;
 }

@@ -175,3 +175,52 @@ test("no intraday data reports unavailable instead of zeroes that look like find
   assert.equal(study.available, false);
   assert.deepEqual(study.shares, []);
 });
+
+// ---- Global benchmark vs MCX ----
+
+import { compareGlobalToMcx, REACTION_TOLERANCE_PCT } from "../utils/overnightGapEngine";
+
+test("a matching move reads as already priced in", () => {
+  const c = compareGlobalToMcx(1.2, 1.25)!;
+  assert.equal(c.verdict, "priced_in");
+  assert.equal(c.diffPct, 0.05);
+});
+
+test("MCX travelling less of the same move is an under-reaction", () => {
+  // Global +1.20%, MCX +0.35% -- the exact shape of a morning where MCX has
+  // not yet caught up.
+  const c = compareGlobalToMcx(1.2, 0.35)!;
+  assert.equal(c.verdict, "under");
+  assert.equal(c.diffPct, -0.85);
+  assert.match(c.detail, /0\.85% short/);
+});
+
+test("MCX travelling further than global is an over-reaction", () => {
+  const c = compareGlobalToMcx(0.4, 1.5)!;
+  assert.equal(c.verdict, "over");
+  assert.match(c.detail, /1\.10% beyond/);
+});
+
+test("under and over are judged on magnitude, so they work on down moves too", () => {
+  // Global -2%, MCX -0.5%: MCX has fallen less, which is still under-reacting.
+  assert.equal(compareGlobalToMcx(-2, -0.5)!.verdict, "under");
+  assert.equal(compareGlobalToMcx(-0.5, -2)!.verdict, "over");
+});
+
+test("opposite directions are called out rather than forced into under/over", () => {
+  const c = compareGlobalToMcx(1.5, -0.8)!;
+  assert.equal(c.verdict, "against");
+  assert.match(c.detail, /rupee/);
+});
+
+test("a move just inside the tolerance is priced in, just outside is not", () => {
+  assert.equal(compareGlobalToMcx(1, 1 + REACTION_TOLERANCE_PCT)!.verdict, "priced_in");
+  assert.equal(compareGlobalToMcx(1, 1 + REACTION_TOLERANCE_PCT + 0.01)!.verdict, "over");
+});
+
+test("a missing benchmark yields no comparison rather than a fabricated one", () => {
+  assert.equal(compareGlobalToMcx(null, 0.35), null);
+  assert.equal(compareGlobalToMcx(1.2, null), null);
+  assert.equal(compareGlobalToMcx(undefined, undefined), null);
+  assert.equal(compareGlobalToMcx(NaN, 1), null);
+});

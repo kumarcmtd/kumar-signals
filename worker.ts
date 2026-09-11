@@ -1254,7 +1254,9 @@ interface MorningGapSession {
 interface GapStudyResponse {
   available: boolean;
   windowLabel: string;
-  latest: { date: string; gapPct: number; open: number; prevClose: number } | null;
+  latest: { date: string; gapPct: number; open: number; prevClose: number; live: boolean } | null;
+  /** The global benchmark this symbol tracks, for a like-for-like comparison. */
+  global: { name: string; changePct: number | null } | null;
   sessions: MorningGapSession[];
   error?: string;
 }
@@ -1341,7 +1343,7 @@ function buildMorningSessions(daily: Candle[], bars30m: Candle[]): MorningGapSes
 }
 
 async function computeGapStudy(env: Env, token: string, symbol: Symbol): Promise<GapStudyResponse> {
-  const empty = { available: false, windowLabel: "9:00-11:00 AM", latest: null, sessions: [] as MorningGapSession[] };
+  const empty = { available: false, windowLabel: "9:00-11:00 AM", latest: null, global: null, sessions: [] as MorningGapSession[] };
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { ...empty, error: "No instrument found" };
 
@@ -1351,12 +1353,46 @@ async function computeGapStudy(env: Env, token: string, symbol: Symbol): Promise
   const bars30m = await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
   const sessions = buildMorningSessions(daily, bars30m);
 
+  // Upstox's historical DAILY endpoint only returns completed sessions, so at
+  // 9:18 AM the newest daily candle is still yesterday's -- which made the card
+  // show yesterday's gap at exactly the moment the overnight move matters most.
+  // Today's real open comes from the live intraday feed instead: its first
+  // 1-minute bar IS the 9:00 open, measured against the last completed daily
+  // close. The daily-only path stays as the fallback for outside market hours.
   let latest: GapStudyResponse["latest"] = null;
-  if (daily.length >= 2) {
+  const lastDaily = daily.length ? daily[daily.length - 1] : null;
+  const todayBars = await getIntradayCandles(token, fut.instrument_key);
+  const firstBar = todayBars && todayBars.length ? todayBars[0] : null;
+
+  if (firstBar && lastDaily && lastDaily.close > 0 && firstBar.open > 0 && firstBar.date.slice(0, 10) !== lastDaily.date.slice(0, 10)) {
+    latest = {
+      date: firstBar.date,
+      gapPct: Number((((firstBar.open - lastDaily.close) / lastDaily.close) * 100).toFixed(2)),
+      open: firstBar.open,
+      prevClose: lastDaily.close,
+      live: true,
+    };
+  } else if (daily.length >= 2) {
     const prev = daily[daily.length - 2];
     const cur = daily[daily.length - 1];
     if (prev.close > 0 && cur.open > 0) {
-      latest = { date: cur.date, gapPct: Number((((cur.open - prev.close) / prev.close) * 100).toFixed(2)), open: cur.open, prevClose: prev.close };
+      latest = { date: cur.date, gapPct: Number((((cur.open - prev.close) / prev.close) * 100).toFixed(2)), open: cur.open, prevClose: prev.close, live: false };
+    }
+  }
+
+  // The global benchmark MCX is following. Yahoo reports this against the
+  // benchmark's OWN previous close, which is a near but not identical window
+  // to "since MCX shut" -- the card says so rather than implying they are the
+  // same measurement.
+  const wanted = symbol === "CRUDEOIL" ? "CL=F" : "NG=F";
+  const inst = GLOBAL_INSTRUMENTS.find((g) => g.symbol === wanted);
+  let globalQuote: GapStudyResponse["global"] = null;
+  if (inst) {
+    try {
+      const q = await getYahooQuote(inst.symbol, inst.name, inst.tracksMCX);
+      globalQuote = { name: inst.name, changePct: q.changePercent };
+    } catch {
+      globalQuote = null;
     }
   }
 
@@ -1364,6 +1400,7 @@ async function computeGapStudy(env: Env, token: string, symbol: Symbol): Promise
     available: sessions.length > 0,
     windowLabel: "9:00-11:00 AM",
     latest,
+    global: globalQuote,
     sessions,
     error: sessions.length === 0 ? "No 30-minute morning history available for this contract yet" : undefined,
   };
