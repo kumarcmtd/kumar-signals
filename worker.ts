@@ -582,7 +582,38 @@ async function fetchHistoricalCandles(token: string, instrumentKey: string): Pro
   return candles;
 }
 
+// Every timeframe on a page (15m, 30m, 60m, 240m) is built by RESAMPLING the
+// same 1-minute intraday feed -- see getCandlesForTF. React Query fires those
+// four requests simultaneously per symbol, so one poll was making four
+// byte-identical Upstox calls, eight across both symbols, roughly thirty-two a
+// minute for a single payload. That is the largest single source of upstream
+// traffic in the app and the most likely reason the 1015 rate limit keeps
+// being hit.
+//
+// The IN-FLIGHT PROMISE is cached, not just the result: the four requests
+// arrive together, so a result-only cache would still let all four miss and
+// fetch in parallel. Sharing the promise means they await one call. The TTL is
+// deliberately tiny -- shorter than the client's own 15s poll -- so this
+// collapses the fan-out without making any timeframe staler than it already
+// was. A failed fetch is evicted immediately so the next poll retries.
+const INTRADAY_CACHE_TTL_MS = 8_000;
+const intradayCache = new Map<string, { at: number; promise: Promise<Candle[] | null> }>();
+
 async function getIntradayCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
+  const hit = intradayCache.get(instrumentKey);
+  if (hit && Date.now() - hit.at < INTRADAY_CACHE_TTL_MS) return hit.promise;
+
+  const promise = fetchIntradayCandles(token, instrumentKey);
+  intradayCache.set(instrumentKey, { at: Date.now(), promise });
+  promise
+    .then((v) => {
+      if (!v) intradayCache.delete(instrumentKey);
+    })
+    .catch(() => intradayCache.delete(instrumentKey));
+  return promise;
+}
+
+async function fetchIntradayCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
   const url = `${UPSTOX_INTRADAY_URL}/${encodeURIComponent(instrumentKey)}/1minute`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
   const json: any = await upstoxJson(res, "price history");
@@ -2098,7 +2129,22 @@ async function getFuturesDepth(token: string, instrumentKey: string, tradingSymb
   };
 }
 
+// Several components ask for the same symbol's depth in the same tick -- the
+// order-book pressure badge on each open call card, plus the depth panel. Same
+// in-flight sharing as the intraday feed, for the same reason.
+const DEPTH_CACHE_TTL_MS = 4_000;
+const depthCache = new Map<string, { at: number; promise: Promise<MarketDepthSnapshot | { error: string }> }>();
+
 async function computeMarketDepth(token: string, symbol: Symbol): Promise<MarketDepthSnapshot | { error: string }> {
+  const hit = depthCache.get(symbol);
+  if (hit && Date.now() - hit.at < DEPTH_CACHE_TTL_MS) return hit.promise;
+  const promise = fetchMarketDepth(token, symbol);
+  depthCache.set(symbol, { at: Date.now(), promise });
+  promise.then((v) => { if ("error" in v) depthCache.delete(symbol); }).catch(() => depthCache.delete(symbol));
+  return promise;
+}
+
+async function fetchMarketDepth(token: string, symbol: Symbol): Promise<MarketDepthSnapshot | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
   return getFuturesDepth(token, fut.instrument_key, fut.trading_symbol);

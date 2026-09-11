@@ -87,14 +87,18 @@ export function useOptionsAnalytics(symbol: InstrumentSymbol) {
 }
 
 // Level 2 market depth for the underlying future -- used by AI Strategy
-// Verification's Market Depth & Smart Money card. A short refetch interval
-// since a stale order-book snapshot is actively misleading, not just less
-// current; the page's own 5s tick also force-refreshes this same key.
+// Verification's Market Depth & Smart Money card and the order-book pressure
+// badge. This was the fastest poll in the app at 5s, which across two symbols
+// was 24 upstream calls a minute on its own and a real contributor to the
+// Upstox rate limit. A stale order book is misleading, so this stays the
+// fastest thing here -- just not three times faster than it needs to be. The
+// pages that genuinely need an instant read still force-refresh this key on
+// their own tick.
 export function useMarketDepth(symbol: InstrumentSymbol) {
   return useQuery({
     queryKey: ["depth", symbol],
     queryFn: () => api.depth(symbol),
-    refetchInterval: 5_000,
+    refetchInterval: 15_000,
   });
 }
 
