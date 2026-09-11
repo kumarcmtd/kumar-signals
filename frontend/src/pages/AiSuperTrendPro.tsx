@@ -13,6 +13,15 @@ import { TIMEFRAME_OPTIONS, effectiveStopForSetup, type MarketStatusLabel, type 
 import { flattenClosedSuperTrend, computeSuperTrendPerformance, exitPriceForSuperTrend } from "../utils/superTrendProStats";
 import { evaluateEntryTiming } from "../utils/entryTiming";
 import { EntryTimingBadge } from "../components/EntryTimingBadge";
+import { CallStrengthButton } from "../components/CallStrengthButton";
+import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
+import { DepthPressureBadge } from "../components/DepthPressureBadge";
+import { LevelProximityWarning } from "../components/LevelProximityWarning";
+import { SignalConflictWarning } from "../components/SignalConflictWarning";
+import { PriceScale } from "../components/CallCardKit";
+import { liveLtpFor } from "../utils/tradeLogCore";
+import type { Candle } from "../types";
+import type { TradeLogEntry } from "../utils/tradeLogCore";
 
 const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -138,6 +147,11 @@ export function AiSuperTrendPro() {
         ))}
       </div>
 
+      {/* App-wide warnings the other call pages already carry: a level about
+          to be tested, and CE/PE running live at the same time. */}
+      <LevelProximityWarning />
+      <SignalConflictWarning />
+
       {candlesError && (
         <div className="card p-4">
           <div className="flex items-start gap-2">
@@ -203,7 +217,7 @@ export function AiSuperTrendPro() {
                   <Layers size={12} />
                   {openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"}
                 </p>
-                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} options={options} />
+                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} options={options} candles={candles} />
               </div>
             </div>
           )}
@@ -366,11 +380,13 @@ function TradeSetupBody({
   openEntry,
   symbol,
   options,
+  candles,
 }: {
   snapshot: NonNullable<ReturnType<typeof useSuperTrendPro>["snapshot"]>;
   openEntry: ReturnType<typeof useSuperTrendPro>["log"][number] | null;
   symbol: TradableSymbol;
   options: OptionsAnalytics | undefined;
+  candles: Candle[];
 }) {
   const setup = snapshot.tradeSetup!;
   const entry = openEntry?.entry ?? setup.entry;
@@ -424,7 +440,32 @@ function TradeSetupBody({
       </div>
       <EntryTimingBadge verdict={entryTiming} theme="light" className="mt-2.5" />
 
-      <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} />
+      {/* The same supporting toolkit every other call page carries, pointed at
+          this setup: strength re-check off real candles, pace-to-target, and
+          live order-book pressure on the option leg actually being bought. */}
+      <div className="mt-2.5 space-y-2">
+        <CallStrengthButton
+          candles={candles}
+          direction={direction}
+          ctx={{
+            entry: dirSign * entry,
+            stop: dirSign * trailingStop,
+            targets: [dirSign * targets[0], dirSign * targets[1], dirSign * targets[2]],
+            targetsHit: [targetsHit[0], targetsHit[1], targetsHit[2]],
+            current: dirSign * snapshot.lastPrice,
+            openedAt: openEntry?.openedAt ?? Date.now(),
+          }}
+        />
+        {openEntry && !openEntry.closed && (
+          <ExpectedHoldBadge
+            entries={[]}
+            open={{ entry: dirSign * entry, current: dirSign * snapshot.lastPrice, openedAt: openEntry.openedAt, nextTarget: dirSign * nextTarget }}
+          />
+        )}
+        <DepthPressureBadge symbol={symbol} optSide={optSide} />
+      </div>
+
+      <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} options={options} />
 
       {openEntry ? (
         <FuturesProfitEstimate
@@ -447,8 +488,19 @@ function TradeSetupBody({
 // The options version of the futures setup above -- ATM Call for a bullish
 // trend, ATM Put for a bearish one, with premium entry/SL/targets projected
 // the same honest way (real delta + theta) as every other options card.
-function OptionsTradeCard({ symbol, optSide, proj }: { symbol: TradableSymbol; optSide: "CE" | "PE"; proj: ReturnType<typeof projectPremiumFromUnderlying> }) {
+function OptionsTradeCard({
+  symbol,
+  optSide,
+  proj,
+  options,
+}: {
+  symbol: TradableSymbol;
+  optSide: "CE" | "PE";
+  proj: ReturnType<typeof projectPremiumFromUnderlying>;
+  options: OptionsAnalytics | undefined;
+}) {
   const accent = optSide === "CE" ? "#16A34A" : "#DC2626";
+  const liveLtp = proj ? liveLtpFor(options, proj.strike, optSide) : null;
 
   if (!proj) {
     return (
@@ -480,6 +532,38 @@ function OptionsTradeCard({ symbol, optSide, proj }: { symbol: TradableSymbol; o
           <Stat label="Target 2" value={`₹${proj.targets[1].toFixed(2)}`} color="#16A34A" />
           <Stat label="Target 3" value={`₹${proj.targets[2].toFixed(2)}`} color="#16A34A" />
         </div>
+        {/* Where the premium sits between stop and targets right now. This is
+            a live projection rather than a tracked trade, so the scale's peak
+            is the highest price actually observed on this card -- the option
+            leg has no stored high-water mark to read a true session peak from. */}
+        <PriceScale
+          entry={{
+            id: `supertrend-${symbol}`,
+            strike: proj.strike,
+            optSide,
+            entry: proj.entry,
+            targets: proj.targets,
+            stop: proj.stop,
+            targetsHit: [
+              liveLtp !== null && liveLtp >= proj.targets[0],
+              liveLtp !== null && liveLtp >= proj.targets[1],
+              liveLtp !== null && liveLtp >= proj.targets[2],
+            ],
+            status: "running",
+            closed: false,
+            openedAt: Date.now(),
+            closedAt: null,
+          } as TradeLogEntry}
+          current={liveLtp}
+        />
+        {liveLtp !== null && (
+          <div className="mt-2 rounded-lg px-2.5 py-2 flex items-center justify-between" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+            <span className="text-[10px] text-[var(--color-muted)]">1 lot ({LOT_SIZE[symbol]} qty) at ₹{proj.entry.toFixed(2)}</span>
+            <span className="text-[12px] font-black" style={{ color: liveLtp >= proj.entry ? "#15803D" : "#DC2626" }}>
+              {liveLtp >= proj.entry ? "+" : "−"}₹{INR(Math.abs((liveLtp - proj.entry) * LOT_SIZE[symbol]))}
+            </span>
+          </div>
+        )}
         <p className="text-[9px] text-[var(--color-muted)] mt-2">
           ATM {optSide} premium projected from the futures move using the strike's real delta ({proj.delta.toFixed(2)}) and a theta decay haircut — buy at or below the entry, never chase.
         </p>
