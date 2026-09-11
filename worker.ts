@@ -471,12 +471,53 @@ interface FutureInfo {
   trading_symbol: string;
 }
 
+// Cloudflare serves its own error pages as PLAIN TEXT, not JSON -- most
+// importantly "error code: 1015", which means "you are being rate limited".
+// Upstox sits behind Cloudflare, so calling res.json() on that response threw
+// a SyntaxError whose message ("Unexpected token 'e', \"error code: 1015 \" is
+// not valid JSON") was then surfaced to the trader verbatim, dressed up as a
+// market-data gap. The rate limit was real; the message was gibberish.
+// Parsing through here names the actual cause instead.
+async function upstoxJson(res: Response, what: string): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const code = /error code:\s*(\d+)/i.exec(text)?.[1];
+    if (code === "1015") {
+      throw new Error(`Upstox is rate-limiting this app right now (Cloudflare 1015) while loading ${what}. Nothing is broken -- it clears on its own and the data refills on the next refresh.`);
+    }
+    if (code) throw new Error(`Upstox returned Cloudflare error ${code} while loading ${what}.`);
+    throw new Error(`Upstox sent a non-JSON reply (HTTP ${res.status}) while loading ${what}.`);
+  }
+}
+
+// The nearest futures contract was being looked up from Upstox on EVERY
+// request -- candles, options, depth, prices, the gap study -- to resolve a
+// contract that only changes when one expires. At a 5-second depth poll and a
+// 15-second candle poll across two symbols that is by far the largest source
+// of upstream calls, and the most likely reason the 1015 limit was being hit
+// at all. Cached per isolate; the TTL is deliberately short so a contract
+// roll is picked up quickly while still collapsing ~99% of the lookups.
+const FUTURE_CACHE_TTL_MS = 15 * 60 * 1000;
+const futureCache = new Map<string, { at: number; value: FutureInfo | null }>();
+
 async function getNearestFuture(token: string, query: string): Promise<FutureInfo | null> {
+  const cached = futureCache.get(query);
+  if (cached && Date.now() - cached.at < FUTURE_CACHE_TTL_MS) return cached.value;
+  const value = await fetchNearestFuture(token, query);
+  // A failed lookup is not cached: caching null would keep the whole app dark
+  // for the full TTL after a single blip.
+  if (value) futureCache.set(query, { at: Date.now(), value });
+  return value;
+}
+
+async function fetchNearestFuture(token: string, query: string): Promise<FutureInfo | null> {
   const usp = new URLSearchParams({ query, exchanges: "MCX", instrument_types: "FUT", records: "10" });
   const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  const json: any = await res.json();
+  const json: any = await upstoxJson(res, "the futures contract list");
   if (json.status !== "success" || !json.data || !json.data.length) return null;
   const contracts = [...json.data].sort((a, b) => +new Date(a.expiry) - +new Date(b.expiry));
   const nearest = contracts[0];
@@ -494,20 +535,39 @@ async function getUpcomingFutures(token: string, query: string, count: number): 
   const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
-  const json: any = await res.json();
+  const json: any = await upstoxJson(res, "the futures contract list");
   if (json.status !== "success" || !json.data || !json.data.length) return [];
   const contracts = [...json.data].sort((a: any, b: any) => +new Date(a.expiry) - +new Date(b.expiry));
   return contracts.slice(0, count).map((c: any) => ({ instrument_key: c.instrument_key, expiry: c.expiry, trading_symbol: c.trading_symbol }));
 }
 
-async function getHistoricalCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
+const DAILY_CANDLE_CACHE_TTL_SECONDS = 30 * 60;
+
+async function getHistoricalCandles(env: Env, token: string, instrumentKey: string): Promise<Candle[] | null> {
+  const cacheKey = `daily:${instrumentKey}:${new Date().toISOString().slice(0, 10)}`;
+  const cached = await env.COMMODITY_KV.get(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as Candle[];
+    } catch {
+      // fall through and refetch on a corrupt cache entry
+    }
+  }
+  const fresh = await fetchHistoricalCandles(token, instrumentKey);
+  // Only a real result is cached -- caching a null would blank out every
+  // daily-candle consumer for the whole TTL after one bad response.
+  if (fresh) await env.COMMODITY_KV.put(cacheKey, JSON.stringify(fresh), { expirationTtl: DAILY_CANDLE_CACHE_TTL_SECONDS });
+  return fresh;
+}
+
+async function fetchHistoricalCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
   const to = new Date();
   const from = new Date();
   from.setDate(from.getDate() - 270);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/day/${fmt(to)}/${fmt(from)}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-  const json: any = await res.json();
+  const json: any = await upstoxJson(res, "price history");
   if (json.status !== "success" || !json.data || !json.data.candles) return null;
   const candles: Candle[] = json.data.candles.map((c: any[]) => ({
     date: c[0],
@@ -525,7 +585,7 @@ async function getHistoricalCandles(token: string, instrumentKey: string): Promi
 async function getIntradayCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
   const url = `${UPSTOX_INTRADAY_URL}/${encodeURIComponent(instrumentKey)}/1minute`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-  const json: any = await res.json();
+  const json: any = await upstoxJson(res, "price history");
   if (json.status !== "success" || !json.data || !json.data.candles) return null;
   const candles: Candle[] = json.data.candles.map((c: any[]) => ({
     date: c[0],
@@ -570,7 +630,7 @@ async function getHistoricalIntradayCandles(env: Env, token: string, instrumentK
   try {
     const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/1minute/${toStr}/${fmt(from)}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-    const json: any = await res.json();
+    const json: any = await upstoxJson(res, "prior-day price history");
     if (json.status !== "success" || !json.data || !json.data.candles) return [];
     const candles: Candle[] = json.data.candles.map((c: any[]) => ({
       date: c[0],
@@ -1058,7 +1118,7 @@ async function buildSignalCard(token: string, symbol: Symbol, fut: FutureInfo, c
   };
 }
 
-async function computeSignal(token: string, symbol: Symbol): Promise<SignalCard> {
+async function computeSignal(env: Env, token: string, symbol: Symbol): Promise<SignalCard> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) {
     return {
@@ -1072,7 +1132,7 @@ async function computeSignal(token: string, symbol: Symbol): Promise<SignalCard>
       error: "No instrument found",
     };
   }
-  const candles = await getHistoricalCandles(token, fut.instrument_key);
+  const candles = await getHistoricalCandles(env, token, fut.instrument_key);
   if (!candles || candles.length < 40) {
     return {
       symbol,
@@ -1088,11 +1148,11 @@ async function computeSignal(token: string, symbol: Symbol): Promise<SignalCard>
   return buildSignalCard(token, symbol, fut, candles);
 }
 
-async function computeSignals(token: string): Promise<SignalCard[]> {
+async function computeSignals(env: Env, token: string): Promise<SignalCard[]> {
   const out: SignalCard[] = [];
   for (const symbol of OPTION_SYMBOLS) {
     try {
-      out.push(await computeSignal(token, symbol));
+      out.push(await computeSignal(env, token, symbol));
     } catch (e: any) {
       out.push({
         symbol,
@@ -1119,7 +1179,7 @@ const PRIOR_HISTORY_DAYS = 20;
 
 async function getCandlesForTF(env: Env, token: string, fut: FutureInfo, tf: string): Promise<Candle[] | { error: string }> {
   if (tf === "1D") {
-    const candles = await getHistoricalCandles(token, fut.instrument_key);
+    const candles = await getHistoricalCandles(env, token, fut.instrument_key);
     if (!candles || candles.length < 40) return { error: "Not enough historical data yet" };
     return candles;
   }
@@ -1228,7 +1288,7 @@ async function getHistorical30mCandles(env: Env, token: string, instrumentKey: s
   try {
     const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/30minute/${toStr}/${fmt(from)}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-    const json: any = await res.json();
+    const json: any = await upstoxJson(res, "prior-day price history");
     if (json.status !== "success" || !json.data || !json.data.candles) return [];
     const candles: Candle[] = json.data.candles.map((c: any[]) => ({
       date: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] ?? 0, oi: c[6] ?? 0,
@@ -1322,10 +1382,10 @@ interface PriceCard {
   lastUpdated: string;
 }
 
-async function computePriceCard(token: string, symbol: Symbol): Promise<PriceCard | { symbol: Symbol; error: string }> {
+async function computePriceCard(env: Env, token: string, symbol: Symbol): Promise<PriceCard | { symbol: Symbol; error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { symbol, error: "No instrument found" };
-  const candles = await getHistoricalCandles(token, fut.instrument_key);
+  const candles = await getHistoricalCandles(env, token, fut.instrument_key);
   if (!candles || candles.length < 2) return { symbol, error: "Not enough historical data yet" };
   const last = candles[candles.length - 1];
   const prev = candles[candles.length - 2];
@@ -1345,11 +1405,11 @@ async function computePriceCard(token: string, symbol: Symbol): Promise<PriceCar
   };
 }
 
-async function computePrices(token: string) {
+async function computePrices(env: Env, token: string) {
   const out = [];
   for (const symbol of ALL_SYMBOLS) {
     try {
-      out.push(await computePriceCard(token, symbol));
+      out.push(await computePriceCard(env, token, symbol));
     } catch (e: any) {
       out.push({ symbol, error: e.message });
     }
@@ -1997,11 +2057,11 @@ interface OptionsAnalytics {
   rows: OptionRowAnalytics[];
 }
 
-async function computeOptionsAnalytics(token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
+async function computeOptionsAnalytics(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
 
-  const candles = await getHistoricalCandles(token, fut.instrument_key);
+  const candles = await getHistoricalCandles(env, token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
   const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot, pinnedStrikes);
@@ -2219,6 +2279,7 @@ interface AdvanceCounts {
 }
 
 async function advanceOpenTradesForSymbol(
+  env: Env,
   token: string,
   symbol: Symbol,
   logs: Record<string, TradeLogEntry[]>,
@@ -2235,7 +2296,7 @@ async function advanceOpenTradesForSymbol(
   }
   if (openStrikes.size === 0) return false;
 
-  const analytics = await computeOptionsAnalytics(token, symbol, Array.from(openStrikes));
+  const analytics = await computeOptionsAnalytics(env, token, symbol, Array.from(openStrikes));
   if ("error" in analytics) return false; // no live quotes -> never fabricate a close
 
   const ltpByStrikeSide = new Map<string, number>();
@@ -2300,7 +2361,7 @@ async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   let anyChanged = false;
   for (const symbol of TRADE_LOG_SYMBOLS) {
     try {
-      const changed = await advanceOpenTradesForSymbol(token, symbol as Symbol, logs, now, counts);
+      const changed = await advanceOpenTradesForSymbol(env, token, symbol as Symbol, logs, now, counts);
       anyChanged = anyChanged || changed;
     } catch {
       // best-effort -- one symbol failing must not block the other
@@ -2582,7 +2643,7 @@ async function computeBestCallForSymbol(env: Env, token: string, symbol: Symbol)
   const daily = await getCandlesForTF(env, token, fut, "1D");
   candlesByTf["1D"] = "error" in daily ? [] : daily;
 
-  const optionsResult = await computeOptionsAnalytics(token, symbol);
+  const optionsResult = await computeOptionsAnalytics(env, token, symbol);
   const options = "error" in optionsResult ? undefined : optionsResult;
 
   const analyses = CRON_TIMEFRAMES.map(({ tf, label }) =>
@@ -2757,13 +2818,13 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (url.pathname === "/api/prices") {
           const token = await requireToken(env);
           if (token instanceof Response) return token;
-          return json(await computePrices(token));
+          return json(await computePrices(env, token));
         }
 
         if (url.pathname === "/api/signals") {
           const token = await requireToken(env);
           if (token instanceof Response) return token;
-          return json(await computeSignals(token));
+          return json(await computeSignals(env, token));
         }
 
         const signalMatch = url.pathname.match(/^\/api\/signals\/([A-Z]+)$/);
@@ -2772,7 +2833,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
           const token = await requireToken(env);
           if (token instanceof Response) return token;
-          return json(await computeSignal(token, symbol));
+          return json(await computeSignal(env, token, symbol));
         }
 
         if (url.pathname === "/api/scan") {
@@ -2824,7 +2885,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
             .split(",")
             .map((s) => Number(s))
             .filter((n) => Number.isFinite(n));
-          return json(await computeOptionsAnalytics(token, symbol, pinnedStrikes));
+          return json(await computeOptionsAnalytics(env, token, symbol, pinnedStrikes));
         }
 
         const depthMatch = url.pathname.match(/^\/api\/depth\/([A-Z]+)$/);
