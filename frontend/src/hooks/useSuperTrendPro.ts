@@ -5,6 +5,7 @@ import type { Candle, InstrumentSymbol, OptionsAnalytics } from "../types";
 import { computeSuperTrendPro, HIGHER_TF, advanceEntry, type SuperTrendProSnapshot } from "../utils/superTrendProEngine";
 import { projectPremiumFromUnderlying } from "../utils/optionProjection";
 import { liveLtpFor } from "../utils/tradeLogCore";
+import { auditCall, buildAuditInput } from "../utils/callAuditEngine";
 
 // Advances one open entry against the latest close, exactly the same
 // trailing-stop philosophy used everywhere else in this app (advanceOpenEntry
@@ -57,6 +58,30 @@ export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string, op
         options
       );
 
+      // Grade the call once, here, using the same adapter the live card uses.
+      const closedHere = history.filter((e) => e.closed);
+      const frozenAudit = optProj
+        ? auditCall(
+            buildAuditInput({
+              optSide,
+              trend: snapshot.trend,
+              higherTfTrend: snapshot.higherTfTrend,
+              adx: snapshot.dmi?.adx ?? null,
+              tradeQualityPct: snapshot.confidence.tradeQuality,
+              strike: optProj.strike,
+              premium: optProj.entry,
+              delta: optProj.delta,
+              thetaPerDay: optProj.thetaPerDay,
+              rr: optProj.rr,
+              options,
+              trackRecord: closedHere.length
+                ? { closed: closedHere.length, wins: closedHere.filter((e) => e.status === "target5_hit" || e.status === "stopped_trailing").length }
+                : null,
+              now,
+            })
+          )
+        : null;
+
       const entry: SuperTrendLogEntry = {
         id: `${key}-${now}`,
         symbol,
@@ -75,6 +100,8 @@ export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string, op
         optSide: optProj ? optSide : undefined,
         optEntry: optProj?.entry,
         optHighWaterMark: optProj?.entry,
+        auditScore: frozenAudit?.score,
+        auditGrade: frozenAudit?.grade,
       };
       setSuperTrendLog(key, [...history, entry]);
     }

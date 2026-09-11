@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, AlertTriangle, Layers, Sparkles, TrendingDown, TrendingUp, Wallet, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Layers, Sparkles, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 import { useMarketStatus, useOptionsAnalytics } from "../api/hooks";
 import { useSuperTrendPro } from "../hooks/useSuperTrendPro";
@@ -20,6 +20,8 @@ import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { PriceScale } from "../components/CallCardKit";
 import { ProfitMilestones } from "../components/ProfitMilestones";
+import { CallAuditCard } from "../components/CallAuditCard";
+import { auditCall, buildAuditInput, type AuditGrade } from "../utils/callAuditEngine";
 import { liveLtpFor } from "../utils/tradeLogCore";
 import type { Candle } from "../types";
 import type { TradeLogEntry } from "../utils/tradeLogCore";
@@ -34,7 +36,6 @@ const TV_INTERVAL: Record<string, string> = { "1D": "D" };
 const LOT_SIZE: Record<TradableSymbol, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 const ALLOWED_TFS = new Set(TIMEFRAME_OPTIONS.map((tf) => tf.value));
 const INR = (n: number) => n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
-const PRESET_AMOUNTS = [50000, 100000, 200000, 500000];
 
 const STATUS_COLOR: Record<MarketStatusLabel, string> = {
   "Strong Buy": "#16A34A",
@@ -216,9 +217,9 @@ export function AiSuperTrendPro() {
               <div className="p-4">
                 <p className="text-xs font-bold uppercase text-[var(--color-muted)] mb-3 flex items-center gap-1.5">
                   <Layers size={12} />
-                  {openEntry ? "Trade Setup -- Tracked" : "Trade Setup -- Live Projection"}
+                  {openEntry ? "Options Call -- Tracked" : "Options Call -- Live Projection"}
                 </p>
-                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} options={options} candles={candles} />
+                <TradeSetupBody snapshot={snapshot} openEntry={openEntry} symbol={symbol} options={options} candles={candles} log={log} />
               </div>
             </div>
           )}
@@ -382,12 +383,14 @@ function TradeSetupBody({
   symbol,
   options,
   candles,
+  log,
 }: {
   snapshot: NonNullable<ReturnType<typeof useSuperTrendPro>["snapshot"]>;
   openEntry: ReturnType<typeof useSuperTrendPro>["log"][number] | null;
   symbol: TradableSymbol;
   options: OptionsAnalytics | undefined;
   candles: Candle[];
+  log: ReturnType<typeof useSuperTrendPro>["log"];
 }) {
   const setup = snapshot.tradeSetup!;
   const entry = openEntry?.entry ?? setup.entry;
@@ -416,35 +419,64 @@ function TradeSetupBody({
   const optSide: "CE" | "PE" = direction === "bullish" ? "CE" : "PE";
   const optionProj = projectPremiumFromUnderlying(optSide, entry, stop, [targets[0], targets[1], targets[2]], options);
 
-  return (
-    <div>
-      <div className="grid grid-cols-2 gap-2 mb-3">
-        <Stat label="Entry" value={`₹${entry.toFixed(2)}`} />
-        <Stat label="Current Price" value={`₹${snapshot.lastPrice.toFixed(2)}`} />
-        <Stat label="Stop Loss" value={`₹${stop.toFixed(2)}`} color="#DC2626" />
-        <Stat label="ATR Stop" value={`₹${setup.atrStop.toFixed(2)}`} />
-        <Stat label="Trailing Stop" value={`₹${trailingStop.toFixed(2)}`} color="#D97706" />
-        <Stat label="Risk : Reward" value={`1:${rr.toFixed(2)}`} />
-        <Stat label="Expected Profit" value={`+${Math.abs(targets[0] - entry).toFixed(2)}`} color="#16A34A" />
-        <Stat label="Expected Loss" value={`-${Math.abs(entry - stop).toFixed(2)}`} color="#DC2626" />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {targets.map((t, i) => (
-          <span
-            key={i}
-            className="text-[11px] px-2.5 py-1 rounded-full font-bold"
-            style={{ background: targetsHit[i] ? "#DCFCE7" : "var(--color-surface-soft)", color: targetsHit[i] ? "#15803D" : "var(--color-muted)", border: "1px solid var(--color-border)" }}
-          >
-            T{i + 1} ₹{t.toFixed(2)} {targetsHit[i] ? "✓" : ""}
-          </span>
-        ))}
-      </div>
-      <EntryTimingBadge verdict={entryTiming} theme="light" className="mt-2.5" />
+  // Live audit of the call as it stands right now. The hook freezes the same
+  // computation at the moment a call is given, so the card can show both and
+  // the trader can see whether the call has decayed since.
+  const closedHere = log.filter((e) => e.closed);
+  const liveAudit = optionProj
+    ? auditCall(
+        buildAuditInput({
+          optSide,
+          trend: snapshot.trend,
+          higherTfTrend: snapshot.higherTfTrend,
+          adx: snapshot.dmi?.adx ?? null,
+          tradeQualityPct: snapshot.confidence.tradeQuality,
+          strike: optionProj.strike,
+          premium: optionProj.entry,
+          delta: optionProj.delta,
+          thetaPerDay: optionProj.thetaPerDay,
+          rr: optionProj.rr,
+          options,
+          trackRecord: closedHere.length
+            ? { closed: closedHere.length, wins: closedHere.filter((e) => e.status === "target5_hit" || e.status === "stopped_trailing").length }
+            : null,
+        })
+      )
+    : null;
+  const frozenAudit = openEntry?.auditScore !== undefined && openEntry.auditGrade ? { score: openEntry.auditScore, grade: openEntry.auditGrade as AuditGrade } : null;
 
-      {/* The same supporting toolkit every other call page carries, pointed at
-          this setup: strength re-check off real candles, pace-to-target, and
-          live order-book pressure on the option leg actually being bought. */}
-      <div className="mt-2.5 space-y-2">
+  return (
+    <div className="space-y-3">
+      {/* The audit leads: what grade this call earned, and why. */}
+      {liveAudit && <CallAuditCard audit={liveAudit} atCall={frozenAudit} />}
+
+      {/* Then the call itself -- the CE/PE actually being bought. */}
+      <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} options={options} />
+
+      {openEntry?.optEntry !== undefined && openEntry.optStrike !== undefined && openEntry.optSide && (
+        <ProfitMilestones
+          entry={{
+            id: openEntry.id,
+            strike: openEntry.optStrike,
+            optSide: openEntry.optSide,
+            entry: openEntry.optEntry,
+            targets: [openEntry.optEntry, openEntry.optEntry, openEntry.optEntry],
+            stop: openEntry.optEntry,
+            targetsHit: [false, false, false],
+            status: openEntry.closed ? "sl_hit" : "running",
+            closed: openEntry.closed,
+            openedAt: openEntry.openedAt,
+            closedAt: openEntry.closedAt,
+            highWaterMark: openEntry.optHighWaterMark,
+          } as TradeLogEntry}
+          current={liveLtpFor(options, openEntry.optStrike, openEntry.optSide)}
+          lotSize={LOT_SIZE[symbol]}
+        />
+      )}
+
+      <EntryTimingBadge verdict={entryTiming} theme="light" />
+
+      <div className="space-y-2">
         <CallStrengthButton
           candles={candles}
           direction={direction}
@@ -466,45 +498,41 @@ function TradeSetupBody({
         <DepthPressureBadge symbol={symbol} optSide={optSide} />
       </div>
 
-      <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} options={options} />
+      {/* The futures levels still drive the option projection, so they stay --
+          just folded away, since this page is read as an options call now. */}
+      <details className="rounded-xl" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
+        <summary className="cursor-pointer px-3 py-2 text-[11px] font-bold text-[var(--color-muted)] flex items-center gap-1.5">
+          <Layers size={12} /> Underlying levels these targets came from
+        </summary>
+        <div className="px-3 pb-3">
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <Stat label="Entry" value={`₹${entry.toFixed(2)}`} />
+            <Stat label="Current Price" value={`₹${snapshot.lastPrice.toFixed(2)}`} />
+            <Stat label="Stop Loss" value={`₹${stop.toFixed(2)}`} color="#DC2626" />
+            <Stat label="ATR Stop" value={`₹${setup.atrStop.toFixed(2)}`} />
+            <Stat label="Trailing Stop" value={`₹${trailingStop.toFixed(2)}`} color="#D97706" />
+            <Stat label="Risk : Reward" value={`1:${rr.toFixed(2)}`} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {targets.map((t, i) => (
+              <span
+                key={i}
+                className="text-[11px] px-2.5 py-1 rounded-full font-bold"
+                style={{ background: targetsHit[i] ? "#DCFCE7" : "var(--color-surface)", color: targetsHit[i] ? "#15803D" : "var(--color-muted)", border: "1px solid var(--color-border)" }}
+              >
+                T{i + 1} ₹{t.toFixed(2)} {targetsHit[i] ? "✓" : ""}
+              </span>
+            ))}
+          </div>
+          <p className="text-[9px] text-[var(--color-muted)] mt-2">
+            These are futures prices, shown only because the option entry, stop and targets above are projected from them. Trade the option, not these.
+          </p>
+        </div>
+      </details>
 
-      {/* Only ever rendered off a TRACKED option leg -- a live projection has
-          no stored peak, and reporting the current price as "the best it
-          reached" is exactly the claim this card must never make. */}
-      {openEntry?.optEntry !== undefined && openEntry.optStrike !== undefined && openEntry.optSide && (
-        <ProfitMilestones
-          entry={{
-            id: openEntry.id,
-            strike: openEntry.optStrike,
-            optSide: openEntry.optSide,
-            entry: openEntry.optEntry,
-            targets: [openEntry.optEntry, openEntry.optEntry, openEntry.optEntry],
-            stop: openEntry.optEntry,
-            targetsHit: [false, false, false],
-            status: openEntry.closed ? "sl_hit" : "running",
-            closed: openEntry.closed,
-            openedAt: openEntry.openedAt,
-            closedAt: openEntry.closedAt,
-            highWaterMark: openEntry.optHighWaterMark,
-          } as TradeLogEntry}
-          current={liveLtpFor(options, openEntry.optStrike, openEntry.optSide)}
-          lotSize={LOT_SIZE[symbol]}
-          className="mt-3"
-        />
-      )}
-
-      {openEntry ? (
-        <FuturesProfitEstimate
-          entry={entry}
-          current={openEntry.closed ? exitPriceForSuperTrend(openEntry) : snapshot.lastPrice}
-          lotSize={LOT_SIZE[symbol]}
-          direction={direction}
-          closed={openEntry.closed}
-        />
-      ) : (
-        <p className="text-[10px] text-[var(--color-muted)] mt-2">
-          This is a live projection recomputed every poll -- it becomes a tracked trade the moment this reading holds as Strong
-          Buy/Strong Sell.
+      {!openEntry && (
+        <p className="text-[10px] text-[var(--color-muted)]">
+          A live projection recomputed every poll -- it becomes a tracked call, with its grade frozen, the moment this reading holds as Strong Buy/Strong Sell.
         </p>
       )}
     </div>
@@ -594,98 +622,6 @@ function OptionsTradeCard({
           ATM {optSide} premium projected from the futures move using the strike's real delta ({proj.delta.toFixed(2)}) and a theta decay haircut — buy at or below the entry, never chase.
         </p>
       </div>
-    </div>
-  );
-}
-
-// Same "what would this be worth" convention Best Call already uses for
-// option premium (full notional, not real futures margin -- kept
-// consistent with the rest of the app), generalized here for a direction
-// that can go either way: a SELL/short profits when price falls, so the
-// P&L sign flips on direction rather than always assuming a long.
-function FuturesProfitEstimate({
-  entry,
-  current,
-  lotSize,
-  direction,
-  closed,
-}: {
-  entry: number;
-  current: number;
-  lotSize: number;
-  direction: "bullish" | "bearish";
-  closed: boolean;
-}) {
-  const [amount, setAmount] = useState(100000);
-  const costPerLot = entry * lotSize;
-  const lots = Math.floor(amount / costPerLot);
-  const dirSign = direction === "bullish" ? 1 : -1;
-  const invested = lots * costPerLot;
-  const worth = invested + lots * (current - entry) * dirSign * lotSize;
-  const inProfit = worth >= invested;
-  const pnlPct = invested > 0 ? Number((((worth - invested) / invested) * 100).toFixed(2)) : 0;
-
-  return (
-    <div className="mt-3 rounded-xl px-3.5 py-3" style={{ background: "var(--color-surface-soft)", border: "1px solid var(--color-border)" }}>
-      <p className="text-[10px] font-bold uppercase text-[var(--color-muted)] mb-2.5 flex items-center gap-1.5">
-        <Wallet size={12} />
-        {closed ? "What that investment would have made" : "What that investment is worth right now"}
-      </p>
-
-      <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-xs text-[var(--color-muted)]">₹</span>
-        <input
-          type="number"
-          value={amount}
-          onChange={(ev) => setAmount(Math.max(0, Number(ev.target.value) || 0))}
-          className="flex-1 min-w-0 rounded-lg px-2.5 py-1.5 text-sm font-bold border"
-          style={{ background: "var(--color-surface)", borderColor: "var(--color-border)" }}
-        />
-      </div>
-      <div className="flex flex-wrap gap-1.5 mb-3">
-        {PRESET_AMOUNTS.map((p) => (
-          <button
-            key={p}
-            onClick={() => setAmount(p)}
-            className="text-[10px] px-2 py-1 rounded-full font-bold"
-            style={amount === p ? { background: "#2563EB", color: "#fff" } : { background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
-          >
-            ₹{INR(p)}
-          </button>
-        ))}
-      </div>
-
-      {lots < 1 ? (
-        <p className="text-xs text-[var(--color-muted)]">
-          ₹{INR(amount)} isn't enough for even 1 lot at this entry — 1 lot of this contract needs ₹{INR(costPerLot)} ({lotSize} qty × ₹{entry.toFixed(2)}).
-        </p>
-      ) : (
-        <>
-          <p className="text-[11px] text-[var(--color-muted)] mb-2">
-            Buys {lots} lot{lots > 1 ? "s" : ""} ({lots * lotSize} qty) for ₹{INR(invested)} at the ₹{entry.toFixed(2)} entry.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
-              <p className="text-[9px] text-[var(--color-muted)]">Invested</p>
-              <p className="text-xs font-bold">₹{INR(invested)}</p>
-            </div>
-            <div className="rounded-lg px-2.5 py-2" style={{ background: "var(--color-surface)" }}>
-              <p className="text-[9px] text-[var(--color-muted)]">{closed ? "Exit value" : "Worth now"}</p>
-              <p className="text-xs font-bold">₹{INR(worth)}</p>
-            </div>
-          </div>
-          <div className="mt-2 rounded-lg px-2.5 py-2 text-center" style={{ background: inProfit ? "#DCFCE7" : "#FEE2E2" }}>
-            <p className="text-lg font-black" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
-              {inProfit ? "+" : ""}
-              ₹{INR(worth - invested)}
-            </p>
-            <p className="text-[10px]" style={{ color: inProfit ? "#15803D" : "#B91C1C" }}>
-              {pnlPct >= 0 ? "+" : ""}
-              {pnlPct}% {closed ? "on that trade" : "right now"}
-            </p>
-          </div>
-        </>
-      )}
     </div>
   );
 }

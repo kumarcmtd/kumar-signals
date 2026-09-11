@@ -86,6 +86,11 @@ export interface SuperTrendLogEntry {
   optSide?: "CE" | "PE";
   optEntry?: number;
   optHighWaterMark?: number;
+  // The call's audit grade FROZEN at the moment it was given. Kept rather than
+  // recomputed so the card can show whether the call has weakened since -- a
+  // grade that silently re-rates itself would quietly rewrite its own history.
+  auditScore?: number;
+  auditGrade?: string;
 }
 
 const MAX_SUPERTREND_HISTORY = 100;
