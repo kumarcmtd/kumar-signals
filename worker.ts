@@ -680,7 +680,15 @@ function resampleCandles(candles: Candle[], minutesPerBucket: number): Candle[] 
 // querying with the wrong date returns a valid response with zero strikes.
 // This discovers the real listed option expiry dates for an underlying via
 // Upstox's option/contract endpoint.
+// Expiry discovery pulls the FULL unfiltered contract list for an instrument
+// -- the single heaviest option call -- to read a set of dates that changes
+// about once a month. It ran on every options poll alongside the chain fetch.
+const OPTION_EXPIRY_CACHE_TTL_MS = 30 * 60 * 1000;
+const optionExpiryCache = new Map<string, { at: number; expiries: string[] }>();
+
 async function getOptionExpiries(token: string, instrumentKey: string): Promise<string[] | null> {
+  const cached = optionExpiryCache.get(instrumentKey);
+  if (cached && Date.now() - cached.at < OPTION_EXPIRY_CACHE_TTL_MS) return cached.expiries;
   const usp = new URLSearchParams({ instrument_key: instrumentKey });
   const res = await fetch(`https://api.upstox.com/v2/option/contract?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
@@ -695,7 +703,11 @@ async function getOptionExpiries(token: string, instrumentKey: string): Promise<
   const expiries = Array.from(new Set<string>(json.data.map((c: any) => c.expiry).filter(Boolean))).sort(
     (a, b) => +new Date(a) - +new Date(b)
   );
-  return expiries.length ? expiries : null;
+  if (!expiries.length) return null;
+  // Only a real result is cached -- a null would keep the chain dark for the
+  // whole TTL after one bad response.
+  optionExpiryCache.set(instrumentKey, { at: Date.now(), expiries });
+  return expiries;
 }
 
 // Every upcoming real option expiry for a future, nearest first; falls back
@@ -720,7 +732,21 @@ async function resolveOptionExpiryCandidates(token: string, fut: FutureInfo): Pr
 // }, put_options: { market_data } } row shape the rest of this file already
 // expects -- so analyzeChain/nearestStrikes/computeMaxPain/Greeks are
 // untouched.
+// The option CONTRACT list (which strikes exist for an expiry) was refetched
+// on every options poll -- every 20 seconds per symbol -- to read something
+// that only changes when contracts are listed or expire. The live QUOTES
+// below still run every poll, because those are the actual prices; this
+// caches only the strike inventory around them.
+const OPTION_CONTRACT_CACHE_TTL_MS = 30 * 60 * 1000;
+const optionContractCache = new Map<string, { at: number; contracts: any[] }>();
+
 async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null, pinnedStrikes: number[] = []): Promise<{ chain?: any[]; error?: string }> {
+  const contractCacheKey = `${instrumentKey}|${expiryDate}`;
+  const cachedContracts = optionContractCache.get(contractCacheKey);
+  if (cachedContracts && Date.now() - cachedContracts.at < OPTION_CONTRACT_CACHE_TTL_MS) {
+    return buildChainFromContracts(token, cachedContracts.contracts, spot, pinnedStrikes);
+  }
+
   const contractUsp = new URLSearchParams({ instrument_key: instrumentKey, expiry_date: expiryDate });
   const contractRes = await fetch(`https://api.upstox.com/v2/option/contract?${contractUsp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
@@ -728,9 +754,12 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
 
   let contractJson: any;
   try {
-    contractJson = await contractRes.json();
-  } catch {
-    return { error: `Option contract request failed (HTTP ${contractRes.status} ${contractRes.statusText}): response was not valid JSON` };
+    contractJson = await upstoxJson(contractRes, "the option chain");
+  } catch (e: any) {
+    // upstoxJson already names a Cloudflare rate limit (1015) explicitly --
+    // pass that through rather than flattening it back to "not valid JSON",
+    // which is what hid the real cause the first time.
+    return { error: e?.message ?? `Option contract request failed (HTTP ${contractRes.status} ${contractRes.statusText})` };
   }
   if (contractJson.errors && contractJson.errors.length) {
     const msg = contractJson.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
@@ -741,6 +770,12 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
   }
 
   const allContracts: any[] = contractJson.data;
+  optionContractCache.set(contractCacheKey, { at: Date.now(), contracts: allContracts });
+  return buildChainFromContracts(token, allContracts, spot, pinnedStrikes);
+}
+
+// Quote-fetching half, split out so a cached contract list can reuse it.
+async function buildChainFromContracts(token: string, allContracts: any[], spot: number | null, pinnedStrikes: number[]): Promise<{ chain?: any[]; error?: string }> {
   const allStrikes = Array.from(new Set<number>(allContracts.map((c) => c.strike_price))).sort((a, b) => a - b);
 
   // Narrow to strikes near spot before fetching quotes -- MCX chains can
@@ -771,9 +806,13 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
     });
     let quoteJson: any;
     try {
-      quoteJson = await quoteRes.json();
-    } catch {
-      continue; // best-effort -- those contracts just end up with no market_data below
+      quoteJson = await upstoxJson(quoteRes, "live option quotes");
+    } catch (e: any) {
+      // A rate limit here means EVERY strike would come back priceless, which
+      // renders as a chain full of blanks. Surface it instead of silently
+      // returning an empty chain that looks like a dead market.
+      if (typeof e?.message === "string" && e.message.includes("1015")) return { error: e.message };
+      continue; // any other blip is best-effort -- those contracts just get no market_data
     }
     if (quoteJson.status === "success" && quoteJson.data) {
       for (const q of Object.values(quoteJson.data) as any[]) {
