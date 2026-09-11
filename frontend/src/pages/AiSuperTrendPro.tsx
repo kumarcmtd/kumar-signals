@@ -19,6 +19,7 @@ import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { SignalConflictWarning } from "../components/SignalConflictWarning";
 import { PriceScale } from "../components/CallCardKit";
+import { ProfitMilestones } from "../components/ProfitMilestones";
 import { liveLtpFor } from "../utils/tradeLogCore";
 import type { Candle } from "../types";
 import type { TradeLogEntry } from "../utils/tradeLogCore";
@@ -63,7 +64,7 @@ export function AiSuperTrendPro() {
   const [timeframe, setTimeframe] = useState("15");
   const { data: market } = useMarketStatus();
   const { data: options } = useOptionsAnalytics(symbol);
-  const { snapshot, candles, candlesLoading, candlesError, log } = useSuperTrendPro(symbol, timeframe);
+  const { snapshot, candles, candlesLoading, candlesError, log } = useSuperTrendPro(symbol, timeframe, options);
 
   const superTrendLogs = useAppStore((s) => s.superTrendLogs);
   const symbolLogs = useMemo(() => {
@@ -466,6 +467,31 @@ function TradeSetupBody({
       </div>
 
       <OptionsTradeCard symbol={symbol} optSide={optSide} proj={optionProj} options={options} />
+
+      {/* Only ever rendered off a TRACKED option leg -- a live projection has
+          no stored peak, and reporting the current price as "the best it
+          reached" is exactly the claim this card must never make. */}
+      {openEntry?.optEntry !== undefined && openEntry.optStrike !== undefined && openEntry.optSide && (
+        <ProfitMilestones
+          entry={{
+            id: openEntry.id,
+            strike: openEntry.optStrike,
+            optSide: openEntry.optSide,
+            entry: openEntry.optEntry,
+            targets: [openEntry.optEntry, openEntry.optEntry, openEntry.optEntry],
+            stop: openEntry.optEntry,
+            targetsHit: [false, false, false],
+            status: openEntry.closed ? "sl_hit" : "running",
+            closed: openEntry.closed,
+            openedAt: openEntry.openedAt,
+            closedAt: openEntry.closedAt,
+            highWaterMark: openEntry.optHighWaterMark,
+          } as TradeLogEntry}
+          current={liveLtpFor(options, openEntry.optStrike, openEntry.optSide)}
+          lotSize={LOT_SIZE[symbol]}
+          className="mt-3"
+        />
+      )}
 
       {openEntry ? (
         <FuturesProfitEstimate

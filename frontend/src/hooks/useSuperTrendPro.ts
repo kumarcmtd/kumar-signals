@@ -1,36 +1,16 @@
 import { useEffect, useMemo } from "react";
 import { useCandles } from "../api/hooks";
 import { useAppStore, type SuperTrendLogEntry } from "../store/appStore";
-import type { Candle, InstrumentSymbol } from "../types";
-import { computeSuperTrendPro, effectiveStopForSetup, HIGHER_TF, type SuperTrendProSnapshot } from "../utils/superTrendProEngine";
+import type { Candle, InstrumentSymbol, OptionsAnalytics } from "../types";
+import { computeSuperTrendPro, HIGHER_TF, advanceEntry, type SuperTrendProSnapshot } from "../utils/superTrendProEngine";
+import { projectPremiumFromUnderlying } from "../utils/optionProjection";
+import { liveLtpFor } from "../utils/tradeLogCore";
 
 // Advances one open entry against the latest close, exactly the same
 // trailing-stop philosophy used everywhere else in this app (advanceOpenEntry
 // in hooks/useTradeLog.ts), generalized to 5 ATR-based targets and a raw
 // price direction instead of a fixed CE/PE + strike.
-function advanceEntry(entry: SuperTrendLogEntry, liveClose: number | null, now: number): SuperTrendLogEntry {
-  if (entry.closed || liveClose === null) return entry;
-  const sign = entry.direction === "bullish" ? 1 : -1;
-  const aboveNow = entry.targets.map((t) => sign * liveClose >= sign * t) as [boolean, boolean, boolean, boolean, boolean];
-  const targetsHit = entry.targetsHit.map((h, i) => h || aboveNow[i]) as [boolean, boolean, boolean, boolean, boolean];
-
-  if (targetsHit[4]) {
-    if (entry.status === "target5_hit") return entry;
-    return { ...entry, targetsHit, status: "target5_hit", closed: true, closedAt: entry.closedAt ?? now };
-  }
-
-  const effStop = effectiveStopForSetup({ entry: entry.entry, targets: entry.targets, stopLoss: entry.stop }, targetsHit);
-  if (sign * liveClose <= sign * effStop) {
-    const anyHit = targetsHit.some(Boolean);
-    return { ...entry, targetsHit, status: anyHit ? "stopped_trailing" : "sl_hit", closed: true, closedAt: now };
-  }
-
-  const changed = targetsHit.some((h, i) => h !== entry.targetsHit[i]);
-  if (!changed) return entry;
-  return { ...entry, targetsHit, status: "running" };
-}
-
-export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string) {
+export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string, options?: OptionsAnalytics) {
   const { data: candleData, isLoading, error } = useCandles(symbol, timeframe);
   const higherTf = HIGHER_TF[timeframe] ?? timeframe;
   const { data: higherData } = useCandles(symbol, higherTf);
@@ -53,7 +33,8 @@ export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string) {
     const open = last && !last.closed ? last : undefined;
 
     if (open) {
-      const advanced = advanceEntry(open, snapshot.lastPrice, now);
+      const optLtp = open.optStrike !== undefined && open.optSide ? liveLtpFor(options, open.optStrike, open.optSide) : null;
+      const advanced = advanceEntry(open, snapshot.lastPrice, optLtp, now);
       if (advanced !== open) setSuperTrendLog(key, [...history.slice(0, -1), advanced]);
       return;
     }
@@ -64,6 +45,18 @@ export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string) {
     // Neutral are shown live on the dashboard but never logged as a trade,
     // same reasoning AI Elite already uses for its own strict-only log.
     if ((snapshot.marketStatus === "Strong Buy" || snapshot.marketStatus === "Strong Sell") && snapshot.tradeSetup) {
+      // Pin the option leg at open: which strike, which side, and the premium
+      // it was actually quoting right then. If the chain is unreachable these
+      // stay undefined and the milestone card simply doesn't render.
+      const optSide: "CE" | "PE" = snapshot.tradeSetup.direction === "bullish" ? "CE" : "PE";
+      const optProj = projectPremiumFromUnderlying(
+        optSide,
+        snapshot.tradeSetup.entry,
+        snapshot.tradeSetup.stopLoss,
+        [snapshot.tradeSetup.targets[0], snapshot.tradeSetup.targets[1], snapshot.tradeSetup.targets[2]],
+        options
+      );
+
       const entry: SuperTrendLogEntry = {
         id: `${key}-${now}`,
         symbol,
@@ -78,11 +71,19 @@ export function useSuperTrendPro(symbol: InstrumentSymbol, timeframe: string) {
         closed: false,
         openedAt: now,
         closedAt: null,
+        optStrike: optProj?.strike,
+        optSide: optProj ? optSide : undefined,
+        optEntry: optProj?.entry,
+        optHighWaterMark: optProj?.entry,
       };
       setSuperTrendLog(key, [...history, entry]);
     }
+    // options is a dependency so the option high-water mark keeps climbing as
+    // the chain ticks, not only when a new candle arrives. Re-running with an
+    // unchanged peak produces an identical entry and sets nothing, so this
+    // settles rather than looping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, key, symbol, timeframe]);
+  }, [snapshot, key, symbol, timeframe, options]);
 
   return {
     snapshot,

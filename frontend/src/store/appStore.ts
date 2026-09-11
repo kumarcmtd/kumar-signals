@@ -74,6 +74,18 @@ export interface SuperTrendLogEntry {
   closed: boolean;
   openedAt: number;
   closedAt: number | null;
+  // The option leg this futures setup is actually traded through: the ATM CE
+  // for a bullish trend, the ATM PE for a bearish one. Recorded at open from
+  // the live chain, with optHighWaterMark tracking the highest premium seen
+  // since -- that peak is what lets the profit-milestone ticks survive a
+  // later stop-out, the same way TradeLogEntry.highWaterMark does elsewhere.
+  // All optional: entries logged before this existed, or opened while the
+  // option chain was unreachable, simply carry no option leg and the
+  // milestone card stays hidden rather than guessing one.
+  optStrike?: number;
+  optSide?: "CE" | "PE";
+  optEntry?: number;
+  optHighWaterMark?: number;
 }
 
 const MAX_SUPERTREND_HISTORY = 100;

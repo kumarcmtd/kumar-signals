@@ -566,3 +566,45 @@ export const TIMEFRAME_OPTIONS: { value: string; label: string }[] = [
   { value: "60", label: "1 Hour" },
   { value: "240", label: "4 Hour" },
 ];
+
+// ---- Tracked-entry advancement (pure; the hook just calls this) ----
+// Kept here rather than inside the hook so the peak-tracking rules can be
+// tested without standing up React and react-query.
+import type { SuperTrendLogEntry } from "../store/appStore";
+
+// Highest option premium seen so far. Always long the premium here (ATM CE on
+// a bullish setup, ATM PE on a bearish one), so "best" is unambiguously the
+// highest LTP regardless of which way the underlying is being traded.
+export function withOptionPeak(entry: SuperTrendLogEntry, optLtp: number | null): SuperTrendLogEntry {
+  if (optLtp === null || entry.optEntry === undefined) return entry;
+  const prior = entry.optHighWaterMark ?? entry.optEntry;
+  if (optLtp <= prior) return entry;
+  return { ...entry, optHighWaterMark: optLtp };
+}
+
+export function advanceEntry(entry: SuperTrendLogEntry, liveClose: number | null, optLtp: number | null, now: number): SuperTrendLogEntry {
+  if (entry.closed || liveClose === null) return entry;
+  // Capture the peak BEFORE the close checks below. A trade that stops out on
+  // this same tick must still keep the best premium it ever reached --
+  // otherwise the milestone ticks it earned would vanish at exactly the moment
+  // they matter most.
+  const base = withOptionPeak(entry, optLtp);
+  const sign = base.direction === "bullish" ? 1 : -1;
+  const aboveNow = base.targets.map((t) => sign * liveClose >= sign * t) as [boolean, boolean, boolean, boolean, boolean];
+  const targetsHit = base.targetsHit.map((h, i) => h || aboveNow[i]) as [boolean, boolean, boolean, boolean, boolean];
+
+  if (targetsHit[4]) {
+    if (base.status === "target5_hit") return base;
+    return { ...base, targetsHit, status: "target5_hit", closed: true, closedAt: base.closedAt ?? now };
+  }
+
+  const effStop = effectiveStopForSetup({ entry: base.entry, targets: base.targets, stopLoss: base.stop }, targetsHit);
+  if (sign * liveClose <= sign * effStop) {
+    const anyHit = targetsHit.some(Boolean);
+    return { ...base, targetsHit, status: anyHit ? "stopped_trailing" : "sl_hit", closed: true, closedAt: now };
+  }
+
+  const changed = targetsHit.some((h, i) => h !== base.targetsHit[i]);
+  if (!changed) return base;
+  return { ...base, targetsHit, status: "running" };
+}
