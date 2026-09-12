@@ -4,7 +4,7 @@ import {
   categoriesFor, horizonFor, verificationFor, strengthFor, priorityFor, confidenceBand,
   buildGptNewsItems, sortItems, breakingItems, applyFilters, countryRisks, chokepointReads,
   weatherRead, crudePanel, ngPanel, intelligenceFor, sessionInfo, openingBiasEstimate,
-  eiaScheduleEvents, upcomingEvents, readPosition, evaluateAlerts, LOT_SIZE, EMPTY_FILTERS,
+  eiaScheduleEvents, upcomingEvents, readPosition, evaluateAlerts, sanitizePositions, LOT_SIZE, EMPTY_FILTERS, DEFAULT_POSITIONS,
   DEFAULT_ALERT_RULES, type GptNewsItem,
 } from "../utils/gptNewsEngine";
 import type { NewsEvent, ScoredNewsArticle } from "../utils/newsScoring";
@@ -414,6 +414,46 @@ test("expiry pressure is flagged only when it is actually close", () => {
   assert.equal(near.expiryWarning, true);
   const far = readPosition({ id: "p", symbol: "CRUDEOIL", strike: 9450, optSide: "CE", expiry: "2026-10-20", lots: 1, avgPremium: 300, levels: [] }, null, null, null, NOW);
   assert.equal(far.expiryWarning, false);
+});
+
+// ---- Stored positions are untrusted input ----
+// This is the regression guard for the crash that took the page down: a stored
+// position missing a numeric field reached .toFixed() and threw.
+
+test("a stored position missing its numbers is dropped, not rendered half-built", () => {
+  const kept = sanitizePositions([
+    { id: "ok", symbol: "CRUDEOIL", strike: 9450, optSide: "CE", expiry: "2026-09-17", lots: 1, avgPremium: 387.9, levels: [] },
+    { id: "broken", symbol: "CRUDEOIL", optSide: "CE", expiry: "2026-09-17", lots: 1, levels: [] },
+    { id: "nan", symbol: "NATURALGAS", strike: Number.NaN, optSide: "CE", expiry: "2026-09-23", lots: 2, avgPremium: 10, levels: [] },
+  ]);
+  assert.deepEqual(kept.map((p) => p.id), ["ok"]);
+});
+
+test("every field of a surviving position is a usable value", () => {
+  const [p] = sanitizePositions([{ symbol: "NATURALGAS", strike: 270, lots: 2.4, avgPremium: 10.25 }]);
+  assert.equal(p.optSide, "CE", "an absent side defaults rather than rendering undefined");
+  assert.equal(p.expiry, "", "a missing expiry is blank, not an invented date");
+  assert.equal(p.lots, 2);
+  assert.deepEqual(p.levels, []);
+  assert.equal(typeof p.id, "string");
+  // The blank expiry must flow through readPosition without throwing.
+  const read = readPosition(p, 268, null, null, NOW);
+  assert.equal(read.daysToExpiry, null);
+  assert.equal(read.expiryWarning, false);
+});
+
+test("junk in storage falls back to the defaults instead of an empty page", () => {
+  assert.deepEqual(sanitizePositions(null), DEFAULT_POSITIONS);
+  assert.deepEqual(sanitizePositions("not an array"), DEFAULT_POSITIONS);
+  assert.deepEqual(sanitizePositions([]), DEFAULT_POSITIONS);
+  assert.deepEqual(sanitizePositions([{ symbol: "GOLD", strike: 1 }]), DEFAULT_POSITIONS);
+});
+
+test("monitoring levels with unusable prices are dropped, the rest survive", () => {
+  const [p] = sanitizePositions([
+    { symbol: "CRUDEOIL", strike: 9450, lots: 1, avgPremium: 300, levels: [{ price: 9500, label: "Warning" }, { price: "abc" }, { price: 9650 }, null] },
+  ]);
+  assert.deepEqual(p.levels, [{ price: 9500, label: "Warning" }, { price: 9650, label: "Level" }]);
 });
 
 // ---- Alerts ----

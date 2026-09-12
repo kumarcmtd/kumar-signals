@@ -31,7 +31,7 @@ import {
 import {
   buildGptNewsItems, sortItems, breakingItems, applyFilters, countryRisks, chokepointReads,
   weatherRead, crudePanel, ngPanel, intelligenceFor, sessionInfo, openingBiasEstimate,
-  upcomingEvents, readPosition, evaluateAlerts, DEFAULT_POSITIONS, DEFAULT_ALERT_RULES, EMPTY_FILTERS,
+  upcomingEvents, readPosition, evaluateAlerts, sanitizePositions, DEFAULT_POSITIONS, DEFAULT_ALERT_RULES, EMPTY_FILTERS,
   type GptCategory, type FilterState, type PositionInput, type Bias, type AlertRule,
 } from "../utils/gptNewsEngine";
 import {
@@ -40,6 +40,8 @@ import {
   SourceHealth, EmptyState, SkeletonRows, GN, BIAS_COLOR,
 } from "../components/GptNewsKit";
 import { formatAge, ageMinutes, formatStamp } from "../utils/aiFlashEngine";
+import type { PriceCard } from "../types";
+import type { MacroQuote } from "../api/client";
 
 const TABS: { key: GptCategory | "all"; label: string; icon: typeof Fuel }[] = [
   { key: "all", label: "All", icon: Newspaper },
@@ -106,6 +108,37 @@ function useLocalState<T>(key: string, initial: T): [T, (v: T) => void] {
   return [value, set];
 }
 
+/**
+ * What /api/prices can actually return. The shared PriceCard type describes the
+ * happy path only; on a failure the worker sends `{ symbol, error }` with none
+ * of the numeric fields, so this page models both shapes and shows the worker's
+ * own reason instead of guessing why a price is missing.
+ */
+type ErroredPriceCard = Partial<PriceCard> & Pick<PriceCard, "symbol"> & { error?: string };
+
+/**
+ * Anything that is not a real, finite number becomes null. Several API types in
+ * this app declare fields as required numbers that the worker can legitimately
+ * omit on an error response, so nothing numeric is taken on trust here.
+ */
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** Formats a macro quote in its own unit, or returns null so the tile shows why it is missing. */
+function macroValue(price: number | null, unit: MacroQuote["unit"]): string | null {
+  if (price === null) return null;
+  if (unit === "pct") return `${price.toFixed(2)}%`;
+  if (unit === "inr") return `₹${price.toFixed(2)}`;
+  if (unit === "usd") return `$${price.toLocaleString("en-US")}`;
+  return price.toFixed(2);
+}
+
+/** A percent as text, or "n/a" -- never a number pulled off a failed response. */
+function pct(v: number | null): string {
+  return v === null ? "n/a" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
 const DARK = { panel: "#14161F", panel2: "#1B1E2A", border: "rgba(255,255,255,.09)", text: "#F2F4F8", muted: "rgba(242,244,248,.66)", faint: "rgba(242,244,248,.40)" };
 const LIGHT = { panel: "#FFFFFF", panel2: "#F4F6FA", border: "rgba(15,23,42,.12)", text: "#0F172A", muted: "rgba(15,23,42,.68)", faint: "rgba(15,23,42,.45)" };
 
@@ -113,10 +146,14 @@ export function GptNews() {
   const [theme, setTheme] = useLocalState<"dark" | "light">("gptnews:theme", "dark");
   const [fastMode, setFastMode] = useLocalState<boolean>("gptnews:fast", false);
   const [refreshMs, setRefreshMs] = useLocalState<number>("gptnews:refresh", 30_000);
-  const [positions, setPositions] = useLocalState<PositionInput[]>("gptnews:positions", DEFAULT_POSITIONS);
+  const [storedPositions, setPositions] = useLocalState<PositionInput[]>("gptnews:positions", DEFAULT_POSITIONS);
   const [enabledAlerts, setEnabledAlerts] = useLocalState<string[]>("gptnews:alerts", DEFAULT_ALERT_RULES.map((r) => r.id));
   const [customRules, setCustomRules] = useLocalState<AlertRule[]>("gptnews:customAlerts", []);
   const [trackPremium, setTrackPremium] = useLocalState<boolean>("gptnews:trackPremium", false);
+
+  // localStorage is untrusted input -- an older or half-edited blob must not
+  // be able to crash the page, so it is validated before anything renders it.
+  const positions = useMemo(() => sanitizePositions(storedPositions), [storedPositions]);
 
   const [tab, setTab] = useState<GptCategory | "all">("all");
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -188,8 +225,18 @@ export function GptNews() {
     [items]
   );
 
-  const mcxCrude = prices.data?.find((p) => p.symbol === "CRUDEOIL");
-  const mcxNg = prices.data?.find((p) => p.symbol === "NATURALGAS");
+  // IMPORTANT: PriceCard declares `ltp` and `changePercent` as required
+  // numbers, but the worker genuinely returns `{ symbol, error }` for a price
+  // it could not fetch (market closed, no Upstox token, not enough history).
+  // TypeScript therefore cannot catch a missing field here -- reading
+  // .toLocaleString() straight off one crashed this whole page. Every value
+  // taken off a price card goes through num() from here on.
+  const mcxCrude = prices.data?.find((p) => p.symbol === "CRUDEOIL") as ErroredPriceCard | undefined;
+  const mcxNg = prices.data?.find((p) => p.symbol === "NATURALGAS") as ErroredPriceCard | undefined;
+  const crudeLtp = num(mcxCrude?.ltp);
+  const ngLtp = num(mcxNg?.ltp);
+  const crudePct = num(mcxCrude?.changePercent);
+  const ngPct = num(mcxNg?.changePercent);
   const wti = global.data?.find((q) => q.symbol === "CL=F");
   const brent = global.data?.find((q) => q.symbol === "BZ=F");
   const henryHub = global.data?.find((q) => q.symbol === "NG=F");
@@ -207,12 +254,12 @@ export function GptNews() {
   const [fired, setFired] = useState<ReturnType<typeof evaluateAlerts>>([]);
 
   const priceMap = useMemo(
-    () => ({ CRUDEOIL: mcxCrude?.ltp ?? null, NATURALGAS: mcxNg?.ltp ?? null, WTI: wti?.price ?? null, HENRYHUB: henryHub?.price ?? null }),
-    [mcxCrude?.ltp, mcxNg?.ltp, wti?.price, henryHub?.price]
+    () => ({ CRUDEOIL: crudeLtp, NATURALGAS: ngLtp, WTI: num(wti?.price), HENRYHUB: num(henryHub?.price) }),
+    [crudeLtp, ngLtp, wti?.price, henryHub?.price]
   );
   const changeMap = useMemo(
-    () => ({ CRUDEOIL: mcxCrude?.changePercent ?? null, NATURALGAS: mcxNg?.changePercent ?? null, WTI: wti?.changePercent ?? null, HENRYHUB: henryHub?.changePercent ?? null }),
-    [mcxCrude?.changePercent, mcxNg?.changePercent, wti?.changePercent, henryHub?.changePercent]
+    () => ({ CRUDEOIL: crudePct, NATURALGAS: ngPct, WTI: num(wti?.changePercent), HENRYHUB: num(henryHub?.changePercent) }),
+    [crudePct, ngPct, wti?.changePercent, henryHub?.changePercent]
   );
 
   useEffect(() => {
@@ -417,8 +464,7 @@ export function GptNews() {
             {/* Spec section 23: never invent a before/after price around a headline. */}
             <p className="text-[9px] leading-snug px-1" style={{ color: tokens.faint }}>
               Before/after price reaction for an individual headline is not measured — this app keeps no tick history stamped against each story, so MCX reaction per headline is unavailable rather
-              than estimated. Today's move so far: MCX Crude {mcxCrude ? `${mcxCrude.changePercent >= 0 ? "+" : ""}${mcxCrude.changePercent.toFixed(2)}%` : "n/a"}, MCX Natural Gas{" "}
-              {mcxNg ? `${mcxNg.changePercent >= 0 ? "+" : ""}${mcxNg.changePercent.toFixed(2)}%` : "n/a"}, WTI {wti?.changePercent != null ? `${wti.changePercent >= 0 ? "+" : ""}${wti.changePercent.toFixed(2)}%` : "n/a"}.
+              than estimated. Today's move so far: MCX Crude {pct(crudePct)}, MCX Natural Gas {pct(ngPct)}, WTI {pct(num(wti?.changePercent))}.
             </p>
           </div>
         )}
@@ -451,7 +497,7 @@ export function GptNews() {
         {positions.map((p) => (
           <PositionCard
             key={p.id}
-            read={readPosition(p, (p.symbol === "CRUDEOIL" ? mcxCrude?.ltp : mcxNg?.ltp) ?? null, premiumFor(p), p.symbol === "CRUDEOIL" ? crude : ng)}
+            read={readPosition(p, p.symbol === "CRUDEOIL" ? crudeLtp : ngLtp, premiumFor(p), p.symbol === "CRUDEOIL" ? crude : ng)}
             onEdit={() => setEditingId(p.id)}
             premiumNote={premiumNoteFor(p)}
           />
@@ -513,19 +559,19 @@ export function GptNews() {
           note="Live data — separate from news and from any interpretation above."
         />
         <div className="grid grid-cols-2 gap-1.5">
-          <MarketTile label="WTI" sub="NYMEX · $" value={wti?.price != null ? `$${wti.price.toFixed(2)}` : null} changePct={wti?.changePercent ?? null} unavailable={wti?.error ?? "No quote"} />
-          <MarketTile label="Brent" sub="ICE · $" value={brent?.price != null ? `$${brent.price.toFixed(2)}` : null} changePct={brent?.changePercent ?? null} unavailable={brent?.error ?? "No quote"} />
-          <MarketTile label="MCX Crude" sub={mcxCrude?.tradingSymbol ?? "₹ / barrel"} value={mcxCrude ? `₹${mcxCrude.ltp.toLocaleString("en-IN")}` : null} changePct={mcxCrude?.changePercent ?? null} unavailable="Needs Upstox login" />
-          <MarketTile label="Henry Hub" sub="NYMEX · $" value={henryHub?.price != null ? `$${henryHub.price.toFixed(2)}` : null} changePct={henryHub?.changePercent ?? null} unavailable={henryHub?.error ?? "No quote"} />
-          <MarketTile label="MCX Natural Gas" sub={mcxNg?.tradingSymbol ?? "₹ / mmBtu"} value={mcxNg ? `₹${mcxNg.ltp.toLocaleString("en-IN")}` : null} changePct={mcxNg?.changePercent ?? null} unavailable="Needs Upstox login" />
+          <MarketTile label="WTI" sub="NYMEX · $" value={num(wti?.price) === null ? null : `$${wti!.price!.toFixed(2)}`} changePct={num(wti?.changePercent)} unavailable={wti?.error ?? "No quote"} />
+          <MarketTile label="Brent" sub="ICE · $" value={num(brent?.price) === null ? null : `$${brent!.price!.toFixed(2)}`} changePct={num(brent?.changePercent)} unavailable={brent?.error ?? "No quote"} />
+          <MarketTile label="MCX Crude" sub={mcxCrude?.tradingSymbol ?? "₹ / barrel"} value={crudeLtp === null ? null : `₹${crudeLtp.toLocaleString("en-IN")}`} changePct={crudePct} unavailable={mcxCrude?.error ?? "No live price"} />
+          <MarketTile label="Henry Hub" sub="NYMEX · $" value={num(henryHub?.price) === null ? null : `$${henryHub!.price!.toFixed(2)}`} changePct={num(henryHub?.changePercent)} unavailable={henryHub?.error ?? "No quote"} />
+          <MarketTile label="MCX Natural Gas" sub={mcxNg?.tradingSymbol ?? "₹ / mmBtu"} value={ngLtp === null ? null : `₹${ngLtp.toLocaleString("en-IN")}`} changePct={ngPct} unavailable={mcxNg?.error ?? "No live price"} />
           {(macro.data?.quotes ?? []).map((q) => (
             <MarketTile
               key={q.symbol}
               label={q.short}
               sub={q.name}
-              value={q.price != null ? (q.unit === "pct" ? `${q.price.toFixed(2)}%` : q.unit === "inr" ? `₹${q.price.toFixed(2)}` : q.unit === "usd" ? `$${q.price.toLocaleString("en-US")}` : q.price.toFixed(2)) : null}
-              changePct={q.changePercent}
-              spark={q.spark}
+              value={macroValue(num(q.price), q.unit)}
+              changePct={num(q.changePercent)}
+              spark={Array.isArray(q.spark) ? q.spark.filter((p) => typeof p === "number" && Number.isFinite(p)) : []}
               unavailable={q.error ?? "No quote"}
             />
           ))}

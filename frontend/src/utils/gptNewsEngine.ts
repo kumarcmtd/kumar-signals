@@ -1047,6 +1047,46 @@ export const DEFAULT_POSITIONS: PositionInput[] = [
   },
 ];
 
+/**
+ * Positions come back from localStorage, which is untrusted input: it may hold
+ * a blob written by an older version of this page, or one left half-edited. A
+ * missing or non-numeric field there would reach .toFixed() and take the whole
+ * page down, so every stored position is validated before it is rendered and
+ * anything unusable is dropped rather than patched up with invented numbers.
+ */
+export function sanitizePositions(raw: unknown): PositionInput[] {
+  if (!Array.isArray(raw)) return DEFAULT_POSITIONS;
+  const n = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const clean = raw.flatMap((entry): PositionInput[] => {
+    if (!entry || typeof entry !== "object") return [];
+    const p = entry as Record<string, unknown>;
+    const symbol = p.symbol === "CRUDEOIL" || p.symbol === "NATURALGAS" ? p.symbol : null;
+    const strike = n(p.strike);
+    const avgPremium = n(p.avgPremium);
+    const lots = n(p.lots);
+    if (!symbol || strike === null || avgPremium === null || lots === null || lots <= 0) return [];
+    return [
+      {
+        id: typeof p.id === "string" && p.id ? p.id : `${symbol}-${strike}`,
+        symbol,
+        strike,
+        optSide: p.optSide === "PE" ? "PE" : "CE",
+        expiry: typeof p.expiry === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.expiry) ? p.expiry : "",
+        lots: Math.round(lots),
+        avgPremium,
+        levels: Array.isArray(p.levels)
+          ? p.levels.flatMap((l): { price: number; label: string }[] => {
+              const lv = l as Record<string, unknown> | null;
+              const price = n(lv?.price);
+              return price === null ? [] : [{ price, label: typeof lv?.label === "string" ? lv.label : "Level" }];
+            })
+          : [],
+      },
+    ];
+  });
+  return clean.length > 0 ? clean : DEFAULT_POSITIONS;
+}
+
 // ---- Alerts (spec section 19) ----
 export interface AlertRule {
   id: string;

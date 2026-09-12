@@ -577,6 +577,14 @@ export function EventRow({ e }: { e: UpcomingEvent }) {
 }
 
 // ---- Positions (spec sections 8, 36, 37) ----
+
+/** A stored position may carry a blank or unparseable expiry; say so rather than printing "Invalid Date". */
+function expiryLabel(expiry: string): string {
+  const d = new Date(`${expiry}T00:00:00Z`);
+  if (!Number.isFinite(d.getTime())) return "not set";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
 export function PositionCard({ read, onEdit, premiumNote }: { read: PositionRead; onEdit: () => void; premiumNote?: string }) {
   const { input } = read;
   const pnlColor = read.pnlRs === null ? GN.flat : read.pnlRs >= 0 ? GN.bull : GN.bear;
@@ -592,7 +600,7 @@ export function PositionCard({ read, onEdit, premiumNote }: { read: PositionRead
             {name} {input.strike} {input.optSide}
           </p>
           <p className="text-[9px]" style={{ color: "var(--gn-faint)" }}>
-            Expiry {new Date(`${input.expiry}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" })} · {input.lots} lot{input.lots > 1 ? "s" : ""} · avg ₹{input.avgPremium.toFixed(2)}
+            Expiry {expiryLabel(input.expiry)} · {input.lots} lot{input.lots > 1 ? "s" : ""} · avg ₹{input.avgPremium.toFixed(2)}
           </p>
         </div>
         <button type="button" onClick={onEdit} className="text-[9.5px] font-black px-2 py-1 rounded-md shrink-0" style={{ background: "var(--gn-panel-2)", color: "var(--gn-muted)" }}>
