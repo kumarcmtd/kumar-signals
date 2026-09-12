@@ -31,6 +31,7 @@ import { AiOwn } from "./pages/AiOwn";
 import { AiUp } from "./pages/AiUp";
 import { AiFlash } from "./pages/AiFlash";
 import { AiEdge } from "./pages/AiEdge";
+import { GptNews } from "./pages/GptNews";
 
 function App() {
   return (
@@ -68,6 +69,7 @@ function App() {
           <Route path="/ai-up" element={<AiUp />} />
           <Route path="/ai-flash" element={<AiFlash />} />
           <Route path="/ai-edge" element={<AiEdge />} />
+          <Route path="/gpt-news" element={<GptNews />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>

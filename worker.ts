@@ -1607,6 +1607,98 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
   return results;
 }
 
+// ---- GPT News macro backdrop (dollar, rates, gold) ----
+// GPT News asks for the macro context that sits behind every energy move:
+// USD/INR (what an MCX rupee contract actually settles in), the dollar index
+// and US 10-year yield (both push dollar-priced commodities around), and gold
+// as the other big risk-sentiment commodity. These are DELIBERATELY a separate
+// endpoint from /api/global-markets rather than extra entries in
+// GLOBAL_INSTRUMENTS -- the Global Markets page renders every quote that route
+// returns, so adding rows there would silently redesign an existing page.
+//
+// Same public Yahoo chart endpoint as the energy benchmarks, but over a 1-month
+// daily range so each card can draw a REAL sparkline from actual closes. No
+// point is ever interpolated or invented; a series that comes back short just
+// draws a shorter line.
+const MACRO_INSTRUMENTS: { symbol: string; name: string; short: string; unit: "usd" | "inr" | "index" | "pct" }[] = [
+  { symbol: "INR=X", name: "US Dollar / Indian Rupee", short: "USD/INR", unit: "inr" },
+  { symbol: "DX-Y.NYB", name: "US Dollar Index", short: "DXY", unit: "index" },
+  { symbol: "GC=F", name: "Gold (COMEX)", short: "Gold", unit: "usd" },
+  { symbol: "^TNX", name: "US 10-Year Treasury Yield", short: "US 10Y", unit: "pct" },
+];
+
+interface MacroQuote {
+  symbol: string;
+  name: string;
+  short: string;
+  unit: "usd" | "inr" | "index" | "pct";
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  /** Real daily closes, oldest first -- for the sparkline. Never synthesized. */
+  spark: number[];
+  asOf: string | null;
+  error?: string;
+}
+
+const MACRO_CACHE_TTL_SECONDS = 120;
+const MACRO_CACHE_KV_KEY = "gptnews:macro:v1";
+
+async function getYahooMacroQuote(inst: (typeof MACRO_INSTRUMENTS)[number]): Promise<MacroQuote> {
+  const base: MacroQuote = { ...inst, price: null, change: null, changePercent: null, spark: [], asOf: null };
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(inst.symbol)}?interval=1d&range=1mo`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; KumarSignalsPro/1.0)", Accept: "application/json" } });
+  if (!res.ok) return { ...base, error: `Yahoo Finance returned ${res.status}` };
+  const json: any = await res.json();
+  const result = json?.chart?.result?.[0];
+  const meta = result?.meta;
+  if (!meta || typeof meta.regularMarketPrice !== "number") {
+    return { ...base, error: json?.chart?.error?.description || "No quote data returned" };
+  }
+  const closes: number[] = (result?.indicators?.quote?.[0]?.close ?? []).filter((c: any) => typeof c === "number");
+  const price = meta.regularMarketPrice;
+  const prevClose = resolvePrevClose({
+    previousClose: typeof meta.previousClose === "number" ? meta.previousClose : null,
+    secondLastDailyClose: closes.length >= 2 ? closes[closes.length - 2] : null,
+    chartPreviousClose: typeof meta.chartPreviousClose === "number" ? meta.chartPreviousClose : null,
+  });
+  return {
+    ...base,
+    price: r2(price),
+    change: prevClose !== null ? r2(price - prevClose) : null,
+    changePercent: prevClose ? r2(((price - prevClose) / prevClose) * 100) : null,
+    spark: closes.slice(-30).map((c) => r2(c)),
+    asOf: meta.regularMarketTime ? new Date(meta.regularMarketTime * 1000).toISOString() : null,
+  };
+}
+
+async function computeMacroMarkets(env: Env): Promise<{ quotes: MacroQuote[]; fetchedAt: string }> {
+  const cached = await env.COMMODITY_KV.get(MACRO_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as { quotes: MacroQuote[]; fetchedAt: string };
+    } catch {
+      // fall through and refetch
+    }
+  }
+  const quotes = await Promise.all(
+    MACRO_INSTRUMENTS.map(async (inst) => {
+      try {
+        return await getYahooMacroQuote(inst);
+      } catch (e: any) {
+        return { ...inst, price: null, change: null, changePercent: null, spark: [], asOf: null, error: e.message ?? "fetch failed" } as MacroQuote;
+      }
+    })
+  );
+  const payload = { quotes, fetchedAt: new Date().toISOString() };
+  // Only cache a generation that actually carries data -- caching an all-failed
+  // response would pin the page to "unavailable" for the full TTL.
+  if (quotes.some((q) => q.price !== null)) {
+    await env.COMMODITY_KV.put(MACRO_CACHE_KV_KEY, JSON.stringify(payload), { expirationTtl: MACRO_CACHE_TTL_SECONDS });
+  }
+  return payload;
+}
+
 // ---- News Based Trade AI: news + EIA inventory/storage + econ calendar ----
 // The app must be fully useful with ZERO secrets configured: news comes
 // from a curated allowlist of official/public RSS feeds by default, and
@@ -2935,6 +3027,12 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 
         if (url.pathname === "/api/global-markets") {
           return json(await computeGlobalMarkets());
+        }
+
+        // GPT News only. Kept off /api/global-markets so the Global Markets
+        // page keeps rendering exactly the three energy benchmarks it always has.
+        if (url.pathname === "/api/macro-markets") {
+          return json(await computeMacroMarkets(env));
         }
 
         if (url.pathname === "/api/prices") {

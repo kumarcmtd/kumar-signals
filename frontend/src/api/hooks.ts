@@ -76,12 +76,17 @@ function useOpenStrikesFor(symbol: InstrumentSymbol): number[] {
   }, [tradeLogs, symbol]);
 }
 
-export function useOptionsAnalytics(symbol: InstrumentSymbol) {
+// `enabled` defaults to true so every existing caller is unchanged. GPT News
+// passes false unless the trader explicitly turns live premium tracking on --
+// the option chain is the single heaviest upstream call in the app, and a new
+// page must not add to it by default.
+export function useOptionsAnalytics(symbol: InstrumentSymbol, enabled = true) {
   const pinnedStrikes = useOpenStrikesFor(symbol);
   const pinnedKey = pinnedStrikes.join(",");
   return useQuery({
     queryKey: ["options-analytics", symbol, pinnedKey],
     queryFn: () => api.optionsAnalytics(symbol, pinnedStrikes),
+    enabled,
     refetchInterval: 20_000,
   });
 }
@@ -175,6 +180,18 @@ export function useGlobalMarkets() {
     queryKey: ["global-markets"],
     queryFn: api.globalMarkets,
     refetchInterval: 30_000,
+  });
+}
+
+// GPT News' macro backdrop. Cached 2 minutes on the server and these
+// instruments move on a macro timescale, not a tick one -- a 2-minute client
+// refetch is plenty and adds no load to the Upstox quota (this is Yahoo).
+export function useMacroMarkets() {
+  return useQuery({
+    queryKey: ["macro-markets"],
+    queryFn: api.macroMarkets,
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
   });
 }
 

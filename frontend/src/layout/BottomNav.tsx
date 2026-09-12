@@ -5,7 +5,7 @@ import {
   BadgeCheck, Radio,
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
-  GraduationCap, BarChart3, Settings, Sparkles, Repeat, Siren, Scale,
+  GraduationCap, BarChart3, Settings, Sparkles, Repeat, Siren, Scale, Newspaper,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
@@ -35,6 +35,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
+      { to: "/gpt-news", label: "GPT News", icon: Newspaper },
       { to: "/ai-flash", label: "AI Flash", icon: Siren },
       { to: "/ai-edge", label: "AI Edge", icon: Scale },
       { to: "/ai-own", label: "AI Own", icon: Sparkles },

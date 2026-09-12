@@ -23,6 +23,27 @@ export interface GapStudyResponse {
   error?: string;
 }
 
+// GPT News' macro backdrop (USD/INR, DXY, Gold, US 10Y). `spark` is a list of
+// real daily closes, oldest first -- an empty list means that source failed,
+// never a flat synthesized line.
+export interface MacroQuote {
+  symbol: string;
+  name: string;
+  short: string;
+  unit: "usd" | "inr" | "index" | "pct";
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
+  spark: number[];
+  asOf: string | null;
+  error?: string;
+}
+
+export interface MacroMarketsResponse {
+  quotes: MacroQuote[];
+  fetchedAt: string;
+}
+
 export interface WhyTodayResponse {
   crude: WhyCommodity;
   naturalGas: WhyCommodity;
@@ -71,6 +92,7 @@ export const api = {
   // economic-calendar payloads, and it polls far more often than that page.
   newsFeed: () => getJSON<NewsFeedResponse>("/news"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
+  macroMarkets: () => getJSON<MacroMarketsResponse>("/macro-markets"),
   expiryAlerts: () => getJSON<{ alerts: ExpiryAlert[] }>("/expiry-alerts"),
   whyToday: () => getJSON<WhyTodayResponse>("/why-today"),
   energy: () => getJSON<EnergyDataResponse>("/energy"),
