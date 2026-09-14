@@ -2,6 +2,7 @@ import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, Opt
 import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
 import type { MorningGapRecord } from "../utils/overnightGapEngine";
+import type { TimeProfile, ClaimResult, ScheduledEvent, EventProfile } from "../utils/timeProfileEngine";
 
 export interface EnergyDataResponse {
   available: boolean;
@@ -42,6 +43,25 @@ export interface MacroQuote {
 export interface MacroMarketsResponse {
   quotes: MacroQuote[];
   fetchedAt: string;
+}
+
+// Price-Alerts. The heavy lifting happens on the worker (which imports the
+// very same timeProfileEngine module), so the page receives finished statistics
+// rather than ~1,200 raw half-hour bars over a mobile connection.
+export interface TimeProfileResponse {
+  available: boolean;
+  symbol: InstrumentSymbol;
+  tradingSymbol: string | null;
+  profile: TimeProfile | null;
+  claims: ClaimResult[];
+  events: ScheduledEvent[];
+  eventProfiles: EventProfile[];
+  sessionsAnalyzed: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  contractNote: string;
+  computedAt: string;
+  error?: string;
 }
 
 export interface WhyTodayResponse {
@@ -97,6 +117,7 @@ export const api = {
   whyToday: () => getJSON<WhyTodayResponse>("/why-today"),
   energy: () => getJSON<EnergyDataResponse>("/energy"),
   gapStudy: (symbol: InstrumentSymbol) => getJSON<GapStudyResponse>(`/gap-study?symbol=${symbol}`),
+  timeProfile: (symbol: InstrumentSymbol) => getJSON<TimeProfileResponse>(`/time-profile?symbol=${symbol}`),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),

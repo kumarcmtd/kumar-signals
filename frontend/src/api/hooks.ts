@@ -195,6 +195,19 @@ export function useMacroMarkets() {
   });
 }
 
+// Price-Alerts. The server caches the computed profile for 6 hours and it is
+// built from COMPLETED sessions, so it barely changes during a day -- a slow
+// client cadence is right, and it shares the gap study's underlying candle
+// cache so it adds no Upstox load.
+export function useTimeProfile(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["time-profile", symbol],
+    queryFn: () => api.timeProfile(symbol),
+    staleTime: 30 * 60_000,
+    refetchInterval: 60 * 60_000,
+  });
+}
+
 export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],

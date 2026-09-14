@@ -15,6 +15,7 @@ import { scoreArticles, scoreEiaChange, clusterEvents, stripPublisherSuffix, typ
 import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
 import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
+import { buildSlotSessions, buildTimeProfile, testClaims, scheduledEvents, eventProfile, type ClaimResult, type ScheduledEvent, type EventProfile } from "./frontend/src/utils/timeProfileEngine";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1607,6 +1608,101 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
   return results;
 }
 
+// ---- Price-Alerts: time-of-day movement profile ----
+// Answers "which half hours of the MCX session actually move" from the
+// contract's own 30-minute history, and tests a specific list of claims the
+// trader was told, rather than repeating them.
+//
+// This deliberately calls getHistorical30mCandles with the SAME day count the
+// gap study uses, so both features share one KV cache entry and one Upstox
+// request. Opening Price-Alerts therefore costs nothing upstream beyond what
+// the app already fetches. The computed profile is cached separately because
+// folding ~1,200 half-hour bars into statistics on every request would push
+// CPU time up, and this result only changes once a session anyway.
+const TIME_PROFILE_CACHE_TTL_SECONDS = 6 * 60 * 60;
+
+interface TimeProfileResponse {
+  available: boolean;
+  symbol: string;
+  tradingSymbol: string | null;
+  profile: ReturnType<typeof buildTimeProfile> | null;
+  claims: ClaimResult[];
+  events: ScheduledEvent[];
+  eventProfiles: EventProfile[];
+  /** Sessions actually found, and the window they span. */
+  sessionsAnalyzed: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  contractNote: string;
+  computedAt: string;
+  error?: string;
+}
+
+async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Promise<TimeProfileResponse> {
+  const empty: TimeProfileResponse = {
+    available: false, symbol, tradingSymbol: null, profile: null, claims: [], events: scheduledEvents(),
+    eventProfiles: [], sessionsAnalyzed: 0, firstDate: null, lastDate: null,
+    contractNote: "", computedAt: new Date().toISOString(),
+  };
+
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { ...empty, error: "No instrument found" };
+
+  const cacheKey = `timeprofile:v1:${fut.instrument_key}:${new Date().toISOString().slice(0, 10)}`;
+  const cached = await env.COMMODITY_KV.get(cacheKey);
+  if (cached) {
+    try {
+      const hit = JSON.parse(cached) as TimeProfileResponse;
+      // Event countdowns are clock-dependent, so they are always recomputed
+      // even on a cache hit -- a cached "in 40 minutes" would be a lie.
+      return { ...hit, events: scheduledEvents() };
+    } catch {
+      // fall through and recompute on a corrupt entry
+    }
+  }
+
+  const bars30m = await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
+  if (bars30m.length === 0) {
+    return { ...empty, tradingSymbol: fut.trading_symbol, error: "No 30-minute history available for this contract yet" };
+  }
+
+  const slotSessions = buildSlotSessions(bars30m);
+  const profile = buildTimeProfile(slotSessions);
+
+  // The gap-continuation claim needs the morning gap sessions the gap study
+  // already knows how to build; daily candles are cached, so this is cheap.
+  let gapSessions: { date: string; gapPct: number; movePct: number }[] = [];
+  const daily = await getCandlesForTF(env, token, fut, "1D");
+  if (!("error" in daily)) gapSessions = buildMorningSessions(daily, bars30m);
+
+  const events = scheduledEvents();
+  const eventProfiles = events
+    .filter((e) => e.affects === symbol)
+    .map((e) => eventProfile(slotSessions, e, e.id === "eia-crude" ? 3 : 4));
+
+  const result: TimeProfileResponse = {
+    available: profile.sessionsAnalyzed > 0,
+    symbol,
+    tradingSymbol: fut.trading_symbol,
+    profile,
+    claims: testClaims(profile, slotSessions, gapSessions),
+    events,
+    eventProfiles,
+    sessionsAnalyzed: profile.sessionsAnalyzed,
+    firstDate: profile.firstDate,
+    lastDate: profile.lastDate,
+    // The single most important caveat on the whole page, carried in the payload
+    // so the UI cannot forget to show it.
+    contractNote: `${profile.sessionsAnalyzed} sessions of ${fut.trading_symbol}. MCX futures roll every month, so this is one contract's life — not years of history. Patterns found in a sample this size can be luck.`,
+    computedAt: new Date().toISOString(),
+  };
+
+  if (result.available) {
+    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: TIME_PROFILE_CACHE_TTL_SECONDS });
+  }
+  return result;
+}
+
 // ---- GPT News macro backdrop (dollar, rates, gold) ----
 // GPT News asks for the macro context that sits behind every energy move:
 // USD/INR (what an MCX rupee contract actually settles in), the dollar index
@@ -3063,6 +3159,14 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           const tf = url.searchParams.get("tf") || "15";
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
           return json(await computeScan(env, token, symbol, tf));
+        }
+
+        if (url.pathname === "/api/time-profile") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
+          return json(await computeTimeProfile(env, token, symbol));
         }
 
         if (url.pathname === "/api/gap-study") {
