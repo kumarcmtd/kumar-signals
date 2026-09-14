@@ -10,8 +10,9 @@
 // global markets, EIA, market status, the econ calendar) via their shared React
 // Query keys, so opening it does not multiply upstream calls. The only new
 // network call is /api/macro-markets (Yahoo, server-cached 2 minutes, nothing
-// to do with the Upstox quota). Live option premiums are OFF by default and
-// only start when the trader turns them on.
+// to do with the Upstox quota). The page never requests the option chain at
+// all -- the positions panel that used to do so was removed at the trader's
+// request, which also took the heaviest upstream call off this page for good.
 //
 // Honesty rules, taken from the specification and enforced in code rather than
 // in prose: no headline, source, price or timestamp is ever synthesized; a
@@ -22,21 +23,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Newspaper, RefreshCw, Search, Settings2, X, Zap, Siren, Fuel, Flame, Globe2, BarChart3,
-  Briefcase, CalendarClock, History, Brain, Bell, Sun, Moon, ShieldAlert, CloudSun,
+  CalendarClock, History, Brain, Bell, Sun, Moon, ShieldAlert, CloudSun,
 } from "lucide-react";
 import {
   useNewsFeed, usePrices, useGlobalMarkets, useMacroMarkets, useEnergyData,
-  useMarketStatus, useNewsTrade, useOptionsAnalytics,
+  useMarketStatus, useNewsTrade,
 } from "../api/hooks";
 import {
   buildGptNewsItems, sortItems, breakingItems, applyFilters, countryRisks, chokepointReads,
   weatherRead, crudePanel, ngPanel, intelligenceFor, sessionInfo, openingBiasEstimate,
-  upcomingEvents, readPosition, evaluateAlerts, sanitizePositions, DEFAULT_POSITIONS, DEFAULT_ALERT_RULES, EMPTY_FILTERS,
-  type GptCategory, type FilterState, type PositionInput, type Bias, type AlertRule,
+  upcomingEvents, evaluateAlerts, DEFAULT_ALERT_RULES, EMPTY_FILTERS,
+  type GptCategory, type FilterState, type Bias, type AlertRule,
 } from "../utils/gptNewsEngine";
 import {
   Panel, SectionTitle, Chip, BreakingCard, NewsRow, MarketTile, BiasPanelCard, CountryCard,
-  ChokepointCard, WeatherCard, EiaCard, TimelineList, IntelligenceCard, EventRow, PositionCard,
+  ChokepointCard, WeatherCard, EiaCard, TimelineList, IntelligenceCard, EventRow,
   SourceHealth, EmptyState, SkeletonRows, GN, BIAS_COLOR,
 } from "../components/GptNewsKit";
 import { formatAge, ageMinutes, formatStamp } from "../utils/aiFlashEngine";
@@ -146,14 +147,8 @@ export function GptNews() {
   const [theme, setTheme] = useLocalState<"dark" | "light">("gptnews:theme", "dark");
   const [fastMode, setFastMode] = useLocalState<boolean>("gptnews:fast", false);
   const [refreshMs, setRefreshMs] = useLocalState<number>("gptnews:refresh", 30_000);
-  const [storedPositions, setPositions] = useLocalState<PositionInput[]>("gptnews:positions", DEFAULT_POSITIONS);
   const [enabledAlerts, setEnabledAlerts] = useLocalState<string[]>("gptnews:alerts", DEFAULT_ALERT_RULES.map((r) => r.id));
   const [customRules, setCustomRules] = useLocalState<AlertRule[]>("gptnews:customAlerts", []);
-  const [trackPremium, setTrackPremium] = useLocalState<boolean>("gptnews:trackPremium", false);
-
-  // localStorage is untrusted input -- an older or half-edited blob must not
-  // be able to crash the page, so it is validated before anything renders it.
-  const positions = useMemo(() => sanitizePositions(storedPositions), [storedPositions]);
 
   const [tab, setTab] = useState<GptCategory | "all">("all");
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
@@ -161,7 +156,6 @@ export function GptNews() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [rawQuery, setRawQuery] = useState("");
   const [expanded, setExpanded] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Debounced search (spec section 32) -- typing must never re-filter the whole
   // feed on every keystroke.
@@ -185,8 +179,6 @@ export function GptNews() {
   const energy = useEnergyData();
   const status = useMarketStatus();
   const newsTrade = useNewsTrade();
-  const crudeChain = useOptionsAnalytics("CRUDEOIL", trackPremium);
-  const ngChain = useOptionsAnalytics("NATURALGAS", trackPremium);
 
   // Honour the chosen refresh interval on top of the shared hook cadence: the
   // shared queries poll on their own schedule, this just pulls them forward.
@@ -289,23 +281,6 @@ export function GptNews() {
   const tokens = theme === "dark" ? DARK : LIGHT;
   const fetchedAge = news.data?.fetchedAt ? ageMinutes(news.data.fetchedAt) : null;
   const feedDown = Boolean(news.error) || (news.data ? !news.data.available : false);
-
-  const position = (id: string) => positions.find((p) => p.id === id);
-  const savePosition = (next: PositionInput) => setPositions(positions.map((p) => (p.id === next.id ? next : p)));
-
-  const premiumFor = (p: PositionInput): number | null => {
-    const chain = p.symbol === "CRUDEOIL" ? crudeChain.data : ngChain.data;
-    const row = chain?.rows?.find((r) => r.strike === p.strike);
-    if (!row) return null;
-    return (p.optSide === "CE" ? row.call.ltp : row.put.ltp) ?? null;
-  };
-  const premiumNoteFor = (p: PositionInput) => {
-    if (!trackPremium) return "Live premium tracking is off — turn it on in Settings to see premium and P&L.";
-    const chain = p.symbol === "CRUDEOIL" ? crudeChain : ngChain;
-    if (chain.isLoading) return "Loading the option chain…";
-    if (chain.error) return `Option chain unavailable: ${(chain.error as Error).message}`;
-    return `Strike ${p.strike} is not in the current option chain window, so no live premium is available for it.`;
-  };
 
   return (
     <div
@@ -475,33 +450,6 @@ export function GptNews() {
         <SectionTitle icon={<BarChart3 size={13} style={{ color: GN.accent }} />} title="Signal panels" note="A read on news pressure only. It knows nothing about the chart." />
         <BiasPanelCard panel={crude} />
         <BiasPanelCard panel={ng} />
-      </section>
-
-      {/* ---- 4. My positions (spec sections 8, 36, 37) ---- */}
-      <section className="space-y-2.5">
-        <SectionTitle
-          icon={<Briefcase size={13} style={{ color: GN.accent }} />}
-          title="My trades"
-          note="Your own positions, stored only on this device. Levels are yours to watch — they are not predictions."
-          right={
-            <button
-              type="button"
-              onClick={() => setTrackPremium(!trackPremium)}
-              className="shrink-0 px-2 py-1 rounded-lg text-[9px] font-black"
-              style={trackPremium ? { background: GN.bull, color: "#0A0B10" } : { background: tokens.panel2, color: tokens.muted }}
-            >
-              Live premium {trackPremium ? "on" : "off"}
-            </button>
-          }
-        />
-        {positions.map((p) => (
-          <PositionCard
-            key={p.id}
-            read={readPosition(p, p.symbol === "CRUDEOIL" ? crudeLtp : ngLtp, premiumFor(p), p.symbol === "CRUDEOIL" ? crude : ng)}
-            onEdit={() => setEditingId(p.id)}
-            premiumNote={premiumNoteFor(p)}
-          />
-        ))}
       </section>
 
       {/* ---- 5. Geopolitical risk (spec sections 11, 12, 13) ---- */}
@@ -774,14 +722,6 @@ export function GptNews() {
             </div>
 
             <div className="mb-3">
-              <p className="text-[10px] font-black uppercase mb-1.5" style={{ color: tokens.muted }}>Live option premium</p>
-              <button type="button" onClick={() => setTrackPremium(!trackPremium)} className="px-3 py-1.5 rounded-lg text-[10.5px] font-bold" style={trackPremium ? { background: GN.bull, color: "#0A0B10" } : { background: tokens.panel2, color: tokens.muted }}>
-                {trackPremium ? "On" : "Off"}
-              </button>
-              <p className="text-[9px] mt-1" style={{ color: tokens.faint }}>Off by default. The option chain is the heaviest call this app makes, so this page does not request it unless you ask.</p>
-            </div>
-
-            <div className="mb-3">
               <p className="text-[10px] font-black uppercase mb-1.5" style={{ color: tokens.muted }}>Notifications</p>
               <button
                 type="button"
@@ -828,18 +768,6 @@ export function GptNews() {
         </div>
       )}
 
-      {/* ---- Position editor ---- */}
-      {editingId && position(editingId) && (
-        <PositionEditor
-          value={position(editingId)!}
-          tokens={tokens}
-          onCancel={() => setEditingId(null)}
-          onSave={(next) => {
-            savePosition(next);
-            setEditingId(null);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -875,99 +803,6 @@ function CustomAlertForm({ onAdd, tokens }: { onAdd: (rule: AlertRule) => void; 
       >
         Add
       </button>
-    </div>
-  );
-}
-
-function PositionEditor({ value, tokens, onSave, onCancel }: { value: PositionInput; tokens: Tokens; onSave: (v: PositionInput) => void; onCancel: () => void }) {
-  const [draft, setDraft] = useState(value);
-  const [levelsText, setLevelsText] = useState(value.levels.map((l) => `${l.price} ${l.label}`).join("\n"));
-
-  const field = (label: string, key: "strike" | "lots" | "avgPremium", step: string) => (
-    <label className="block">
-      <span className="text-[9.5px] font-bold" style={{ color: tokens.faint }}>{label}</span>
-      <input
-        inputMode="decimal"
-        step={step}
-        value={String(draft[key])}
-        onChange={(e) => setDraft({ ...draft, [key]: Number(e.target.value) })}
-        className="w-full mt-0.5 px-2 py-1.5 rounded-lg text-[11px] outline-none"
-        style={{ background: tokens.panel2, color: tokens.text }}
-      />
-    </label>
-  );
-
-  return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Edit position">
-      <div className="absolute inset-0 bg-black/55" onClick={onCancel} />
-      <div className="absolute bottom-0 left-0 right-0 max-w-lg mx-auto max-h-[85vh] overflow-y-auto rounded-t-2xl px-4 pt-3 pb-[max(20px,env(safe-area-inset-bottom))]" style={{ background: tokens.panel, border: `1px solid ${tokens.border}` }}>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-[14px] font-black" style={{ color: tokens.text }}>{draft.symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas"} position</p>
-          <button type="button" onClick={onCancel} aria-label="Close editor"><X size={16} style={{ color: tokens.muted }} /></button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {field("Strike", "strike", "1")}
-          {field("Lots", "lots", "1")}
-          {field("Avg premium", "avgPremium", "0.05")}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 mt-2">
-          <label className="block">
-            <span className="text-[9.5px] font-bold" style={{ color: tokens.faint }}>Side</span>
-            <button type="button" onClick={() => setDraft({ ...draft, optSide: draft.optSide === "CE" ? "PE" : "CE" })} className="w-full mt-0.5 px-2 py-1.5 rounded-lg text-[11px] font-black" style={{ background: tokens.panel2, color: tokens.text }}>
-              {draft.optSide}
-            </button>
-          </label>
-          <label className="block">
-            <span className="text-[9.5px] font-bold" style={{ color: tokens.faint }}>Expiry</span>
-            <input
-              type="date"
-              value={draft.expiry}
-              onChange={(e) => setDraft({ ...draft, expiry: e.target.value })}
-              className="w-full mt-0.5 px-2 py-1.5 rounded-lg text-[11px] outline-none"
-              style={{ background: tokens.panel2, color: tokens.text }}
-            />
-          </label>
-        </div>
-
-        <label className="block mt-2">
-          <span className="text-[9.5px] font-bold" style={{ color: tokens.faint }}>Monitoring levels — one per line, "price label"</span>
-          <textarea
-            rows={6}
-            value={levelsText}
-            onChange={(e) => setLevelsText(e.target.value)}
-            className="w-full mt-0.5 px-2 py-1.5 rounded-lg text-[11px] outline-none font-mono"
-            style={{ background: tokens.panel2, color: tokens.text }}
-          />
-        </label>
-        <p className="text-[9px] mt-1" style={{ color: tokens.faint }}>These are your own levels to watch. They are never treated as targets or predictions.</p>
-
-        <div className="flex gap-2 mt-3">
-          <button type="button" onClick={onCancel} className="flex-1 py-2.5 rounded-xl text-[12px] font-black" style={{ background: tokens.panel2, color: tokens.muted }}>Cancel</button>
-          <button
-            type="button"
-            onClick={() =>
-              onSave({
-                ...draft,
-                levels: levelsText
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean)
-                  .map((line) => {
-                    const [price, ...rest] = line.split(/\s+/);
-                    return { price: Number(price), label: rest.join(" ") || "Level" };
-                  })
-                  .filter((l) => Number.isFinite(l.price)),
-              })
-            }
-            className="flex-1 py-2.5 rounded-xl text-[12px] font-black"
-            style={{ background: GN.accent, color: "#0A0B10" }}
-          >
-            Save
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
