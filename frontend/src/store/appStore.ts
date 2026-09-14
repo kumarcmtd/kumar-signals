@@ -154,6 +154,12 @@ interface AppState {
 
   verifyProSnapshots: Record<string, VerifyProSnapshot>;
   recordVerifyProSnapshot: (id: string, snapshot: VerifyProSnapshot) => void;
+
+  // Auto-update on the pages OUTSIDE the six main tabs. Off by default: those
+  // pages load once when opened and then hold still until the user taps
+  // Update. Persisted, so the choice survives a reload.
+  liveOnOtherPages: boolean;
+  setLiveOnOtherPages: (on: boolean) => void;
 }
 
 // Midnight of the current calendar day in IST, as an epoch ms. A call whose
@@ -233,6 +239,9 @@ export const useAppStore = create<AppState>()(
       verifyProSnapshots: {},
       recordVerifyProSnapshot: (id, snapshot) =>
         set((s) => (s.verifyProSnapshots[id] ? s : { verifyProSnapshots: { ...s.verifyProSnapshots, [id]: snapshot } })),
+
+      liveOnOtherPages: false,
+      setLiveOnOtherPages: (on) => set({ liveOnOtherPages: on }),
     }),
     {
       name: "kumar-signals-pro-store",

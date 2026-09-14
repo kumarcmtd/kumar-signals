@@ -1,4 +1,5 @@
 import { useMarketStatus } from "../api/hooks";
+import { LiveControl } from "./LiveControl";
 
 export function Header() {
   const { data: market } = useMarketStatus();
@@ -22,6 +23,8 @@ export function Header() {
           <span className="text-[var(--color-muted)] font-normal">{market?.timeLabel}</span>
         </div>
       </div>
+      {/* Only renders on pages outside the six main tabs. */}
+      <LiveControl />
     </header>
   );
 }

@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
+import { LIVE_PAGE_PATHS, isAlwaysLivePage } from "../config/livePages";
 
 interface NavItem {
   to: string;
@@ -22,13 +23,15 @@ interface NavItem {
 // this replaces a flat, horizontally-scrolling strip of 24 equally-weighted
 // icons (where reaching Journal or Settings meant scrolling past ~20 signal
 // pages) with a clear hierarchy.
+// Paths come from config/livePages so these six tabs and the six pages allowed
+// to auto-refresh are guaranteed to be the same six pages.
 const PRIMARY: NavItem[] = [
-  { to: "/", label: "AI-Shoot", icon: Rocket, end: true },
-  { to: "/best-call", label: "Best Call", icon: Crosshair },
-  { to: "/ai-20-20", label: "Ai20-20", icon: Target },
-  { to: "/level-cross-scan", label: "Level Cross", icon: Waypoints },
-  { to: "/ai-up", label: "AI-Up", icon: Repeat },
-  { to: "/ai-supertrend-pro", label: "SuperTrend", icon: Zap },
+  { to: LIVE_PAGE_PATHS[0], label: "AI-Shoot", icon: Rocket, end: true },
+  { to: LIVE_PAGE_PATHS[1], label: "Best Call", icon: Crosshair },
+  { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
+  { to: LIVE_PAGE_PATHS[3], label: "Level Cross", icon: Waypoints },
+  { to: LIVE_PAGE_PATHS[4], label: "AI-Up", icon: Repeat },
+  { to: LIVE_PAGE_PATHS[5], label: "SuperTrend", icon: Zap },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
@@ -84,7 +87,6 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-const PRIMARY_PATHS = new Set(PRIMARY.map((p) => p.to));
 
 function MoreMenu({ open, onClose, unreadCount }: { open: boolean; onClose: () => void; unreadCount: number }) {
   const location = useLocation();
@@ -164,7 +166,7 @@ export function BottomNav() {
   const unreadCount = useAppStore((s) => s.alerts.filter((a) => !a.read).length);
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const onSecondaryPage = !PRIMARY_PATHS.has(location.pathname);
+  const onSecondaryPage = !isAlwaysLivePage(location.pathname);
 
   const tabClass = (active: boolean) =>
     `relative flex flex-col items-center gap-0.5 py-2.5 px-0.5 text-[10px] leading-tight text-center font-medium transition-colors flex-1 min-w-0 ${

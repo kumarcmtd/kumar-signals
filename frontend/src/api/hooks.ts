@@ -1,9 +1,32 @@
 import { useMemo } from "react";
+import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { useAppStore } from "../store/appStore";
+import { refetchIntervalFor } from "../config/livePages";
 import type { InstrumentSymbol, PortfolioTrade, KumarAiAnalyzeRequest } from "../types";
 
+/**
+ * The polling interval a query should use ON THE PAGE CURRENTLY OPEN.
+ *
+ * The six main tabs always poll. Every other page loads once and then holds
+ * still until the user taps Update, unless they switch auto-update on for the
+ * session. Putting the rule here means it applies to all ~25 pages at once and
+ * no individual page can forget it.
+ *
+ * Returning `false` only stops the REPEAT fetches -- React Query still fetches
+ * once on mount, so a paused page is never an empty page.
+ */
+function usePollInterval(ms: number): number | false {
+  const { pathname } = useLocation();
+  const liveOverride = useAppStore((s) => s.liveOnOtherPages);
+  return refetchIntervalFor(pathname, liveOverride, ms);
+}
+
+// Deliberately NOT gated by usePollInterval. This drives the LIVE/CLOSED clock
+// in the header, which is mounted on every page -- pausing it would freeze the
+// clock and look broken -- and it is pure server-side computation with no
+// Upstox call behind it.
 export function useMarketStatus() {
   return useQuery({
     queryKey: ["market-status"],
@@ -16,7 +39,7 @@ export function usePrices() {
   return useQuery({
     queryKey: ["prices"],
     queryFn: api.prices,
-    refetchInterval: 15_000,
+    refetchInterval: usePollInterval(15_000),
   });
 }
 
@@ -24,7 +47,7 @@ export function useSignals() {
   return useQuery({
     queryKey: ["signals"],
     queryFn: api.signals,
-    refetchInterval: 30_000,
+    refetchInterval: usePollInterval(30_000),
   });
 }
 
@@ -32,7 +55,7 @@ export function useSignal(symbol: InstrumentSymbol) {
   return useQuery({
     queryKey: ["signal", symbol],
     queryFn: () => api.signal(symbol),
-    refetchInterval: 30_000,
+    refetchInterval: usePollInterval(30_000),
   });
 }
 
@@ -50,7 +73,7 @@ export function useCandles(symbol: InstrumentSymbol, tf: string) {
     queryKey: ["candles", symbol, tf],
     queryFn: () => api.candles(symbol, tf),
     staleTime: 10_000,
-    refetchInterval: tf === "1D" ? 60_000 : 15_000,
+    refetchInterval: usePollInterval(tf === "1D" ? 60_000 : 15_000),
   });
 }
 
@@ -87,7 +110,7 @@ export function useOptionsAnalytics(symbol: InstrumentSymbol, enabled = true) {
     queryKey: ["options-analytics", symbol, pinnedKey],
     queryFn: () => api.optionsAnalytics(symbol, pinnedStrikes),
     enabled,
-    refetchInterval: 20_000,
+    refetchInterval: usePollInterval(20_000),
   });
 }
 
@@ -103,7 +126,7 @@ export function useMarketDepth(symbol: InstrumentSymbol) {
   return useQuery({
     queryKey: ["depth", symbol],
     queryFn: () => api.depth(symbol),
-    refetchInterval: 15_000,
+    refetchInterval: usePollInterval(15_000),
   });
 }
 
@@ -115,7 +138,7 @@ export function useNewsTrade() {
   return useQuery({
     queryKey: ["news-trade"],
     queryFn: api.newsTrade,
-    refetchInterval: 60_000,
+    refetchInterval: usePollInterval(60_000),
   });
 }
 
@@ -127,7 +150,7 @@ export function useNewsFeed() {
   return useQuery({
     queryKey: ["news-feed"],
     queryFn: api.newsFeed,
-    refetchInterval: 30_000,
+    refetchInterval: usePollInterval(30_000),
   });
 }
 
@@ -139,7 +162,7 @@ export function useGapStudy(symbol: InstrumentSymbol) {
     queryKey: ["gap-study", symbol],
     queryFn: () => api.gapStudy(symbol),
     staleTime: 10 * 60_000,
-    refetchInterval: 15 * 60_000,
+    refetchInterval: usePollInterval(15 * 60_000),
   });
 }
 
@@ -150,7 +173,7 @@ export function useExpiryAlerts() {
   return useQuery({
     queryKey: ["expiry-alerts"],
     queryFn: api.expiryAlerts,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: usePollInterval(5 * 60_000),
   });
 }
 
@@ -160,7 +183,7 @@ export function useWhyToday() {
   return useQuery({
     queryKey: ["why-today"],
     queryFn: api.whyToday,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: usePollInterval(5 * 60_000),
   });
 }
 
@@ -171,7 +194,7 @@ export function useEnergyData() {
   return useQuery({
     queryKey: ["energy-data"],
     queryFn: api.energy,
-    refetchInterval: 5 * 60_000,
+    refetchInterval: usePollInterval(5 * 60_000),
   });
 }
 
@@ -179,7 +202,7 @@ export function useGlobalMarkets() {
   return useQuery({
     queryKey: ["global-markets"],
     queryFn: api.globalMarkets,
-    refetchInterval: 30_000,
+    refetchInterval: usePollInterval(30_000),
   });
 }
 
@@ -191,7 +214,7 @@ export function useMacroMarkets() {
     queryKey: ["macro-markets"],
     queryFn: api.macroMarkets,
     staleTime: 60_000,
-    refetchInterval: 2 * 60_000,
+    refetchInterval: usePollInterval(2 * 60_000),
   });
 }
 
@@ -204,7 +227,7 @@ export function useTimeProfile(symbol: InstrumentSymbol) {
     queryKey: ["time-profile", symbol],
     queryFn: () => api.timeProfile(symbol),
     staleTime: 30 * 60_000,
-    refetchInterval: 60 * 60_000,
+    refetchInterval: usePollInterval(60 * 60_000),
   });
 }
 
@@ -212,7 +235,7 @@ export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],
     queryFn: api.portfolio,
-    refetchInterval: 20_000,
+    refetchInterval: usePollInterval(20_000),
   });
 }
 
