@@ -1619,7 +1619,7 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
 // the app already fetches. The computed profile is cached separately because
 // folding ~1,200 half-hour bars into statistics on every request would push
 // CPU time up, and this result only changes once a session anyway.
-const TIME_PROFILE_CACHE_TTL_SECONDS = 6 * 60 * 60;
+const TIME_PROFILE_CACHE_TTL_SECONDS = 20 * 60 * 60;
 
 interface TimeProfileResponse {
   available: boolean;
@@ -1636,6 +1636,48 @@ interface TimeProfileResponse {
   contractNote: string;
   computedAt: string;
   error?: string;
+}
+
+/**
+ * Serves the profile. Reads the cache first and ONLY builds it inline when the
+ * cache is cold -- building it is the single most CPU-expensive thing this
+ * Worker does (folding ~1,700 half-hour bars into statistics), and the free
+ * plan allows 10 ms of CPU per request. The Cron warms this once a day so a
+ * real user should essentially never pay for the build.
+ *
+ * A failure here degrades to "unavailable" with the reason rather than
+ * throwing: a 500 on this route would be counted as a Worker error and would
+ * blank the page, when the honest answer is simply that the profile is not
+ * ready yet.
+ */
+async function serveTimeProfile(env: Env, token: string, symbol: Symbol): Promise<TimeProfileResponse> {
+  try {
+    return await computeTimeProfile(env, token, symbol);
+  } catch (e: any) {
+    return {
+      available: false, symbol, tradingSymbol: null, profile: null, claims: [], events: scheduledEvents(),
+      eventProfiles: [], sessionsAnalyzed: 0, firstDate: null, lastDate: null, contractNote: "",
+      computedAt: new Date().toISOString(),
+      error: e?.message ?? "Could not build the time profile",
+    };
+  }
+}
+
+/**
+ * Builds today's profile if it is not already cached, and stores it. Called
+ * from the Cron, so the expensive path runs on a schedule rather than while a
+ * trader waits. Cheap on a warm day: one KV read and nothing else.
+ */
+async function warmTimeProfiles(env: Env): Promise<void> {
+  const token = await env.COMMODITY_KV.get("access_token");
+  if (!token) return;
+  for (const symbol of OPTION_SYMBOLS) {
+    try {
+      await computeTimeProfile(env, token, symbol as Symbol);
+    } catch {
+      // A warm failure is not worth surfacing anywhere -- the next tick retries.
+    }
+  }
 }
 
 async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Promise<TimeProfileResponse> {
@@ -1671,9 +1713,16 @@ async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Prom
 
   // The gap-continuation claim needs the morning gap sessions the gap study
   // already knows how to build; daily candles are cached, so this is cheap.
+  // Wrapped: this is a second KV read and a second pass purely to answer the
+  // gap-continuation claim. If it fails, that ONE claim reports "not enough
+  // days" and the rest of the page is unaffected.
   let gapSessions: { date: string; gapPct: number; movePct: number }[] = [];
-  const daily = await getCandlesForTF(env, token, fut, "1D");
-  if (!("error" in daily)) gapSessions = buildMorningSessions(daily, bars30m);
+  try {
+    const daily = await getCandlesForTF(env, token, fut, "1D");
+    if (!("error" in daily)) gapSessions = buildMorningSessions(daily, bars30m);
+  } catch {
+    gapSessions = [];
+  }
 
   const events = scheduledEvents();
   const eventProfiles = events
@@ -3166,7 +3215,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
-          return json(await computeTimeProfile(env, token, symbol));
+          return json(await serveTimeProfile(env, token, symbol));
         }
 
         if (url.pathname === "/api/gap-study") {
@@ -3389,5 +3438,8 @@ export default {
     ctx.waitUntil(runBestCallNotificationCheck(env));
     ctx.waitUntil(runExpiryAlertCheck(env));
     ctx.waitUntil(runTradeLogAdvanceCheck(env));
+    // Builds the Price-Alerts profile off the request path. Does nothing on a
+    // tick where today's profile is already cached.
+    ctx.waitUntil(warmTimeProfiles(env));
   },
 };

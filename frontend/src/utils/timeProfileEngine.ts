@@ -57,12 +57,23 @@ export type Confidence = "reliable" | "leaning" | "coin_flip" | "insufficient";
 
 /** IST minutes-from-midnight, read straight off Upstox's own +05:30 stamp.
  *  Parsing to a Date and calling getHours() would shift every bar by 5.5
- *  hours on a UTC worker and put the whole evening in the wrong slot. */
+ *  hours on a UTC worker and put the whole evening in the wrong slot.
+ *
+ *  Deliberately hand-parsed rather than regex-matched: this runs once per
+ *  candle, and 90 days of 30-minute bars is a few thousand calls inside a
+ *  single request. On a Worker with a 10 ms CPU budget a regex here was a
+ *  measurable share of the whole request.
+ */
 export function istMinutesOfStamp(date: string): number | null {
-  const m = /T(\d{2}):(\d{2})/.exec(date);
-  if (!m) return null;
-  const mins = Number(m[1]) * 60 + Number(m[2]);
-  return Number.isFinite(mins) ? mins : null;
+  // Stamps look like "2026-09-11T21:30:00+05:30" -- the hour always begins at
+  // index 11, immediately after the "T".
+  if (date.length < 16 || date.charCodeAt(10) !== 84 /* T */) return null;
+  const h1 = date.charCodeAt(11) - 48;
+  const h2 = date.charCodeAt(12) - 48;
+  const m1 = date.charCodeAt(14) - 48;
+  const m2 = date.charCodeAt(15) - 48;
+  if (h1 < 0 || h1 > 9 || h2 < 0 || h2 > 9 || m1 < 0 || m1 > 9 || m2 < 0 || m2 > 9) return null;
+  return (h1 * 10 + h2) * 60 + (m1 * 10 + m2);
 }
 
 export function slotStartOf(minutes: number): number {

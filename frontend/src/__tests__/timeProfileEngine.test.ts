@@ -48,6 +48,21 @@ test("the IST hour is read off the stamp, not off a UTC Date", () => {
   assert.equal(istMinutesOfStamp("garbage"), null);
 });
 
+test("the hand-written stamp parser rejects anything it cannot read", () => {
+  // It is hand-parsed rather than regex-matched for CPU reasons, so the
+  // rejection cases have to be pinned down explicitly.
+  assert.equal(istMinutesOfStamp("2026-09-11 21:00:00+05:30"), null, "a space where the T should be");
+  assert.equal(istMinutesOfStamp("2026-09-11T2x:00:00+05:30"), null, "a non-digit hour");
+  assert.equal(istMinutesOfStamp("2026-09-11T21:0"), null, "truncated");
+  assert.equal(istMinutesOfStamp(""), null);
+  // And it agrees with the obvious (slower) reading at every half hour.
+  for (let m = 0; m < 24 * 60; m += 30) {
+    const hh = String(Math.floor(m / 60)).padStart(2, "0");
+    const mm = String(m % 60).padStart(2, "0");
+    assert.equal(istMinutesOfStamp(`2026-09-11T${hh}:${mm}:00+05:30`), m);
+  }
+});
+
 test("slots snap to the half hour and label readably", () => {
   assert.equal(slotStartOf(21 * 60 + 17), 21 * 60);
   assert.equal(slotStartOf(21 * 60 + 47), 21 * 60 + 30);
