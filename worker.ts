@@ -1648,7 +1648,7 @@ async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Prom
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { ...empty, error: "No instrument found" };
 
-  const cacheKey = `timeprofile:v1:${fut.instrument_key}:${new Date().toISOString().slice(0, 10)}`;
+  const cacheKey = `timeprofile:v2:${fut.instrument_key}:${new Date().toISOString().slice(0, 10)}`;
   const cached = await env.COMMODITY_KV.get(cacheKey);
   if (cached) {
     try {

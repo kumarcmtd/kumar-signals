@@ -6,6 +6,7 @@ import {
   directionZ, directionVerdict, liveWindow, istMinutesNow,
   conditionalFadeClaim, gapContinuationClaim, testClaims,
   tzOffsetMinutes, easternToInstant, scheduledEvents, istSlotOf, eventProfile,
+  plainDirection, plainBusyness, plainMultiple,
   SESSION_START_MIN, SESSION_END_MIN, SLOT_MINUTES, MIN_SESSIONS_FOR_VERDICT, STRONG_Z, LEANING_Z,
   type SlotSession,
 } from "../utils/timeProfileEngine";
@@ -172,6 +173,138 @@ test("an empty history produces an empty profile rather than throwing", () => {
   assert.equal(profile.firstDate, null);
   assert.equal(profile.typicalRangePct, 0);
   assert.ok(profile.slots.every((s) => s.sessions === 0 && s.movementIndex === 0));
+});
+
+// ---- How far it goes each way, and what the candle before says ----
+
+test("up and down reach are measured separately, not collapsed into one range", () => {
+  // Opens 100, runs to 101 but only dips to 99.5: the swing is NOT symmetric,
+  // and a single 1.5% range number would hide that completely.
+  const rows = buildSlotSessions(Array.from({ length: 20 }, (_, i) =>
+    bar(`2026-06-${String(i + 1).padStart(2, "0")}`, "17:30", 100, 101, 99.5, 100.4)
+  ));
+  const slot = buildTimeProfile(rows).slots.find((s) => s.key === "17:30")!;
+  assert.ok(Math.abs(slot.avgUpReachPct - 1) < 0.001, `up reach ${slot.avgUpReachPct}`);
+  assert.ok(Math.abs(slot.avgDownReachPct - 0.5) < 0.001, `down reach ${slot.avgDownReachPct}`);
+  assert.ok(Math.abs(slot.avgRangePct - 1.5) < 0.001, "the range is still the sum of both sides");
+});
+
+test("gain and loss sizes are averaged only over the days that actually went that way", () => {
+  const rows = buildSlotSessions([
+    ...Array.from({ length: 12 }, (_, i) => bar(`2026-06-${String(i + 1).padStart(2, "0")}`, "17:30", 100, 103, 97, 102)),
+    ...Array.from({ length: 8 }, (_, i) => bar(`2026-06-${String(i + 13).padStart(2, "0")}`, "17:30", 100, 103, 97, 99)),
+  ]);
+  const slot = buildTimeProfile(rows).slots.find((s) => s.key === "17:30")!;
+  assert.equal(slot.upDays, 12);
+  assert.equal(slot.downDays, 8);
+  assert.ok(Math.abs(slot.avgGainPct - 2) < 0.001, "green days gained 2%");
+  assert.ok(Math.abs(slot.avgLossPct - 1) < 0.001, "red days lost 1%, reported as a positive size");
+});
+
+test("a slot that never trades reports zeros rather than NaN", () => {
+  const slot = buildTimeProfile([]).slots[0];
+  assert.equal(slot.avgUpReachPct, 0);
+  assert.equal(slot.avgGainPct, 0);
+  assert.equal(slot.avgLossPct, 0);
+});
+
+/** Builds days where slot `at` follows the previous slot's colour, or flips it. */
+function prevLinkDays(n: number, at: string, mode: "continue" | "reverse" | "random"): Candle[] {
+  const atMin = Number(at.slice(0, 2)) * 60 + Number(at.slice(3));
+  const out: Candle[] = [];
+  for (let d = 0; d < n; d++) {
+    const date = `2026-06-${String((d % 28) + 1).padStart(2, "0")}`;
+    const prevGreen = d % 2 === 0;
+    for (let m = SESSION_START_MIN; m < SESSION_END_MIN; m += SLOT_MINUTES) {
+      const hh = String(Math.floor(m / 60)).padStart(2, "0");
+      const mm = String(m % 60).padStart(2, "0");
+      let close = 100;
+      if (m === atMin - SLOT_MINUTES) close = prevGreen ? 101 : 99;
+      if (m === atMin) {
+        if (mode === "continue") close = prevGreen ? 101 : 99;
+        else if (mode === "reverse") close = prevGreen ? 99 : 101;
+        else close = d % 4 < 2 ? 101 : 99; // unrelated to the previous candle
+      }
+      out.push(bar(date, `${hh}:${mm}`, 100, 102, 98, close));
+    }
+  }
+  return out;
+}
+
+test("a slot that follows the candle before it is reported as continuing", () => {
+  const link = buildTimeProfile(buildSlotSessions(prevLinkDays(40, "18:00", "continue"))).prevLinks.find((l) => l.key === "18:00")!;
+  assert.equal(link.prevKey, "17:30");
+  assert.equal(link.verdict, "continues");
+  assert.equal(link.afterGreen.upRatePct, 100);
+  assert.equal(link.afterRed.upRatePct, 0);
+  assert.match(link.summary, /tends to carry on/);
+});
+
+test("a slot that flips against the candle before it is reported as reversing", () => {
+  const link = buildTimeProfile(buildSlotSessions(prevLinkDays(40, "18:00", "reverse"))).prevLinks.find((l) => l.key === "18:00")!;
+  assert.equal(link.verdict, "reverses");
+  assert.equal(link.afterGreen.upRatePct, 0);
+  assert.equal(link.afterRed.upRatePct, 100);
+  assert.match(link.summary, /tends to flip/);
+});
+
+test("when the candle before makes no difference, the page says so instead of inventing a link", () => {
+  const link = buildTimeProfile(buildSlotSessions(prevLinkDays(60, "18:00", "random"))).prevLinks.find((l) => l.key === "18:00")!;
+  assert.equal(link.verdict, "none");
+  assert.match(link.summary, /no real difference/);
+});
+
+test("the previous-candle check needs enough days on BOTH sides before it answers", () => {
+  const link = buildTimeProfile(buildSlotSessions(prevLinkDays(8, "18:00", "continue"))).prevLinks.find((l) => l.key === "18:00")!;
+  assert.equal(link.verdict, "insufficient");
+  assert.match(link.summary, /Not enough days to compare/);
+});
+
+test("the first slot of the session has no candle before it, so it gets no link", () => {
+  const links = buildTimeProfile(buildSlotSessions(syntheticDays(30))).prevLinks;
+  assert.ok(!links.some((l) => l.startMin === SESSION_START_MIN), "9:00 AM cannot have a previous half hour");
+  assert.ok(links.some((l) => l.key === "09:30"));
+});
+
+test("a flat previous candle counts as neither green nor red", () => {
+  // Every previous candle closes exactly at its open, so both buckets are empty.
+  const candles: Candle[] = [];
+  for (let d = 0; d < 30; d++) {
+    const date = `2026-06-${String(d + 1).padStart(2, "0")}`;
+    candles.push(bar(date, "17:30", 100, 101, 99, 100));
+    candles.push(bar(date, "18:00", 100, 101, 99, 101));
+  }
+  const link = buildTimeProfile(buildSlotSessions(candles)).prevLinks.find((l) => l.key === "18:00")!;
+  assert.equal(link.afterGreen.sessions, 0);
+  assert.equal(link.afterRed.sessions, 0);
+  assert.equal(link.verdict, "insufficient");
+});
+
+// ---- Plain language ----
+
+test("the words on screen match the maths behind them", () => {
+  assert.equal(plainDirection("up", "reliable"), "Usually goes UP");
+  assert.equal(plainDirection("down", "reliable"), "Usually goes DOWN");
+  assert.match(plainDirection("down", "leaning"), /not always/);
+  assert.match(plainDirection("coin_flip", "coin_flip"), /50\/50/);
+  assert.match(plainDirection("coin_flip", "insufficient"), /Not enough days/);
+  // No jargon survives into the user-facing strings.
+  for (const b of ["up", "down", "coin_flip"] as const) {
+    for (const c of ["reliable", "leaning", "coin_flip", "insufficient"] as const) {
+      assert.doesNotMatch(plainDirection(b, c), /sigma|z-score|significan|edge|bias/i);
+    }
+  }
+});
+
+test("busyness reads as words, and the multiple reads either way round", () => {
+  assert.equal(plainBusyness(2), "Very busy");
+  assert.equal(plainBusyness(1.3), "Busy");
+  assert.equal(plainBusyness(1), "Normal");
+  assert.equal(plainBusyness(0.5), "Quiet");
+  assert.equal(plainBusyness(0), "No data");
+  assert.match(plainMultiple(1.9), /1\.9× the normal half hour/);
+  assert.match(plainMultiple(0.5), /2\.0× quieter than normal/);
+  assert.match(plainMultiple(1), /About the same/);
 });
 
 // ---- Live window ----

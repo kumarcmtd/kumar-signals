@@ -26,9 +26,10 @@ import {
 import { useTimeProfile, useMarketStatus } from "../api/hooks";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
+  plainDirection, plainBusyness, plainMultiple,
   SESSION_START_MIN, MIN_SESSIONS_FOR_CONFIDENCE,
   type SlotStat, type ClaimResult, type ClaimVerdict, type TimeProfile,
-  type ScheduledEvent, type EventProfile, type Confidence,
+  type ScheduledEvent, type EventProfile, type PrevCandleLink,
 } from "../utils/timeProfileEngine";
 import type { InstrumentSymbol } from "../types";
 
@@ -47,17 +48,10 @@ const SYMBOLS: { key: InstrumentSymbol; label: string; short: string; Icon: type
 ];
 
 const VERDICT_STYLE: Record<ClaimVerdict, { color: string; Icon: typeof CheckCircle2; word: string }> = {
-  supported: { color: C.up, Icon: CheckCircle2, word: "HOLDS UP" },
-  mixed: { color: C.warn, Icon: AlertTriangle, word: "PARTLY" },
-  not_supported: { color: C.down, Icon: XCircle, word: "DOESN'T HOLD" },
-  insufficient: { color: C.flat, Icon: CircleHelp, word: "CAN'T TELL" },
-};
-
-const CONFIDENCE_WORD: Record<Confidence, string> = {
-  reliable: "Strong enough to act on",
-  leaning: "Leans this way, not proven",
-  coin_flip: "Coin flip — no edge",
-  insufficient: "Too few sessions",
+  supported: { color: C.up, Icon: CheckCircle2, word: "TRUE" },
+  mixed: { color: C.warn, Icon: AlertTriangle, word: "SOMETIMES" },
+  not_supported: { color: C.down, Icon: XCircle, word: "NOT TRUE" },
+  insufficient: { color: C.flat, Icon: CircleHelp, word: "NOT ENOUGH DAYS" },
 };
 
 function Card({ children, className, tone }: { children: React.ReactNode; className?: string; tone?: string }) {
@@ -85,6 +79,7 @@ function MovementBar({ slot, max }: { slot: SlotStat; max: number }) {
   const pct = max > 0 ? Math.max(2, Math.round((slot.avgRangePct / max) * 100)) : 0;
   const color = slot.movementIndex >= 1.4 ? C.hot : slot.movementIndex >= 1.15 ? C.warn : C.flat;
   const DirIcon = slot.bias === "up" ? TrendingUp : slot.bias === "down" ? TrendingDown : Minus;
+  const unproven = slot.confidence !== "reliable";
   const dirColor = slot.confidence === "coin_flip" || slot.confidence === "insufficient" ? C.flat : slot.bias === "up" ? C.up : C.down;
   return (
     <div className="flex items-center gap-2">
@@ -95,41 +90,62 @@ function MovementBar({ slot, max }: { slot: SlotStat; max: number }) {
       <span className="text-[10px] font-bold tabular-nums w-[46px] text-right shrink-0" style={{ color }}>
         {slot.avgRangePct.toFixed(3)}%
       </span>
-      <DirIcon size={12} className="shrink-0" style={{ color: dirColor }} />
+      {/* A faded arrow means the lean is real but not proven -- a solid one
+          always means it cleared the bar, so the two can never be confused. */}
+      <DirIcon size={12} className="shrink-0" style={{ color: dirColor, opacity: unproven ? 0.4 : 1 }} />
     </div>
   );
 }
 
-function SlotDetail({ slot }: { slot: SlotStat }) {
+function SlotDetail({ slot, rank, link }: { slot: SlotStat; rank?: number; link?: PrevCandleLink }) {
+  const proven = slot.confidence === "reliable";
   const dirColor = slot.confidence === "coin_flip" || slot.confidence === "insufficient" ? C.flat : slot.bias === "up" ? C.up : C.down;
   return (
-    <div className="rounded-xl px-2.5 py-2 bg-slate-50 border border-slate-200">
+    <div className="rounded-xl px-2.5 py-2.5 bg-slate-50 border border-slate-200">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11.5px] font-black text-slate-800">{slot.label}</p>
-        <span className="text-[9px] font-black px-1.5 py-[2px] rounded-md" style={{ background: `${C.hot}18`, color: C.hot }}>
-          #{slot.rangeRank} mover
-        </span>
+        <p className="text-[12px] font-black text-slate-800">{slot.label}</p>
+        {rank !== undefined && (
+          <span className="text-[9px] font-black px-1.5 py-[2px] rounded-md shrink-0" style={{ background: `${C.hot}18`, color: C.hot }}>
+            {rank === 1 ? "Biggest mover" : `${rank}th biggest`}
+          </span>
+        )}
       </div>
-      <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-        {[
-          ["Avg range", `${slot.avgRangePct.toFixed(3)}%`, slot.movementIndex >= 1.25 ? C.hot : "#334155"],
-          ["vs typical", `${slot.movementIndex.toFixed(2)}×`, slot.movementIndex >= 1.25 ? C.hot : "#334155"],
-          ["Closed up", `${slot.upRatePct}%`, dirColor],
-        ].map(([k, v, col]) => (
-          <div key={k} className="rounded-lg bg-white px-2 py-1 border border-slate-200">
-            <p className="text-[8.5px] font-bold uppercase text-slate-400">{k}</p>
-            <p className="text-[12px] font-black leading-tight" style={{ color: col }}>{v}</p>
-          </div>
-        ))}
+
+      {/* How far it goes each way -- the question actually being asked. */}
+      <div className="flex items-stretch gap-1.5 mt-2">
+        <div className="flex-1 rounded-lg bg-white px-2 py-1.5 border border-slate-200">
+          <p className="text-[9px] font-bold text-slate-400">Price goes UP by</p>
+          <p className="text-[15px] font-black leading-tight" style={{ color: C.up }}>+{slot.avgUpReachPct.toFixed(2)}%</p>
+        </div>
+        <div className="flex-1 rounded-lg bg-white px-2 py-1.5 border border-slate-200">
+          <p className="text-[9px] font-bold text-slate-400">Price goes DOWN by</p>
+          <p className="text-[15px] font-black leading-tight" style={{ color: C.down }}>−{slot.avgDownReachPct.toFixed(2)}%</p>
+        </div>
       </div>
-      <p className="text-[9.5px] mt-1.5 leading-snug" style={{ color: dirColor }}>
-        <span className="font-bold">{CONFIDENCE_WORD[slot.confidence]}</span>
-        {" · "}
-        <span className="text-slate-500">
-          {slot.upDays} up / {slot.downDays} down across {slot.sessions} sessions, average move {slot.avgMovePct >= 0 ? "+" : "−"}
-          {Math.abs(slot.avgMovePct).toFixed(3)}%
-        </span>
+      <p className="text-[9px] text-slate-400 leading-snug mt-1">
+        Average swing each way from the price at {slot.key}, over {slot.sessions} days. {plainBusyness(slot.movementIndex)} — {plainMultiple(slot.movementIndex)}.
       </p>
+
+      {/* Which way it ends up */}
+      <div className="mt-2 rounded-lg px-2 py-1.5" style={{ background: `${dirColor}10`, border: `1px solid ${dirColor}33` }}>
+        <p className="text-[11px] font-black" style={{ color: dirColor }}>
+          {plainDirection(slot.bias, slot.confidence)}
+          {!proven && slot.confidence !== "coin_flip" && slot.confidence !== "insufficient" && (
+            <span className="font-bold"> (not proven)</span>
+          )}
+        </p>
+        <p className="text-[9.5px] text-slate-500 leading-snug mt-0.5">
+          Closed higher on {slot.upDays} days, lower on {slot.downDays}. When it ends green it gains {slot.avgGainPct.toFixed(2)}%; when red it loses {slot.avgLossPct.toFixed(2)}%.
+        </p>
+      </div>
+
+      {/* What the candle before it says */}
+      {link && (
+        <div className="mt-1.5 rounded-lg px-2 py-1.5 bg-white border border-slate-200">
+          <p className="text-[9px] font-bold text-slate-400">The half hour before ({link.prevKey})</p>
+          <p className="text-[10px] text-slate-600 leading-snug mt-0.5">{link.summary}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -145,7 +161,7 @@ function ClaimCard({ claim }: { claim: ClaimResult }) {
           <Icon size={15} className="shrink-0 mt-0.5" style={{ color: v.color }} />
           <div className="min-w-0 flex-1">
             <p className="text-[9px] font-black uppercase tracking-wide" style={{ color: v.color }}>
-              {v.word} · {claim.sessions} sessions
+              {v.word} · checked on {claim.sessions} days
             </p>
             <p className="text-[11.5px] font-bold text-slate-800 leading-snug mt-0.5">“{claim.claim}”</p>
           </div>
@@ -236,9 +252,9 @@ function LiveNow({ profile }: { profile: TimeProfile }) {
         <div className="px-3 py-3 flex items-center gap-2.5">
           <Moon size={18} className="text-slate-400 shrink-0" />
           <div>
-            <p className="text-[12px] font-black text-slate-700">MCX energy is closed</p>
+            <p className="text-[12px] font-black text-slate-700">Market is closed</p>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Session runs 9:00 AM – 11:30 PM IST. Opens in about {Math.floor(toOpen / 60)}h {toOpen % 60}m.
+              MCX Crude and Gas trade 9:00 AM to 11:30 PM. Opens again in about {Math.floor(toOpen / 60)} hours {toOpen % 60} minutes.
             </p>
           </div>
         </div>
@@ -260,24 +276,27 @@ function LiveNow({ profile }: { profile: TimeProfile }) {
         </div>
 
         {cur && cur.sessions >= 5 ? (
-          <p className="text-[11px] text-slate-600 leading-snug mt-1.5">
-            This half hour has averaged <span className="font-black" style={{ color: hot ? C.hot : "#334155" }}>{cur.avgRangePct.toFixed(3)}%</span> of movement
-            ({cur.movementIndex.toFixed(2)}× a typical half hour) across {cur.sessions} sessions.{" "}
-            {cur.confidence === "coin_flip" || cur.confidence === "insufficient"
-              ? "Direction has been a coin flip — the size is the only usable part."
-              : `It closed ${cur.bias} ${cur.bias === "up" ? cur.upRatePct : 100 - cur.upRatePct}% of the time, though that is ${cur.confidence === "reliable" ? "a real lean" : "not proven"}.`}
-          </p>
+          <>
+            <p className="text-[11px] text-slate-600 leading-snug mt-1.5">
+              On a normal day this half hour swings about{" "}
+              <span className="font-black" style={{ color: C.up }}>+{cur.avgUpReachPct.toFixed(2)}%</span> up and{" "}
+              <span className="font-black" style={{ color: C.down }}>−{cur.avgDownReachPct.toFixed(2)}%</span> down. {plainBusyness(cur.movementIndex)} — {plainMultiple(cur.movementIndex)}.
+            </p>
+            <p className="text-[10.5px] font-bold leading-snug mt-1" style={{ color: cur.confidence === "reliable" ? (cur.bias === "up" ? C.up : C.down) : "#64748B" }}>
+              {plainDirection(cur.bias, cur.confidence)} · checked on {cur.sessions} days
+            </p>
+          </>
         ) : (
-          <p className="text-[11px] text-slate-500 leading-snug mt-1.5">Not enough history for this half hour to say anything about it.</p>
+          <p className="text-[11px] text-slate-500 leading-snug mt-1.5">Not enough past days for this half hour to say anything yet.</p>
         )}
 
         {live.nextBigMover && live.minutesToBigMover !== null && (
           <div className="mt-2 rounded-xl px-2.5 py-2 flex items-start gap-1.5" style={{ background: `${C.hot}12`, border: `1px solid ${C.hot}33` }}>
             <AlarmClock size={12} className="shrink-0 mt-0.5" style={{ color: C.hot }} />
             <p className="text-[10.5px] leading-snug text-slate-700">
-              Next active window: <span className="font-black" style={{ color: C.hot }}>{live.nextBigMover.label}</span> in{" "}
-              {live.minutesToBigMover < 60 ? `${live.minutesToBigMover} min` : `${Math.floor(live.minutesToBigMover / 60)}h ${live.minutesToBigMover % 60}m`} —{" "}
-              {live.nextBigMover.movementIndex.toFixed(2)}× typical movement.
+              Next busy time: <span className="font-black" style={{ color: C.hot }}>{live.nextBigMover.label}</span>, in{" "}
+              {live.minutesToBigMover < 60 ? `${live.minutesToBigMover} minutes` : `${Math.floor(live.minutesToBigMover / 60)}h ${live.minutesToBigMover % 60}m`} —{" "}
+              {plainMultiple(live.nextBigMover.movementIndex)}.
             </p>
           </div>
         )}
@@ -312,7 +331,7 @@ export function PriceAlerts() {
           <AlarmClock size={20} style={{ color: C.accent }} />
           <div>
             <h1 className="text-[17px] font-black leading-none text-slate-900">Price-Alerts</h1>
-            <p className="text-[9.5px] text-slate-500 mt-0.5">Which times of day actually move — measured, not repeated</p>
+            <p className="text-[9.5px] text-slate-500 mt-0.5">Which times of day really move — checked against past days</p>
           </div>
           <span className="ml-auto text-[9.5px] font-bold text-slate-400 shrink-0">
             MCX {status.data?.isOpen ? "open" : "closed"}
@@ -341,11 +360,11 @@ export function PriceAlerts() {
           <Info size={13} className="shrink-0 mt-0.5" style={{ color: thinSample ? C.down : C.warn }} />
           <div>
             <p className="text-[10.5px] font-bold" style={{ color: thinSample ? C.down : C.warn }}>
-              {thinSample ? `Only ${data.sessionsAnalyzed} sessions — too thin to trust yet` : "Read this before you trust any number here"}
+              {thinSample ? `Only ${data.sessionsAnalyzed} days of history — too few to trust yet` : "Please read this first"}
             </p>
             <p className="text-[10px] text-slate-600 leading-snug mt-0.5">
-              {data.contractNote} This page checks 29 half-hour slots at once — with that many tests, one or two will look like a pattern by pure chance every time. That is why anything short of
-              a strong result is labelled a coin flip here instead of an edge.
+              {data.contractNote} This page looks at 29 different half hours at once. When you check that many, one or two will always look like a pattern just by luck — like tossing 29 coins and
+              finding one that landed heads five times. So unless a result is really strong, this page tells you it is 50/50 rather than calling it a pattern.
             </p>
           </div>
         </div>
@@ -387,10 +406,10 @@ export function PriceAlerts() {
             <SectionHead
               icon={<Activity size={13} style={{ color: C.hot }} />}
               title="Best times to trade"
-              note={`The half hours that moved most, across ${data.sessionsAnalyzed} sessions. For an option buyer, movement in either direction is what pays — so this ranks by size of move, not direction.`}
+              note={`The half hours that moved the most, from ${data.sessionsAnalyzed} past days. When you buy an option, a move in EITHER direction is what pays you — so this list is ordered by how big the move is, not which way it goes.`}
             />
             <div className="space-y-2">
-              {best.map((s) => <SlotDetail key={s.key} slot={s} />)}
+              {best.map((s, i) => <SlotDetail key={s.key} slot={s} rank={i + 1} link={profile.prevLinks.find((l) => l.key === s.key)} />)}
             </div>
           </section>
 
@@ -399,8 +418,8 @@ export function PriceAlerts() {
             <section>
               <SectionHead
                 icon={<Moon size={13} className="text-slate-400" />}
-                title="Quietest times"
-                note="The opposite list, and just as useful: these are the half hours where an option buyer pays time decay and gets little movement back."
+                title="Worst (quietest) times"
+                note="Just as useful to know: in these half hours the price barely moves, so your option loses a little value for nothing. Sitting through these is what quietly eats a small account."
               />
               <Card>
                 <div className="px-3 py-2.5 space-y-1.5">
@@ -421,8 +440,8 @@ export function PriceAlerts() {
           <section>
             <SectionHead
               icon={<CircleHelp size={13} style={{ color: C.accent }} />}
-              title="The timing rules, checked"
-              note="Each of these was measured against this contract's own sessions. Where the answer is no, it is said plainly — that is the point of checking."
+              title="Your timing rules, checked"
+              note="Each rule you were told, checked against real past days. Where the answer is no, it says no — that is the whole point of checking."
             />
             <div className="space-y-2">
               {data.claims.map((c) => <ClaimCard key={c.id} claim={c} />)}
@@ -433,8 +452,8 @@ export function PriceAlerts() {
           <section>
             <SectionHead
               icon={<CalendarClock size={13} style={{ color: C.accent }} />}
-              title="Scheduled movement"
-              note="Unlike a time-of-day pattern, these are genuinely scheduled — the release happens at a known minute whether anyone believes in it or not."
+              title="Fixed-time news"
+              note="These are different from a time-of-day habit: the report comes out at a fixed minute whether anyone believes in it or not."
             />
             <div className="space-y-2">
               {data.events
@@ -449,8 +468,8 @@ export function PriceAlerts() {
           <section>
             <SectionHead
               icon={<Activity size={13} className="text-slate-400" />}
-              title="The whole session"
-              note="Average half-hour range through the day. The arrow is the direction lean — grey means it was a coin flip."
+              title="Every half hour of the day"
+              note="How much the price moves in each half hour. A solid arrow means the direction is proven; a faded arrow means it leans that way but is not proven; grey means 50/50."
             />
             <Card>
               <div className="px-3 py-3 space-y-1.5">
@@ -467,10 +486,10 @@ export function PriceAlerts() {
           </section>
 
           <p className="text-[9.5px] text-slate-400 leading-relaxed px-1">
-            Built from {data.sessionsAnalyzed} completed sessions of {data.tradingSymbol}
-            {data.firstDate && data.lastDate ? `, ${data.firstDate} to ${data.lastDate}` : ""}, using the same 30-minute candles the gap study already downloads — this page adds no extra load.
-            Percentages are of the price at the start of each half hour. Educational reference only, not financial advice. A time-of-day tendency is not a signal: it says nothing about today's
-            news, today's chart, or your strike. Past sessions do not have to repeat, and a sample this small can be luck.
+            Built from {data.sessionsAnalyzed} finished days of {data.tradingSymbol}
+            {data.firstDate && data.lastDate ? `, ${data.firstDate} to ${data.lastDate}` : ""}. All percentages are measured from the price at the start of that half hour. For learning only, not
+            advice. A habit at a certain time is not a buy or sell signal — it knows nothing about today's news, today's chart, or your strike. Yesterday does not have to repeat, and with this
+            few days a pattern can simply be luck.
           </p>
         </>
       )}

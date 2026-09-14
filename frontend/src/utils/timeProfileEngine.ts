@@ -168,6 +168,18 @@ export interface SlotStat {
   medianRangePct: number;
   /** Mean signed (close-open)/open -- the directional drift. */
   avgMovePct: number;
+  /**
+   * How far the price typically REACHES each way inside the half hour,
+   * measured from that half hour's opening price. These two answer "price up
+   * by how much, down by how much" far better than a single range number: a
+   * 0.8% range could be 0.8% up and nothing down, or 0.4% each way, and an
+   * option buyer needs to know which.
+   */
+  avgUpReachPct: number;
+  avgDownReachPct: number;
+  /** On the days it finished green, how much it gained; and on red days, how much it lost. */
+  avgGainPct: number;
+  avgLossPct: number;
   upDays: number;
   downDays: number;
   upRatePct: number;
@@ -181,13 +193,124 @@ export interface SlotStat {
   movementIndex: number;
 }
 
+/**
+ * What the HALF HOUR BEFORE says about this one.
+ *
+ * A trader looking at a big move always wants to know what the candle before
+ * it looked like. This splits every session in two -- the days the previous
+ * half hour finished green, and the days it finished red -- and reports what
+ * this slot then did in each case.
+ *
+ * Conditioning like this roughly halves the sample, which is exactly why
+ * "after a green candle it always does X" survives in trading talk unchecked.
+ * Both halves carry their own session count and their own significance check.
+ */
+export interface ConditionalOutcome {
+  sessions: number;
+  upRatePct: number;
+  avgMovePct: number;
+  bias: Bias;
+  confidence: Confidence;
+}
+
+export interface PrevCandleLink {
+  key: string;
+  startMin: number;
+  prevKey: string;
+  afterGreen: ConditionalOutcome;
+  afterRed: ConditionalOutcome;
+  /** continues = green begets green; reverses = green begets red; none = the previous candle tells you nothing. */
+  verdict: "continues" | "reverses" | "none" | "insufficient";
+  /** Plain-language answer, with the real numbers in it. */
+  summary: string;
+}
+
 export interface TimeProfile {
   slots: SlotStat[];
+  prevLinks: PrevCandleLink[];
   sessionsAnalyzed: number;
   firstDate: string | null;
   lastDate: string | null;
   /** The median slot range across the day -- the yardstick movementIndex uses. */
   typicalRangePct: number;
+}
+
+/** How far apart two up-rates must be before the previous candle is said to matter. */
+export const PREV_LINK_GAP_PCT = 15;
+
+function outcomeOf(moves: number[]): ConditionalOutcome {
+  const up = moves.filter((m) => m > 0).length;
+  const down = moves.filter((m) => m < 0).length;
+  const decided = up + down;
+  const { bias, confidence } = directionVerdict(up, decided);
+  return {
+    sessions: moves.length,
+    upRatePct: decided ? Math.round((up / decided) * 100) : 0,
+    avgMovePct: moves.length ? r3(moves.reduce((a, b) => a + b, 0) / moves.length) : 0,
+    bias,
+    confidence,
+  };
+}
+
+export function buildPrevCandleLinks(slotSessions: SlotSession[]): PrevCandleLink[] {
+  const byDate = groupByDate(slotSessions);
+  const greenMoves = new Map<number, number[]>();
+  const redMoves = new Map<number, number[]>();
+
+  for (const [, daySlots] of byDate) {
+    const byStart = new Map(daySlots.map((s) => [s.startMin, s]));
+    for (const s of daySlots) {
+      const prev = byStart.get(s.startMin - SLOT_MINUTES);
+      if (!prev || !(s.open > 0)) continue;
+      // A perfectly flat previous candle belongs to neither group.
+      if (prev.close === prev.open) continue;
+      const move = ((s.close - s.open) / s.open) * 100;
+      const target = prev.close > prev.open ? greenMoves : redMoves;
+      const list = target.get(s.startMin);
+      if (list) list.push(move);
+      else target.set(s.startMin, [move]);
+    }
+  }
+
+  return allSlotStarts()
+    .filter((startMin) => startMin > SESSION_START_MIN)
+    .map((startMin) => {
+      const afterGreen = outcomeOf(greenMoves.get(startMin) ?? []);
+      const afterRed = outcomeOf(redMoves.get(startMin) ?? []);
+      const prevKey = slotKey(startMin - SLOT_MINUTES);
+      const base = { key: slotKey(startMin), startMin, prevKey, afterGreen, afterRed };
+
+      if (afterGreen.sessions < MIN_SESSIONS_FOR_VERDICT || afterRed.sessions < MIN_SESSIONS_FOR_VERDICT) {
+        return {
+          ...base,
+          verdict: "insufficient" as const,
+          summary: `Not enough days to compare (${afterGreen.sessions} after a green ${prevKey}, ${afterRed.sessions} after a red one).`,
+        };
+      }
+
+      const gap = afterGreen.upRatePct - afterRed.upRatePct;
+      const meaningful = afterGreen.confidence === "reliable" || afterRed.confidence === "reliable" || Math.abs(gap) >= PREV_LINK_GAP_PCT * 1.5;
+
+      if (gap >= PREV_LINK_GAP_PCT && meaningful) {
+        return {
+          ...base,
+          verdict: "continues" as const,
+          summary: `The move tends to carry on. After a green ${prevKey} this half hour went up ${afterGreen.upRatePct}% of ${afterGreen.sessions} days; after a red one, only ${afterRed.upRatePct}% of ${afterRed.sessions} days.`,
+        };
+      }
+      if (gap <= -PREV_LINK_GAP_PCT && meaningful) {
+        return {
+          ...base,
+          verdict: "reverses" as const,
+          summary: `The move tends to flip. After a green ${prevKey} this half hour went up only ${afterGreen.upRatePct}% of ${afterGreen.sessions} days; after a red one it went up ${afterRed.upRatePct}% of ${afterRed.sessions} days.`,
+        };
+      }
+      return {
+        ...base,
+        verdict: "none" as const,
+        summary: `The candle before makes no real difference — ${afterGreen.upRatePct}% up after a green ${prevKey} against ${afterRed.upRatePct}% after a red one. Close enough to be chance.`,
+      };
+    });
 }
 
 export function buildTimeProfile(slotSessions: SlotSession[]): TimeProfile {
@@ -203,10 +326,15 @@ export function buildTimeProfile(slotSessions: SlotSession[]): TimeProfile {
     const rows = bySlot.get(startMin) ?? [];
     const ranges = rows.map((r) => ((r.high - r.low) / r.open) * 100);
     const moves = rows.map((r) => ((r.close - r.open) / r.open) * 100);
-    const upDays = moves.filter((m) => m > 0).length;
-    const downDays = moves.filter((m) => m < 0).length;
+    const upReach = rows.map((r) => (Math.max(0, r.high - r.open) / r.open) * 100);
+    const downReach = rows.map((r) => (Math.max(0, r.open - r.low) / r.open) * 100);
+    const gains = moves.filter((m) => m > 0);
+    const losses = moves.filter((m) => m < 0).map((m) => -m);
+    const upDays = gains.length;
+    const downDays = losses.length;
     const decided = upDays + downDays;
     const { bias, confidence, z } = directionVerdict(upDays, decided);
+    const mean = (list: number[]) => (list.length ? r3(list.reduce((a, b) => a + b, 0) / list.length) : 0);
     return {
       key: slotKey(startMin),
       startMin,
@@ -214,7 +342,11 @@ export function buildTimeProfile(slotSessions: SlotSession[]): TimeProfile {
       sessions: rows.length,
       avgRangePct: rows.length ? r3(ranges.reduce((a, b) => a + b, 0) / ranges.length) : 0,
       medianRangePct: r3(median(ranges)),
-      avgMovePct: rows.length ? r3(moves.reduce((a, b) => a + b, 0) / moves.length) : 0,
+      avgMovePct: mean(moves),
+      avgUpReachPct: mean(upReach),
+      avgDownReachPct: mean(downReach),
+      avgGainPct: mean(gains),
+      avgLossPct: mean(losses),
       upDays,
       downDays,
       upRatePct: decided ? Math.round((upDays / decided) * 100) : 0,
@@ -244,11 +376,43 @@ export function buildTimeProfile(slotSessions: SlotSession[]): TimeProfile {
 
   return {
     slots,
+    prevLinks: buildPrevCandleLinks(slotSessions),
     sessionsAnalyzed: dates.length,
     firstDate: dates[0] ?? null,
     lastDate: dates[dates.length - 1] ?? null,
     typicalRangePct,
   };
+}
+
+// ---- Plain language ----
+// The trader reading this page is not a statistician and should not have to be.
+// "Coin flip", "leaning", "2.8 sigma" are the engine's words; these are the
+// words the screen uses. Kept here, beside the maths they describe, so the
+// wording can never drift away from what was actually computed.
+
+/** What the direction reading means, in words anyone can act on. */
+export function plainDirection(bias: Bias, confidence: Confidence): string {
+  if (confidence === "insufficient") return "Not enough days yet to say";
+  if (confidence === "coin_flip") return "Up or down — 50/50, no way to tell";
+  if (confidence === "reliable") return bias === "up" ? "Usually goes UP" : "Usually goes DOWN";
+  return bias === "up" ? "Goes up more often — but not always" : "Goes down more often — but not always";
+}
+
+/** A one-line answer to "how busy is this half hour". */
+export function plainBusyness(movementIndex: number): string {
+  if (movementIndex >= 1.7) return "Very busy";
+  if (movementIndex >= 1.25) return "Busy";
+  if (movementIndex >= 0.85) return "Normal";
+  if (movementIndex > 0) return "Quiet";
+  return "No data";
+}
+
+/** How much of the day's movement happens here, as a plain multiple. */
+export function plainMultiple(movementIndex: number): string {
+  if (movementIndex <= 0) return "—";
+  if (movementIndex >= 1.05) return `${movementIndex.toFixed(1)}× the normal half hour`;
+  if (movementIndex <= 0.95) return `${(1 / movementIndex).toFixed(1)}× quieter than normal`;
+  return "About the same as any other half hour";
 }
 
 /** The busiest slots that actually have enough history to be worth naming. */
