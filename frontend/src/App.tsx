@@ -33,6 +33,7 @@ import { AiFlash } from "./pages/AiFlash";
 import { AiEdge } from "./pages/AiEdge";
 import { GptNews } from "./pages/GptNews";
 import { PriceAlerts } from "./pages/PriceAlerts";
+import { AiPullback } from "./pages/AiPullback";
 
 function App() {
   return (
@@ -72,6 +73,7 @@ function App() {
           <Route path="/ai-edge" element={<AiEdge />} />
           <Route path="/gpt-news" element={<GptNews />} />
           <Route path="/price-alerts" element={<PriceAlerts />} />
+          <Route path="/ai-pullback" element={<AiPullback />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>

@@ -16,6 +16,7 @@ import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOL
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
 import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
 import { buildSlotSessions, buildTimeProfile, testClaims, scheduledEvents, eventProfile, type ClaimResult, type ScheduledEvent, type EventProfile } from "./frontend/src/utils/timeProfileEngine";
+import { evaluatePullbackReversal, type PullbackResult, type TfKey, type ExternalSignal } from "./frontend/src/utils/pullbackReversalEngine";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -1606,6 +1607,115 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
     })
   );
   return results;
+}
+
+// ---- Pullback vs Reversal ----
+// Computed HERE rather than on the phone, for two reasons. The six main tabs
+// all want this card, and doing it client-side would mean each of them fetching
+// 4H + 1H + 30M + 15M candles on an always-live page -- exactly the upstream
+// load we spent days removing. And the candle data this needs is already in the
+// Worker's own KV caches, so computing it here is nearly free.
+//
+// Memoised in module memory (not KV) on purpose: a 60-second KV cache would be
+// 1,440 writes a day against a 1,000/day free limit. Isolate memory costs
+// nothing and a cold isolate simply recomputes.
+const PULLBACK_MEMO_MS = 60_000;
+const pullbackMemo = new Map<string, { at: number; value: PullbackResult }>();
+
+/**
+ * Turns the already-cached news into ONE bullish/bearish reading for a
+ * commodity. Returns `available: false` when there is genuinely no news rather
+ * than a zero, so the engine can lower its confidence honestly instead of
+ * pretending it looked and found nothing.
+ */
+function newsSignalFor(news: NewsFetchResult, symbol: Symbol, now: number): ExternalSignal {
+  if (!news.available || !news.articles?.length) return { available: false, score: 0 };
+  const want = symbol === "CRUDEOIL" ? "CRUDE" : "NG";
+  const relevant = news.articles.filter((a) => a.affectedMarket === want || a.affectedMarket === "BOTH");
+  if (relevant.length === 0) return { available: false, score: 0 };
+
+  // Weight by source quality and freshness, so one loud blog cannot swing it.
+  let mass = 0;
+  let net = 0;
+  let newestMinutes = Number.POSITIVE_INFINITY;
+  for (const a of relevant) {
+    const ageMin = Math.max(0, (now - new Date(a.publishedAt).getTime()) / 60_000);
+    if (!Number.isFinite(ageMin)) continue;
+    newestMinutes = Math.min(newestMinutes, ageMin);
+    const w = (a.sourceQualityPct / 100) * (a.recencyPct / 100);
+    mass += w;
+    net += w * (a.bullishScore - a.bearishScore);
+  }
+  if (mass <= 0) return { available: false, score: 0 };
+  const score = Math.max(-100, Math.min(100, Math.round(net / mass)));
+  return {
+    available: true,
+    score,
+    ageMinutes: Number.isFinite(newestMinutes) ? newestMinutes : undefined,
+    note: `${relevant.length} ${want === "CRUDE" ? "crude" : "gas"} stories, weighted by source and freshness.`,
+  };
+}
+
+/** The EIA's own reported weekly change -- an official figure, not a headline. */
+function fundamentalSignalFor(eia: EiaFetchResult, symbol: Symbol): ExternalSignal {
+  const row = symbol === "CRUDEOIL" ? eia.crude : eia.ngStorage;
+  if (!eia.available || !row) return { available: false, score: 0 };
+  const score = Math.max(-100, Math.min(100, row.bullishScore - row.bearishScore));
+  return { available: true, score, ageMinutes: 0, note: row.label };
+}
+
+async function computePullback(env: Env, token: string, symbol: Symbol): Promise<PullbackResult> {
+  const memo = pullbackMemo.get(symbol);
+  if (memo && Date.now() - memo.at < PULLBACK_MEMO_MS) return memo.value;
+
+  const fut = await getNearestFuture(token, symbol);
+  const now = Date.now();
+  if (!fut) {
+    return evaluatePullbackReversal({ commodity: symbol as "CRUDEOIL" | "NATURALGAS", timeframes: {}, now });
+  }
+
+  // Every one of these is already KV-cached by other pages, so this is mostly
+  // cache reads. A timeframe that fails is simply absent -- the engine
+  // renormalises its weights and reports lower data quality.
+  const tfs: TfKey[] = ["240", "60", "30", "15"];
+  const timeframes: Partial<Record<TfKey, Candle[]>> = {};
+  for (const tf of tfs) {
+    try {
+      const c = await getCandlesForTF(env, token, fut, tf);
+      if (!("error" in c)) timeframes[tf] = c;
+    } catch {
+      // absent, deliberately
+    }
+  }
+  let dailyCandles: Candle[] | undefined;
+  try {
+    const d = await getCandlesForTF(env, token, fut, "1D");
+    if (!("error" in d)) dailyCandles = d;
+  } catch {
+    dailyCandles = undefined;
+  }
+
+  const [news, eia] = await Promise.all([fetchEnergyNews(env), fetchEiaData(env)]);
+  const hourly = timeframes["60"] ?? timeframes["30"] ?? timeframes["240"];
+  const currentPrice = hourly && hourly.length ? hourly[hourly.length - 1].close : null;
+
+  const value = evaluatePullbackReversal({
+    commodity: symbol as "CRUDEOIL" | "NATURALGAS",
+    timeframes,
+    dailyCandles,
+    currentPrice,
+    news: newsSignalFor(news, symbol, now),
+    fundamentals: fundamentalSignalFor(eia, symbol),
+    // No weather source is connected. Saying so costs data quality and caps
+    // confidence, which is the honest outcome -- see Part 49 of the spec.
+    weather: { available: false, score: 0 },
+    previousState: memo?.value.state,
+    previousStateAt: memo?.at,
+    now,
+  });
+
+  pullbackMemo.set(symbol, { at: now, value });
+  return value;
 }
 
 // ---- Price-Alerts: time-of-day movement profile ----
@@ -3208,6 +3318,14 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           const tf = url.searchParams.get("tf") || "15";
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
           return json(await computeScan(env, token, symbol, tf));
+        }
+
+        if (url.pathname === "/api/pullback") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
+          return json(await computePullback(env, token, symbol));
         }
 
         if (url.pathname === "/api/time-profile") {

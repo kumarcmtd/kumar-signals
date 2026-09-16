@@ -240,6 +240,19 @@ export function useTimeProfile(symbol: InstrumentSymbol) {
   });
 }
 
+// The Pullback vs Reversal read. The server memoises this for 60 seconds and it
+// is built from structure, which does not change tick by tick -- so a 60s
+// cadence on the live tabs is plenty, and every page that shows the card shares
+// this one query rather than adding its own candle fetches.
+export function usePullback(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["pullback", symbol],
+    queryFn: () => api.pullback(symbol),
+    staleTime: 30_000,
+    refetchInterval: usePollInterval(60_000),
+  });
+}
+
 export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],

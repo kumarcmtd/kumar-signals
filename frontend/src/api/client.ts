@@ -3,6 +3,7 @@ import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
 import type { MorningGapRecord } from "../utils/overnightGapEngine";
 import type { TimeProfile, ClaimResult, ScheduledEvent, EventProfile } from "../utils/timeProfileEngine";
+import type { PullbackResult } from "../utils/pullbackReversalEngine";
 
 export interface EnergyDataResponse {
   available: boolean;
@@ -118,6 +119,10 @@ export const api = {
   energy: () => getJSON<EnergyDataResponse>("/energy"),
   gapStudy: (symbol: InstrumentSymbol) => getJSON<GapStudyResponse>(`/gap-study?symbol=${symbol}`),
   timeProfile: (symbol: InstrumentSymbol) => getJSON<TimeProfileResponse>(`/time-profile?symbol=${symbol}`),
+  // One shared read of the central Pullback/Reversal engine. Computed on the
+  // Worker so the six main tabs share a single request instead of each fetching
+  // four timeframes of candles for themselves.
+  pullback: (symbol: InstrumentSymbol) => getJSON<PullbackResult>(`/pullback?symbol=${symbol}`),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),
