@@ -123,6 +123,11 @@ export const api = {
   // Worker so the six main tabs share a single request instead of each fetching
   // four timeframes of candles for themselves.
   pullback: (symbol: InstrumentSymbol) => getJSON<PullbackResult>(`/pullback?symbol=${symbol}`),
+  // Raw 30-minute history for the AI Backtest Lab, which runs the backtest in
+  // the browser -- a Worker invocation gets 10ms of CPU and the run needs
+  // seconds. Server-side this is the same KV-cached series the gap study uses.
+  history30m: (symbol: InstrumentSymbol) =>
+    getJSON<{ symbol: InstrumentSymbol; tradingSymbol: string | null; candles: Candle[]; error?: string }>(`/history-30m?symbol=${symbol}`),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),

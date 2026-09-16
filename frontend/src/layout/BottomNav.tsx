@@ -6,6 +6,7 @@ import {
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
   GraduationCap, BarChart3, Settings, Sparkles, Repeat, Siren, Scale, Newspaper, AlarmClock, Activity as ActivityIcon,
+  Microscope,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
@@ -39,6 +40,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     title: "Signals",
     items: [
       { to: "/ai-pullback", label: "AI Pullback", icon: ActivityIcon },
+      { to: "/ai-backtest-lab", label: "Backtest Lab", icon: Microscope },
       { to: "/price-alerts", label: "Price-Alerts", icon: AlarmClock },
       { to: "/gpt-news", label: "GPT News", icon: Newspaper },
       { to: "/ai-flash", label: "AI Flash", icon: Siren },

@@ -3320,6 +3320,24 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           return json(await computeScan(env, token, symbol, tf));
         }
 
+        // 90 days of 30-minute candles for the AI Backtest Lab.
+        //
+        // The Lab runs the backtest IN THE BROWSER, not here: ~1,300 engine
+        // evaluations is seconds of CPU and a Worker invocation gets 10 ms.
+        // So this endpoint just hands over the candles, which are already the
+        // same KV-cached series the gap study and Price-Alerts use -- no extra
+        // Upstox call, and the phone has no CPU ceiling.
+        if (url.pathname === "/api/history-30m") {
+          const token = await requireToken(env);
+          if (token instanceof Response) return token;
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
+          const fut = await getNearestFuture(token, symbol);
+          if (!fut) return json({ symbol, tradingSymbol: null, candles: [], error: "No instrument found" });
+          const candles = await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
+          return json({ symbol, tradingSymbol: fut.trading_symbol, candles });
+        }
+
         if (url.pathname === "/api/pullback") {
           const token = await requireToken(env);
           if (token instanceof Response) return token;

@@ -253,6 +253,18 @@ export function usePullback(symbol: InstrumentSymbol) {
   });
 }
 
+// The Backtest Lab's candle history. Frozen data -- it only changes when a new
+// session completes -- so it is fetched once and never polled.
+export function useHistory30m(symbol: InstrumentSymbol, enabled: boolean) {
+  return useQuery({
+    queryKey: ["history-30m", symbol],
+    queryFn: () => api.history30m(symbol),
+    enabled,
+    staleTime: 60 * 60_000,
+    refetchInterval: false,
+  });
+}
+
 export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],
