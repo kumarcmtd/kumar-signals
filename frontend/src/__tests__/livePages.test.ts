@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { LIVE_PAGE_PATHS, isAlwaysLivePage, refetchIntervalFor } from "../config/livePages";
+import { LIVE_PAGE_PATHS, isAlwaysLivePage, refetchIntervalFor, queryFailed, PAUSED_RETRY_MS } from "../config/livePages";
 
 test("exactly six pages are allowed to poll on their own", () => {
   assert.equal(LIVE_PAGE_PATHS.length, 6, "this list IS the bottom bar -- adding a seventh silently adds load");
@@ -47,4 +47,38 @@ test("the interval passed in is what comes back, so per-hook cadences survive", 
     assert.equal(refetchIntervalFor("/ai-up", false, ms), ms);
     assert.equal(refetchIntervalFor("/ai-flash", false, ms), false);
   }
+});
+
+// ---- A paused page must still recover from a failure ----
+// Before pages could be paused, a transient upstream blip healed on the next
+// tick and nobody saw it. These pin the behaviour that replaces that.
+
+test("a plain query error counts as failed", () => {
+  assert.equal(queryFailed({ status: "error", data: undefined }), true);
+});
+
+test("a 200 carrying an error field counts as failed, because this app answers that way", () => {
+  // The Worker returns { error } with a 200 when an upstream call fails, which
+  // React Query treats as a success -- exactly the "Option chain unreachable"
+  // case, and the one a status-only check would miss.
+  assert.equal(queryFailed({ status: "success", data: { error: "Option chain unreachable" } }), true);
+  assert.equal(queryFailed({ status: "success", data: { spot: 269.6, rows: [] } }), false);
+});
+
+test("an empty or absent error field is not a failure", () => {
+  assert.equal(queryFailed({ status: "success", data: { error: "" } }), false, "an empty string is not an error");
+  assert.equal(queryFailed({ status: "success", data: { error: null } }), false);
+  assert.equal(queryFailed({ status: "success", data: {} }), false);
+});
+
+test("non-object payloads never crash the failure check", () => {
+  for (const data of [null, undefined, 0, "", "text", [], [1, 2, 3], true]) {
+    assert.equal(queryFailed({ status: "success", data }), false, `data=${JSON.stringify(data)}`);
+  }
+  assert.equal(queryFailed({ status: "pending", data: undefined }), false, "still loading is not failed");
+});
+
+test("the retry gap is slow enough to be a recovery, not a poll", () => {
+  assert.ok(PAUSED_RETRY_MS >= 30_000, "this must not become a back-door poll on every paused page");
+  assert.ok(PAUSED_RETRY_MS <= 120_000, "but a broken figure should not sit on screen for minutes either");
 });

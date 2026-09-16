@@ -45,3 +45,30 @@ export function isAlwaysLivePage(pathname: string): boolean {
 export function refetchIntervalFor(pathname: string, liveOverride: boolean, ms: number): number | false {
   return isAlwaysLivePage(pathname) || liveOverride ? ms : false;
 }
+
+/**
+ * How often a paused page retries a request that FAILED.
+ *
+ * Pausing a page must never mean a one-off failure sticks to the screen. Before
+ * pages could be paused, a transient upstream blip (an Upstox rate-limit, a
+ * dropped connection) healed itself on the next tick seconds later and nobody
+ * ever saw it. With polling off, that same blip would freeze a live figure as a
+ * dash until the user happened to tap Update.
+ */
+export const PAUSED_RETRY_MS = 45_000;
+
+/**
+ * True when a query's last attempt did not produce usable data.
+ *
+ * Two shapes count as a failure. The obvious one is React Query's own error
+ * state (network down, non-2xx). The other is this app's own convention: the
+ * Worker answers 200 with `{ error: "..." }` when an upstream call fails, which
+ * React Query quite reasonably treats as a success. A page showing "Option
+ * chain unreachable" is in the second state, so only checking the first would
+ * leave exactly the case this exists for unrecovered.
+ */
+export function queryFailed(state: { status: string; data: unknown }): boolean {
+  if (state.status === "error") return true;
+  const data = state.data;
+  return typeof data === "object" && data !== null && "error" in data && Boolean((data as { error?: unknown }).error);
+}

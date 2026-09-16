@@ -3,7 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { useAppStore } from "../store/appStore";
-import { refetchIntervalFor } from "../config/livePages";
+import { refetchIntervalFor, queryFailed, PAUSED_RETRY_MS } from "../config/livePages";
 import type { InstrumentSymbol, PortfolioTrade, KumarAiAnalyzeRequest } from "../types";
 
 /**
@@ -14,13 +14,22 @@ import type { InstrumentSymbol, PortfolioTrade, KumarAiAnalyzeRequest } from "..
  * session. Putting the rule here means it applies to all ~25 pages at once and
  * no individual page can forget it.
  *
- * Returning `false` only stops the REPEAT fetches -- React Query still fetches
- * once on mount, so a paused page is never an empty page.
+ * `false` only stops the REPEAT fetches -- React Query still fetches once on
+ * mount, so a paused page is never an empty page.
+ *
+ * The one exception is failure. Before pages could be paused, a transient
+ * upstream blip (an Upstox rate-limit, a dropped connection) healed itself on
+ * the next tick a few seconds later and nobody ever saw it. With polling off,
+ * that same blip would freeze "Current", "Probability" and "R:R" as dashes
+ * until the user happened to tap Update. So a paused query still retries, just
+ * slowly, and only while it is actually broken.
  */
-function usePollInterval(ms: number): number | false {
+function usePollInterval(ms: number): number | false | ((query: { state: { status: string; data: unknown } }) => number | false) {
   const { pathname } = useLocation();
   const liveOverride = useAppStore((s) => s.liveOnOtherPages);
-  return refetchIntervalFor(pathname, liveOverride, ms);
+  const interval = refetchIntervalFor(pathname, liveOverride, ms);
+  if (interval !== false) return interval;
+  return (query) => (queryFailed(query.state) ? PAUSED_RETRY_MS : false);
 }
 
 // Deliberately NOT gated by usePollInterval. This drives the LIVE/CLOSED clock
