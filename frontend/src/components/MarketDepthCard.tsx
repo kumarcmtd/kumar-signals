@@ -13,6 +13,7 @@ function PressureBar({ buyPct, sellPct }: { buyPct: number; sellPct: number }) {
     <div>
       <div className="flex justify-between text-[10px] font-bold mb-1">
         <span style={{ color: "#15803D" }}>Buy {buyPct}%</span>
+        <span className="text-[9px] font-normal text-[var(--color-muted)]">resting orders, not trades</span>
         <span style={{ color: "#B91C1C" }}>Sell {sellPct}%</span>
       </div>
       <div className="h-2.5 rounded-full overflow-hidden flex" style={{ background: "rgba(0,0,0,.06)" }}>
@@ -113,8 +114,36 @@ export function MarketDepthCard({ depth, snapshot }: { depth: MarketDepthResult 
         </div>
       )}
 
+      {/* The book and traded price disagree. Said first, before any number,
+          because every percentage below it is about to look like the opposite
+          of what is actually happening. */}
+      {depth.depthPriceConflict && depth.conflictNote && (
+        <div className="rounded-xl px-3 py-2.5 mb-3 flex items-start gap-2" style={{ background: "#FFFBEB", border: "1px solid #FCD34D" }}>
+          <AlertTriangle size={13} className="shrink-0 mt-0.5" style={{ color: "#B45309" }} />
+          <div>
+            <p className="text-[11px] font-black" style={{ color: "#B45309" }}>
+              Order book says one thing, price says another
+            </p>
+            <p className="text-[10px] text-[var(--color-muted)] leading-snug mt-0.5">{depth.conflictNote}</p>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-2.5 rounded-xl p-3 mb-3" style={{ background: "rgba(255,255,255,.5)" }}>
         <PressureBar buyPct={depth.buyPct} sellPct={depth.sellPct} />
+        {depth.pricePressure.pressure !== "unknown" && (
+          <div className="flex justify-between text-[10px]">
+            <span className="text-[var(--color-muted)]">What price actually did</span>
+            <span
+              className="font-bold"
+              style={{ color: depth.pricePressure.pressure === "selling" ? "#B91C1C" : depth.pricePressure.pressure === "buying" ? "#15803D" : "#B45309" }}
+            >
+              {depth.pricePressure.label}
+              {depth.pricePressure.changePct !== null &&
+                ` ${depth.pricePressure.changePct >= 0 ? "+" : ""}${depth.pricePressure.changePct.toFixed(2)}%`}
+            </span>
+          </div>
+        )}
         <ImbalanceGauge imbalance={depth.imbalance} />
         {depth.spreadPct !== null && (
           <div className="flex justify-between text-[10px]">

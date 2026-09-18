@@ -1,4 +1,5 @@
 import type { Candle, MarketDepthSnapshot } from "../types";
+import { readPricePressure, type PricePressureRead } from "./marketPressure";
 
 // Reads the underlying future's own Level 2 order book (bid/ask, 5 levels
 // each side) and produces one MORE weighted input into the existing AI
@@ -36,6 +37,12 @@ export interface MarketDepthResult {
   volumeRatio: number | null;
   smartMoney: SmartMoneyFlag[];
   reason: string;
+  /** What price actually did over recent bars, to check the book against. */
+  pricePressure: PricePressureRead;
+  /** True when the resting book leans one way and price is going the other. */
+  depthPriceConflict: boolean;
+  /** Plain-language warning shown when depthPriceConflict is set. */
+  conflictNote: string | null;
 }
 
 function volumeRatioOf(candles: Candle[]): number | null {
@@ -134,18 +141,48 @@ export function evaluateMarketDepth(
   if (tier === "neutral" && cautionCount > positiveCount) tier = "bearish";
   else if (tier === "neutral" && positiveCount > cautionCount) tier = "bullish";
 
+  // RESTING DEPTH CANNOT OUTVOTE TRADED PRICE.
+  //
+  // Everything above this point is derived from orders that are merely WAITING.
+  // A book showing 80% buy quantity while price keeps making lower lows is
+  // those bids being consumed by sellers crossing the spread -- it looks like
+  // demand and means the opposite. Whenever the book and price disagree the
+  // tier drops to neutral, because the honest answer is "these two do not
+  // agree", never "bullish".
+  const pricePressure = readPricePressure(candles);
+  const depthPriceConflict =
+    (tier === "bullish" && pricePressure.pressure === "selling") ||
+    (tier === "bearish" && pricePressure.pressure === "buying");
+
+  let conflictNote: string | null = null;
+  if (depthPriceConflict) {
+    const bookSide = tier === "bullish" ? "buy" : "sell";
+    const moving = pricePressure.pressure === "selling" ? "falling" : "rising";
+    const pctText = pricePressure.changePct === null ? "" : ` (${pricePressure.changePct >= 0 ? "+" : ""}${pricePressure.changePct.toFixed(2)}% over ${pricePressure.barsUsed} bars)`;
+    conflictNote =
+      `Depth leans ${bookSide} side, but price is ${moving}${pctText}. Resting orders are being consumed rather than defended, ` +
+      "so the displayed percentages are not confirming actual price strength.";
+    smartMoney.unshift({ key: "depthPriceConflict", label: `Order book and price disagree — price is ${moving}`, kind: "caution" });
+    tier = "neutral";
+  }
+
   const tierScore = tier === "bullish" ? 100 : tier === "neutral" ? 50 : 0;
   const spreadScore = spreadQuality === "bullish" ? 100 : spreadQuality === "neutral" ? 50 : 0;
   const imbalanceScore = Math.round(((imbalance + 1) / 2) * 100);
   const liquidityPctScore = liquidityScore * 10;
-  const smartMoneyScore = Math.max(0, Math.min(100, 50 + (positiveCount - cautionCount) * 20));
+  // Counted after the conflict flag above, so a book that price contradicts
+  // costs confidence rather than only changing the label.
+  const finalCautionCount = smartMoney.filter((f) => f.kind === "caution").length;
+  const finalPositiveCount = smartMoney.filter((f) => f.kind === "positive" && f.key !== "clean").length;
+  const smartMoneyScore = Math.max(0, Math.min(100, 50 + (finalPositiveCount - finalCautionCount) * 20));
 
   const depthScore = Number(((tierScore * 0.35 + spreadScore * 0.15 + imbalanceScore * 0.2 + liquidityPctScore * 0.15 + smartMoneyScore * 0.15) / 10).toFixed(1));
   const confidencePct = Math.round(depthScore * 10);
 
-  const reasonParts = [`Buy ${buyPct.toFixed(0)}% / Sell ${sellPct.toFixed(0)}% (${pressure.label})`];
+  const reasonParts = [`Buy ${buyPct.toFixed(0)}% / Sell ${sellPct.toFixed(0)}% resting (${pressure.label})`];
   if (spreadPct !== null) reasonParts.push(`spread ${spreadPct.toFixed(2)}%`);
   if (buyWall || sellWall) reasonParts.push(buyWall ? "buy wall detected" : "sell wall detected");
+  if (depthPriceConflict) reasonParts.push("price disagrees with the book");
 
   return {
     tier,
@@ -161,5 +198,8 @@ export function evaluateMarketDepth(
     volumeRatio,
     smartMoney,
     reason: reasonParts.join(" · "),
+    pricePressure,
+    depthPriceConflict,
+    conflictNote,
   };
 }

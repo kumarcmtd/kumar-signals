@@ -86,6 +86,21 @@ export function useCandles(symbol: InstrumentSymbol, tf: string) {
   });
 }
 
+// Recent candles used ONLY to sanity-check the order-book buy/sell split
+// against what price actually did (see utils/marketPressure.ts). Deliberately
+// its own cache entry on a 60-second cadence rather than sharing useCandles'
+// 15-second one: the question it answers is "which way has price gone over the
+// last couple of hours", which does not change four times a minute. The Worker
+// serves candles from KV, so this adds no upstream Upstox calls.
+export function useDepthContextCandles(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["candles-depth-context", symbol],
+    queryFn: () => api.candles(symbol, "15"),
+    staleTime: 55_000,
+    refetchInterval: usePollInterval(60_000),
+  });
+}
+
 // Every page's own trade-log key naming is different ("BEST-CRUDEOIL",
 // "AIRISK-NATURALGAS-15", "GATECE-CRUDEOIL-30", "CRUDEOIL-1D", ...) but every
 // one of them contains the plain symbol name somewhere, and "CRUDEOIL" /
