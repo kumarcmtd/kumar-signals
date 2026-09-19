@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCandles, useOptionsAnalytics, useMarketDepth, useNewsTrade } from "../api/hooks";
+import { isAlwaysLivePage } from "../config/livePages";
+import { useAppStore } from "../store/appStore";
 import { evaluateMarketDepth, type MarketDepthResult } from "../utils/marketDepthAnalysis";
 import { evaluateNewsTrade, type NewsTradeResult, type NewsTradeSymbol } from "../utils/newsTradeEngine";
 import type { MarketDepthSnapshot } from "../types";
@@ -35,8 +38,19 @@ export function useNewsTradeAI(symbol: NewsTradeSymbol) {
   const underlyingPrice = candles.length ? candles[candles.length - 1].close : null;
 
   const queryClient = useQueryClient();
+  const { pathname } = useLocation();
+  const liveOverride = useAppStore((s) => s.liveOnOtherPages);
+  // This timer used to run on every page that mounted the hook, invalidating
+  // four queries every 15 seconds regardless of which page you were on. That
+  // quietly bypassed the app-wide rule in config/livePages -- only the six main
+  // tabs auto-refresh; everywhere else loads once and waits for Update. Four
+  // queries x 4 times a minute is real Worker and Upstox load for a screen that
+  // is not being watched, so the timer now obeys the same rule as every other
+  // query in the app.
+  const shouldAutoRefresh = isAlwaysLivePage(pathname) || liveOverride;
   const [tick, setTick] = useState(0);
   useEffect(() => {
+    if (!shouldAutoRefresh) return;
     const id = setInterval(() => {
       queryClient.invalidateQueries({ queryKey: ["candles", symbol, "15"] });
       queryClient.invalidateQueries({ queryKey: ["options-analytics", symbol] });
@@ -45,7 +59,7 @@ export function useNewsTradeAI(symbol: NewsTradeSymbol) {
       setTick((t) => t + 1);
     }, REFRESH_MS);
     return () => clearInterval(id);
-  }, [queryClient, symbol]);
+  }, [queryClient, symbol, shouldAutoRefresh]);
 
   const prevDepthRef = useRef<MarketDepthSnapshot | null>(null);
   const depth: MarketDepthResult | null = useMemo(() => {

@@ -18,16 +18,18 @@
 import { useMemo, useState } from "react";
 import {
   Newspaper, RefreshCw, Radio, Activity, Server, ChevronDown, ChevronUp,
-  ExternalLink, AlertTriangle, CheckCircle2, TrendingUp, TrendingDown, Minus, HelpCircle,
+  ExternalLink, Target,
 } from "lucide-react";
 import { useNewsFeed, useNewsTrade, useMarketStatus, usePullback } from "../api/hooks";
 import {
   computeTilt, rankMovers, breakingSince, bucketThemes, summariseSourceHealth, readFreshness, relativeAge,
   type NewsCommodity,
 } from "../utils/claudeNewsAnalytics";
-import { combineNewsAndTechnical, type CombinedVerdict } from "../utils/newsTechnicalVerdict";
 import { analyzeFlash } from "../utils/aiFlashEngine";
 import { EiaPanel, EconCalendarCardV2, TopEventsList } from "../components/NewsDashboardKit";
+import { NewsTradeDecisionCard } from "../components/NewsTradeDecisionCard";
+import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
+import type { NewsTradeSymbol } from "../utils/newsTradeEngine";
 import type { ScoredNewsArticle } from "../utils/newsScoring";
 import type { InstrumentSymbol } from "../types";
 
@@ -38,92 +40,12 @@ const SYMBOLS: { key: InstrumentSymbol; news: NewsCommodity; label: string; shor
 
 const TIER_LABEL: Record<number, string> = { 1: "Official", 2: "Major wire", 3: "Trade press", 4: "Other" };
 
-const TONE: Record<CombinedVerdict["tone"], { ink: string; bg: string; border: string }> = {
-  green: { ink: "#15803D", bg: "linear-gradient(135deg,#DCFCE7,#F0FDF4)", border: "#86EFAC" },
-  red: { ink: "#B91C1C", bg: "linear-gradient(135deg,#FEE2E2,#FEF2F2)", border: "#FCA5A5" },
-  amber: { ink: "#B45309", bg: "linear-gradient(135deg,#FEF3C7,#FFFBEB)", border: "#FCD34D" },
-  grey: { ink: "#475569", bg: "linear-gradient(135deg,#F1F5F9,#F8FAFC)", border: "#CBD5E1" },
-};
-
 function impactChip(impactScale: number) {
   if (impactScale >= 2) return { text: "Bullish", bg: "#DCFCE7", ink: "#15803D" };
   if (impactScale > 0.5) return { text: "Mildly bullish", bg: "#F0FDF4", ink: "#16A34A" };
   if (impactScale <= -2) return { text: "Bearish", bg: "#FEE2E2", ink: "#B91C1C" };
   if (impactScale < -0.5) return { text: "Mildly bearish", bg: "#FEF2F2", ink: "#DC2626" };
   return { text: "Neutral", bg: "#F1F5F9", ink: "#64748B" };
-}
-
-function SideIcon({ side }: { side: string }) {
-  if (side === "bullish") return <TrendingUp size={11} className="shrink-0" style={{ color: "#15803D" }} />;
-  if (side === "bearish") return <TrendingDown size={11} className="shrink-0" style={{ color: "#B91C1C" }} />;
-  if (side === "neutral") return <Minus size={11} className="shrink-0" style={{ color: "#64748B" }} />;
-  return <HelpCircle size={11} className="shrink-0" style={{ color: "#94A3B8" }} />;
-}
-
-/** The big card: news + chart, and what to do when they disagree. */
-function VerdictCard({ verdict }: { verdict: CombinedVerdict }) {
-  const t = TONE[verdict.tone];
-  return (
-    <div className="rounded-2xl p-3.5 border" style={{ background: t.bg, borderColor: t.border, boxShadow: `0 8px 24px ${t.ink}1A` }}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-[14px] font-black leading-tight" style={{ color: t.ink }}>{verdict.headline}</p>
-        <div className="shrink-0 text-right">
-          <p className="text-[8px] font-bold uppercase text-slate-500">Confidence</p>
-          <p className="text-[15px] font-black leading-none" style={{ color: t.ink }}>{verdict.confidence}%</p>
-        </div>
-      </div>
-
-      {/* The two halves, side by side, so it is obvious which one is which. */}
-      <div className="grid grid-cols-2 gap-1.5 mt-2.5">
-        <div className="rounded-xl px-2 py-1.5" style={{ background: "rgba(255,255,255,.7)" }}>
-          <p className="text-[8px] font-bold uppercase text-slate-500">News says</p>
-          <p className="text-[11px] font-black flex items-center gap-1 capitalize" style={{ color: "#334155" }}>
-            <SideIcon side={verdict.newsSide} />
-            {verdict.newsSide === "unknown" ? "No read" : verdict.newsSide}
-          </p>
-        </div>
-        <div className="rounded-xl px-2 py-1.5" style={{ background: "rgba(255,255,255,.7)" }}>
-          <p className="text-[8px] font-bold uppercase text-slate-500">Chart says</p>
-          <p className="text-[11px] font-black flex items-center gap-1 capitalize" style={{ color: "#334155" }}>
-            <SideIcon side={verdict.techSide} />
-            {verdict.techSide === "unknown" ? "No read" : verdict.techSide}
-          </p>
-        </div>
-      </div>
-
-      <p className="text-[10.5px] text-slate-700 leading-snug mt-2.5">{verdict.detail}</p>
-
-      <div className="rounded-xl px-2.5 py-2 mt-2" style={{ background: "rgba(255,255,255,.7)" }}>
-        <p className="text-[8px] font-bold uppercase text-slate-500 mb-0.5">What would make this actionable</p>
-        <p className="text-[10px] text-slate-700 leading-snug">{verdict.nextStep}</p>
-      </div>
-
-      {verdict.agrees.length > 0 && (
-        <div className="mt-2 space-y-0.5">
-          {verdict.agrees.map((a) => (
-            <p key={a} className="text-[9.5px] text-slate-600 flex items-start gap-1 leading-snug">
-              <CheckCircle2 size={10} className="shrink-0 mt-[2px]" style={{ color: "#16A34A" }} />
-              {a}
-            </p>
-          ))}
-        </div>
-      )}
-      {verdict.cautions.length > 0 && (
-        <div className="mt-1 space-y-0.5">
-          {verdict.cautions.map((c) => (
-            <p key={c} className="text-[9.5px] text-slate-600 flex items-start gap-1 leading-snug">
-              <AlertTriangle size={10} className="shrink-0 mt-[2px]" style={{ color: "#D97706" }} />
-              {c}
-            </p>
-          ))}
-        </div>
-      )}
-
-      <p className="text-[8.5px] text-slate-500 mt-2 leading-snug">
-        A reading of current conditions, not a prediction. Confidence describes how consistent the evidence is — never a chance of profit.
-      </p>
-    </div>
-  );
 }
 
 function TiltBar({ score, sampleSize }: { score: number; sampleSize: number }) {
@@ -176,21 +98,19 @@ export function AiNews() {
   // there is no separate energy query here -- one fetch, both panels.
   const newsTrade = useNewsTrade();
   const status = useMarketStatus();
-  // The chart half of the verdict. Already memoised on the Worker and shared
-  // with the six main tabs, so this is effectively free.
+  // Confirmation / invalidation levels. Already memoised on the Worker and
+  // shared with the six main tabs, so this is effectively free.
   const pullback = usePullback(symbolKey);
+  // The Final Decision engine: news, technical, momentum, options and
+  // liquidity combined into one weighted score. Reuses the candle, options and
+  // depth queries other pages already open rather than adding its own.
+  const decision = useNewsTradeAI(symbolKey as NewsTradeSymbol);
 
   const articles = useMemo(() => feed.data?.articles ?? [], [feed.data]);
   const now = useMemo(() => Date.now(), [feed.dataUpdatedAt]);
 
   const crudeTilt = useMemo(() => computeTilt(articles, "CRUDE", now), [articles, now]);
   const ngTilt = useMemo(() => computeTilt(articles, "NG", now), [articles, now]);
-  const activeTilt = active.news === "CRUDE" ? crudeTilt : ngTilt;
-
-  const verdict = useMemo(
-    () => combineNewsAndTechnical(symbolKey as "CRUDEOIL" | "NATURALGAS", activeTilt, pullback.data),
-    [symbolKey, activeTilt, pullback.data]
-  );
 
   const flash = useMemo(() => analyzeFlash(articles, active.news, now), [articles, active.news, now]);
   const movers = useMemo(() => rankMovers(articles, active.news, 12, now), [articles, active.news, now]);
@@ -209,7 +129,7 @@ export function AiNews() {
         </div>
         <button
           type="button"
-          onClick={() => { feed.refetch(); pullback.refetch(); }}
+          onClick={() => { feed.refetch(); pullback.refetch(); newsTrade.refetch(); }}
           disabled={feed.isFetching}
           className="shrink-0 rounded-xl px-2.5 py-1.5 text-[10.5px] font-black flex items-center gap-1 disabled:opacity-50"
           style={{ background: "var(--color-surface-soft)", color: "#475569" }}
@@ -267,10 +187,46 @@ export function AiNews() {
         </div>
       )}
 
-      {/* ---- THE VERDICT ---- */}
+      {/* ---- THE VERDICT ----
+          Five weighted inputs -- news, technical, momentum, options and
+          liquidity -- combined into one score, with an explicit WAIT state when
+          they conflict. Any input that is unavailable says so on its own row
+          rather than quietly scoring zero and dragging the total toward
+          neutral. */}
       <section>
         <h2 className="text-[13px] font-black text-slate-800 mb-1.5">The read on {active.label}</h2>
-        <VerdictCard verdict={verdict} />
+        <NewsTradeDecisionCard result={decision.result} label={`${active.label} Final Decision`} />
+
+        {/* The levels that would confirm or kill it. The decision card scores
+            the evidence; this says what price has to do about it. */}
+        {pullback.data && (
+          <div className="rounded-2xl bg-white border border-[var(--color-border)] px-3 py-2.5 mt-2">
+            <p className="text-[10px] font-black text-slate-700 flex items-center gap-1.5">
+              <Target size={12} className="text-indigo-500" />
+              Levels to watch
+            </p>
+            <div className="mt-1.5 space-y-1">
+              <p className="text-[10px] text-slate-600 leading-snug">
+                <span className="font-bold text-emerald-700">Confirms up:</span> {pullback.data.bullishConfirmation}
+              </p>
+              <p className="text-[10px] text-slate-600 leading-snug">
+                <span className="font-bold text-rose-700">Confirms down:</span> {pullback.data.bearishConfirmation}
+              </p>
+              <p className="text-[10px] text-slate-600 leading-snug">
+                <span className="font-bold text-amber-700">Wrong if:</span> {pullback.data.invalidation}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {decision.candlesError && (
+          <p className="text-[9.5px] text-amber-700 mt-1.5 leading-snug">
+            Price data unavailable ({decision.candlesError}), so the technical, momentum, options and liquidity rows above are not scored. The news side is unaffected.
+          </p>
+        )}
+        <p className="text-[9px] text-slate-400 mt-1.5 leading-snug px-0.5">
+          A reading of current conditions, not a prediction. A high score means the evidence currently agrees — it is never a chance of profit, and conditions can change fast.
+        </p>
       </section>
 
       {/* ---- Both tilt meters ---- */}
