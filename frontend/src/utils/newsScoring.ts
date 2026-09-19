@@ -44,7 +44,21 @@ const TIER2_MATCH = [
   // the two the trader specifically asked to be covered.
   "finance.yahoo.com", "yahoo finance", "tradingeconomics.com", "trading economics", "dowjones.com", "dow jones", "market talk",
 ];
-const TIER3_MATCH = ["oilprice.com", "rigzone.com", "naturalgasintel.com", "investing.com", "moneycontrol.com", "livemint.com", "businessline.com", "energyintel.com", "hellenicshippingnews.com", "oilprice", "rigzone", "ogj.com", "oil & gas journal", "hellenic shipping", "natural gas intelligence"];
+const TIER3_MATCH = [
+  "oilprice.com", "rigzone.com", "naturalgasintel.com", "investing.com", "moneycontrol.com", "livemint.com", "businessline.com", "energyintel.com", "hellenicshippingnews.com", "oilprice", "rigzone", "ogj.com", "oil & gas journal", "hellenic shipping", "natural gas intelligence",
+  // Energy trade press added for the Claude News page. Every one of these is
+  // a feed in worker.ts's TRUSTED_RSS_FEEDS; anything left off this list
+  // falls to Tier 4, which halves its impact and caps its confidence.
+  "worldoil.com", "world oil", "offshore-energy.biz", "offshore energy", "lngprime.com", "lng prime",
+  "naturalgasworld.com", "natural gas world", "argusmedia.com", "argus media", "upstreamonline.com", "zawya.com",
+];
+
+// Google News topic feeds carry stories from every tier, so the feed NAME
+// cannot tell us the publisher's quality -- only the article URL can, and
+// classifySourceTier already checks the URL first. These names exist so an
+// aggregated item with a missing or shortened link still lands somewhere
+// sensible (Tier 3) rather than being discounted to Tier 4 noise.
+const TIER3_AGGREGATOR_MATCH = ["via google news", "news.google.com", "headlines (via", "watch (via", "storage (via"];
 
 // Google News appends " - Publisher" to every headline it syndicates. That
 // suffix is an artifact of the aggregator, not part of the headline, and
@@ -61,6 +75,7 @@ export function classifySourceTier(source: string, url?: string): SourceTier {
   if (TIER1_MATCH.some((d) => hay.includes(d))) return 1;
   if (TIER2_MATCH.some((d) => hay.includes(d))) return 2;
   if (TIER3_MATCH.some((d) => hay.includes(d))) return 3;
+  if (TIER3_AGGREGATOR_MATCH.some((d) => hay.includes(d))) return 3;
   return 4;
 }
 

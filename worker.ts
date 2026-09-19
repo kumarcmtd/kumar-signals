@@ -1970,6 +1970,8 @@ interface NewsFetchResult {
   articles: ScoredNewsArticle[];
   events: NewsEvent[];
   sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
+  /** When the Cron last rebuilt this payload. Absent on an all-sources-down result. */
+  builtAt?: string;
   error?: string;
 }
 
@@ -2044,7 +2046,69 @@ const TRUSTED_RSS_FEEDS: RssFeedConfig[] = [
   { url: "https://www.rigzone.com/news/rss/rigzone_latest.aspx", source: "Rigzone" },
   { url: "https://www.naturalgasintel.com/feed/", source: "Natural Gas Intelligence" },
   { url: "https://www.hellenicshippingnews.com/feed/", source: "Hellenic Shipping News" },
+  { url: "https://worldoil.com/rss?feed=news", source: "World Oil" },
+  { url: "https://www.spglobal.com/commodity-insights/en/news-research/rss-feed", source: "S&P Global Commodity Insights" },
+  { url: "https://www.offshore-energy.biz/feed/", source: "Offshore Energy" },
+  { url: "https://lngprime.com/feed/", source: "LNG Prime" },
+  { url: "https://www.naturalgasworld.com/rss", source: "Natural Gas World" },
+  { url: "https://www.opec.org/opec_web/en/press_room/28.htm?rss=1", source: "OPEC - Press Releases" },
+
+  // ---------------------------------------------------------------------
+  // Aggregated topic feeds. These matter more than they look.
+  //
+  // Most energy trade sites either never published RSS, moved it, or sit
+  // behind bot protection that answers a datacentre IP with a 403 -- which
+  // is indistinguishable from a dead URL from in here. Google News is a
+  // single well-known endpoint that indexes ALL of those publishers within
+  // minutes, so one feed that works is worth more than six site feeds that
+  // might not. The site:-restricted ones below name the publishers the
+  // trader specifically asked for; the unrestricted ones are the safety net
+  // that keeps the page populated even when every direct feed is blocked.
+  //
+  // when:1d bounds each query to the last 24h, inside the 48h window the
+  // scorer already discards past, so nothing stale is pulled in.
+  // ---------------------------------------------------------------------
+  {
+    url: "https://news.google.com/rss/search?q=%28%22crude+oil%22+OR+WTI+OR+Brent+OR+OPEC%29+when%3A1d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Crude Oil headlines (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=%28%22natural+gas%22+OR+LNG+OR+%22Henry+Hub%22%29+when%3A1d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Natural Gas headlines (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=%28%22crude+inventories%22+OR+%22oil+inventories%22+OR+%22gas+storage%22+OR+EIA%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Inventory & storage (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=site%3Aoilprice.com+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "OilPrice.com (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=site%3Aworldoil.com+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "World Oil (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=site%3Aspglobal.com+%28oil+OR+gas+OR+LNG+OR+crude%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "S&P Global (via Google News)",
+    stripPublisherSuffix: true,
+  },
+  {
+    url: "https://news.google.com/rss/search?q=%28%22Strait+of+Hormuz%22+OR+%22Red+Sea%22+OR+sanctions+OR+refinery+OR+pipeline%29+%28oil+OR+gas%29+when%3A2d&hl=en-US&gl=US&ceid=US%3Aen",
+    source: "Supply disruption watch (via Google News)",
+    stripPublisherSuffix: true,
+  },
 ];
+
+// Per-feed item cap. An aggregator feed can return 100 items; parsing and
+// scoring all of them across ~35 feeds is CPU this Worker does not have.
+// The scorer sorts by recency anyway, so the tail is discarded regardless.
+const MAX_ITEMS_PER_FEED = 25;
 // Tightened from 8s: with a wider feed list these run in parallel, so the
 // slowest single feed sets the floor on how fast a flash can surface.
 const RSS_FETCH_TIMEOUT_MS = 6000;
@@ -2105,7 +2169,7 @@ async function fetchOneRssFeed(feed: RssFeedConfig): Promise<{ source: string; o
     clearTimeout(timer);
     if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
     const xml = await res.text();
-    const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true);
+    const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true).slice(0, MAX_ITEMS_PER_FEED);
     return { source: feed.source, ok: true, count: articles.length, articles };
   } catch (e: any) {
     return { source: feed.source, ok: false, count: 0, error: e?.name === "AbortError" ? "Timed out" : (e?.message ?? "Fetch failed"), articles: [] };
@@ -2140,19 +2204,26 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // which is what AI Flash wants. The key is versioned because the feed list
 // above changed: a v2 payload cached from the old five-source list would
 // otherwise keep serving until it aged out.
-const NEWS_CACHE_TTL_SECONDS = 60;
-const NEWS_CACHE_KV_KEY = "news:combined:v5";
+// The Cron fires every 5 minutes and refreshes this, so a 30-minute TTL keeps
+// the key warm with a wide safety margin while a request-path rebuild becomes
+// the rare exception rather than the norm.
+//
+// WHY THIS IS NOT 60 SECONDS ANY MORE. A 60s TTL meant a browser polling the
+// news was, most minutes, the thing that paid for rebuilding it: ~35 parallel
+// feed fetches plus regex-parsing every one of their XML bodies, inside a
+// request that gets 10ms of CPU on this plan. That is how a news page ends up
+// showing nothing -- not because the feeds are dead, but because the request
+// rebuilding them runs out of CPU and fails. It also wrote KV ~1,440 times a
+// day against a 1,000/day free limit. Cron-warming at 5 minutes costs ~288
+// writes a day and moves the expensive part somewhere it has room to run.
+const NEWS_CACHE_TTL_SECONDS = 30 * 60;
+const NEWS_CACHE_KV_KEY = "news:combined:v6";
 
-async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
-  const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as NewsFetchResult;
-    } catch {
-      // fall through and refetch on a corrupt cache entry
-    }
-  }
-
+/**
+ * Rebuilds the news cache from every feed. Expensive by nature -- call it
+ * from scheduled(), not from a request, unless the cache is genuinely empty.
+ */
+async function buildEnergyNews(env: Env): Promise<NewsFetchResult> {
   const rssResults = await Promise.all(TRUSTED_RSS_FEEDS.map(fetchOneRssFeed));
   const sourceStatus = rssResults.map(({ articles, ...status }) => status);
   const rawArticles: RawNewsArticle[] = rssResults.flatMap((r) => r.articles);
@@ -2182,9 +2253,41 @@ async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   const now = Date.now();
   const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);
   const events = clusterEvents(scored);
-  const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus };
+  const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus, builtAt: new Date(now).toISOString() };
   await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
   return result;
+}
+
+/**
+ * What every request path calls. Reads the cache the Cron keeps warm and only
+ * rebuilds inline when there is genuinely nothing cached (first request after
+ * a deploy, or after a 30-minute gap in Cron delivery) -- so the 10ms-CPU
+ * request path almost never does the expensive work.
+ */
+async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
+  const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as NewsFetchResult;
+    } catch {
+      // fall through and rebuild on a corrupt cache entry
+    }
+  }
+  return buildEnergyNews(env);
+}
+
+/**
+ * Cron entry point. Refreshes the news cache every tick so the feeds are at
+ * most ~5 minutes old and no browser request ever pays to rebuild them.
+ * Failures are swallowed: a bad tick leaves the previous cache in place.
+ */
+async function warmEnergyNews(env: Env): Promise<void> {
+  try {
+    await buildEnergyNews(env);
+  } catch {
+    // A failed warm is not worth failing the whole Cron run for -- the
+    // previous cached payload keeps serving until the next tick.
+  }
 }
 
 // ---- "Why Today": a grounded, plain-language read of why crude / NG is
@@ -3577,5 +3680,8 @@ export default {
     // Builds the Price-Alerts profile off the request path. Does nothing on a
     // tick where today's profile is already cached.
     ctx.waitUntil(warmTimeProfiles(env));
+    // Keeps the news feeds warm so no browser request ever has to rebuild
+    // ~35 RSS sources inside a 10ms CPU budget. See NEWS_CACHE_TTL_SECONDS.
+    ctx.waitUntil(warmEnergyNews(env));
   },
 };

@@ -142,6 +142,8 @@ export interface NewsFetchResponse {
   articles: ScoredNewsArticle[];
   events: NewsEvent[];
   sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
+  /** When the Worker's Cron last rebuilt the feed payload. */
+  builtAt?: string;
   error?: string;
 }
 
