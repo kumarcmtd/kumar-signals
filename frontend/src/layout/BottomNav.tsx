@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   Rocket, Crosshair, Target, Waypoints, Menu, X,
-  BadgeCheck, Radio,
+  BadgeCheck,
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
-  GraduationCap, BarChart3, Settings, Sparkles, Repeat, Siren, Scale, Newspaper, AlarmClock, Activity as ActivityIcon,
+  GraduationCap, BarChart3, Settings, Sparkles, Repeat, Scale, AlarmClock, Activity as ActivityIcon,
   Microscope, Rss,
   type LucideIcon,
 } from "lucide-react";
@@ -24,6 +24,12 @@ interface NavItem {
 // this replaces a flat, horizontally-scrolling strip of 24 equally-weighted
 // icons (where reaching Journal or Settings meant scrolling past ~20 signal
 // pages) with a clear hierarchy.
+//
+// GPT News, AI Flash, News AI and Claude News are no longer listed: Ai-News
+// carries all four sets of features on one page. Their ROUTES still work, so
+// nothing is broken and any saved link still opens -- they have simply stopped
+// being four different answers to the same question, and four separate pages
+// each opening their own polling queries.
 // Paths come from config/livePages so these six tabs and the six pages allowed
 // to auto-refresh are guaranteed to be the same six pages.
 const PRIMARY: NavItem[] = [
@@ -39,16 +45,13 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
-      { to: "/claude-news", label: "Claude News", icon: Rss },
+      { to: "/ai-news", label: "Ai-News", icon: Rss },
       { to: "/ai-pullback", label: "AI Pullback", icon: ActivityIcon },
       { to: "/ai-backtest-lab", label: "Backtest Lab", icon: Microscope },
       { to: "/price-alerts", label: "Price-Alerts", icon: AlarmClock },
-      { to: "/gpt-news", label: "GPT News", icon: Newspaper },
-      { to: "/ai-flash", label: "AI Flash", icon: Siren },
       { to: "/ai-edge", label: "AI Edge", icon: Scale },
       { to: "/ai-own", label: "AI Own", icon: Sparkles },
       { to: "/ai-verify-pro", label: "Verify Pro", icon: BadgeCheck },
-      { to: "/news-trade-ai", label: "News AI", icon: Radio },
     ],
   },
   {
