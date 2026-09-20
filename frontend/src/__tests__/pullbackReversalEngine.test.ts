@@ -403,3 +403,101 @@ test("every signal explains itself and names what would prove it wrong", () => {
   assert.match(r.bearishConfirmation, /CLOSE|close/, "confirmation must be about closes, not wicks");
   assert.ok(r.contributions.length > 0, "Part 29 requires the actual contributing factors");
 });
+
+// ===========================================================================
+// THE 18 SEPTEMBER FAILURE.
+//
+// The backtest found a run of GREEN 84% calls, every one reasoned "Higher highs
+// and higher lows intact on 4H", while Crude fell 9917 -> 9766 across a single
+// evening. Every one lost. These tests lock in the fix and, just as important,
+// lock in that a NORMAL pullback is still allowed to read green -- a fix that
+// turns everything yellow would be worse than the bug.
+// ===========================================================================
+
+/** Bullish overall, but the last stretch is a steady decline. */
+function bullishThenFallingPath(): number[] {
+  const out = bullishPath(6);
+  let p = out[out.length - 1];
+  for (let i = 0; i < 14; i++) {
+    p -= 1.6;
+    out.push(Number(p.toFixed(2)));
+  }
+  return out;
+}
+
+test("slow structure can no longer call GREEN while price is actively falling", () => {
+  const slow = series(bullishPath());
+  const fast = series(bullishThenFallingPath());
+  const r = evaluatePullbackReversal(
+    input({
+      timeframes: { "240": slow, "60": slow, "30": fast, "15": fast },
+      currentPrice: fast[fast.length - 1].close,
+    })
+  );
+  assert.notEqual(r.state, "still_bullish", "a falling market with bearish fast timeframes must not read GREEN");
+  assert.ok(r.confidence <= 65, `confidence should be capped, got ${r.confidence}`);
+});
+
+test("the price-action veto explains itself in the warnings", () => {
+  const slow = series(bullishPath());
+  const fast = series(bullishThenFallingPath());
+  const r = evaluatePullbackReversal(
+    input({
+      timeframes: { "240": slow, "60": slow, "30": fast, "15": fast },
+      currentPrice: fast[fast.length - 1].close,
+    })
+  );
+  if (r.state === "uncertain") {
+    assert.ok(
+      r.warnings.some((w) => /price is actively moving the other way|fast and slow timeframes disagree/i.test(w)),
+      `expected an explanation, got: ${JSON.stringify(r.warnings)}`
+    );
+  }
+});
+
+// The guard against over-correcting.
+test("an ordinary pullback inside an intact uptrend still reads bullish", () => {
+  const path = bullishPath();
+  const candles = series(path);
+  const r = evaluatePullbackReversal(input({ timeframes: { "240": candles, "60": candles, "30": candles, "15": candles } }));
+  assert.equal(r.state, "still_bullish", "the whole point of the page is that a normal pullback stays green");
+});
+
+test("no single timeframe can out-score the decision threshold on its own", () => {
+  // Only the 4H has data. Under the old engine its intact bullish structure was
+  // worth 17.5 points against a threshold of 12 and carried GREEN alone.
+  const slow = series(bullishPath());
+  const r = evaluatePullbackReversal(input({ timeframes: { "240": slow } }));
+  const structureLines = r.contributions.filter((c) => /structure$/i.test(c.label));
+  for (const line of structureLines) {
+    assert.ok(
+      line.points < DEFAULT_CONFIG.decisionThreshold,
+      `${line.label} scored ${line.points}, which alone clears the ${DEFAULT_CONFIG.decisionThreshold} decision threshold`
+    );
+  }
+});
+
+test("confidence no longer climbs just because many correlated rules fired", () => {
+  // Every timeframe is the same series, so every structure rule agrees. That is
+  // one opinion repeated four times, not four confirmations, and it must not
+  // produce a near-maximum confidence.
+  const candles = series(bullishPath());
+  const r = evaluatePullbackReversal(input({ timeframes: { "240": candles, "60": candles, "30": candles, "15": candles } }));
+  assert.ok(r.confidence <= 85, `identical inputs repeated should not read as near-certainty, got ${r.confidence}`);
+  assert.ok(r.confidence <= MAX_CONFIDENCE);
+});
+
+test("a state held only by whipsaw protection is not a confident state", () => {
+  const slow = series(bullishPath());
+  const fast = series(bullishThenFallingPath());
+  const r = evaluatePullbackReversal(
+    input({
+      timeframes: { "240": slow, "60": slow, "30": fast, "15": fast },
+      previousState: "still_bullish",
+      previousStateAt: NOW - 60_000,
+      currentPrice: fast[fast.length - 1].close,
+    })
+  );
+  const held = r.warnings.some((w) => /whipsaw protection is holding/i.test(w));
+  if (held) assert.ok(r.confidence <= 58, `a cooldown-held state claimed ${r.confidence}%`);
+});

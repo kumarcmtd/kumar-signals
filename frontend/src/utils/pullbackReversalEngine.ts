@@ -34,6 +34,7 @@
 
 import type { Candle } from "../types";
 import { emaLast, rsi, macd, adx, atr, superTrend, vwap, pivotPoints } from "./indicators";
+import { readPricePressure, type PricePressureRead } from "./marketPressure";
 import { findSwingPoints } from "./priceAction";
 
 export type TfKey = "240" | "60" | "30" | "15" | "5";
@@ -517,6 +518,10 @@ interface ScoreContext {
   news: ExternalSignal;
   fundamentals: ExternalSignal;
   weather: ExternalSignal;
+  /** What price has actually done recently, on the fastest timeframe available. */
+  pricePressure: PricePressureRead;
+  /** Needed so no single timeframe can out-score the decision on its own. */
+  decisionThreshold: number;
 }
 
 function technicalLines(ctx: ScoreContext): { bull: ScoreLine[]; bear: ScoreLine[] } {
@@ -527,18 +532,43 @@ function technicalLines(ctx: ScoreContext): { bull: ScoreLine[]; bear: ScoreLine
   };
 
   // Structure, weighted so the slow timeframes genuinely dominate.
+  //
+  // CAPPED, because they were dominating too well. With 4H weighted 35 and a
+  // decision threshold of 12, `w * 0.5` handed 17.5 points to a single stale
+  // reading -- enough to carry a GREEN on its own, with every other timeframe
+  // silent. The backtest found the consequence: a run of GREEN 84% calls, all
+  // reasoned "Higher highs and higher lows intact on 4H", while price fell
+  // from 9917 to 9766 over the same evening. A 4-hour structure takes hours of
+  // 30-minute bars to register a turn; by the time it does, the move is gone.
+  //
+  // No single timeframe may now contribute more than the decision threshold
+  // itself, so at least two things must agree before anything goes green.
+  const maxPerTf = Math.max(4, ctx.decisionThreshold - 1);
   for (const tf of TF_ORDER) {
     const s = ctx.structures[tf];
     if (!s.available || s.effectiveWeight <= 0) continue;
     const w = s.effectiveWeight;
-    if (s.trend === "bullish" && s.health === "intact") add(bull, `${s.label} structure`, Math.round(w * 0.5), `Higher highs and higher lows intact on ${s.label}.`);
+    const cap = (points: number) => Math.min(Math.round(points), maxPerTf);
+    if (s.trend === "bullish" && s.health === "intact") add(bull, `${s.label} structure`, cap(w * 0.5), `Higher highs and higher lows intact on ${s.label}.`);
     else if (s.trend === "bullish" && s.health === "weakening") {
-      add(bull, `${s.label} structure`, Math.round(w * 0.2), `${s.label} still bullish but the last low did not hold up.`);
-      add(bear, `${s.label} weakening`, Math.round(w * 0.2), `${s.label} higher-low sequence is faltering.`);
+      add(bull, `${s.label} structure`, cap(w * 0.2), `${s.label} still bullish but the last low did not hold up.`);
+      add(bear, `${s.label} weakening`, cap(w * 0.2), `${s.label} higher-low sequence is faltering.`);
     } else if (s.health === "broken" || s.trend === "bearish") {
-      add(bear, `${s.label} structure`, Math.round(w * 0.5), `${s.label} has made a lower low / closed below its last swing low.`);
+      add(bear, `${s.label} structure`, cap(w * 0.5), `${s.label} has made a lower low / closed below its last swing low.`);
     }
-    if (s.changeOfCharacter) add(bear, `${s.label} character change`, Math.round(w * 0.15), `${s.label} broke structure against its own trend.`);
+    if (s.changeOfCharacter) add(bear, `${s.label} character change`, cap(w * 0.15), `${s.label} broke structure against its own trend.`);
+  }
+
+  // What price has ACTUALLY been doing, regardless of what the slow structure
+  // still says. This is the half that was missing: structure is a lagging
+  // description of the past, and a falling market does not wait for the 4H
+  // chart to agree before it takes the premium out of a Call.
+  if (ctx.pricePressure.pressure === "selling") {
+    const pts = Math.min(18, Math.round(Math.abs(ctx.pricePressure.atrMultiple ?? 1) * 8));
+    add(bear, "Price is falling now", pts, `Price has dropped ${Math.abs(ctx.pricePressure.changePct ?? 0).toFixed(2)}% over the last ${ctx.pricePressure.barsUsed} bars, whatever the slower charts still show.`);
+  } else if (ctx.pricePressure.pressure === "buying") {
+    const pts = Math.min(18, Math.round(Math.abs(ctx.pricePressure.atrMultiple ?? 1) * 8));
+    add(bull, "Price is rising now", pts, `Price has risen ${Math.abs(ctx.pricePressure.changePct ?? 0).toFixed(2)}% over the last ${ctx.pricePressure.barsUsed} bars.`);
   }
 
   // Support behaviour -- the heart of the pullback case.
@@ -671,7 +701,16 @@ export function evaluatePullbackReversal(input: PullbackInput): PullbackResult {
   const fall = detectFall(reference, structures["60"].available ? structures["60"] : structures["240"], price);
 
   // 4. Score both cases.
-  const ctx: ScoreContext = { structures, hourly, price, nearestSupport, nearestResistance, fall, news, fundamentals, weather };
+  // The fastest timeframe with enough bars is the one that knows what price is
+  // doing NOW. Read before scoring, because both the score and the decision
+  // gate below depend on it.
+  const fastCandles = input.timeframes["15"] ?? input.timeframes["30"] ?? input.timeframes["60"];
+  const pricePressure = readPricePressure(fastCandles);
+
+  const ctx: ScoreContext = {
+    structures, hourly, price, nearestSupport, nearestResistance, fall, news, fundamentals, weather,
+    pricePressure, decisionThreshold: config.decisionThreshold,
+  };
   const tech = technicalLines(ctx);
   const mom = momentumLines(ctx);
   const ext = externalLines(ctx, input.commodity, config);
@@ -714,6 +753,44 @@ export function evaluatePullbackReversal(input: PullbackInput): PullbackResult {
   else if (-net >= bearBar) state = "bearish";
   else state = "uncertain";
 
+  // ---------------------------------------------------------------------
+  // THE PRICE-ACTION GATE.
+  //
+  // The single change the backtest most clearly asked for. The old engine
+  // could call GREEN off slow structure alone while price was actively
+  // falling -- a run of GREEN 84% readings on 18 September, all reasoned
+  // "Higher highs and higher lows intact on 4H", while Crude fell 9917 ->
+  // 9766 across the same evening. Every one of those was a losing call.
+  //
+  // So: slow structure is no longer allowed to call a direction that price
+  // itself is currently contradicting. The answer in that situation is WAIT,
+  // not a confident GREEN. Yellow costs nothing -- the backtest never scores
+  // an "uncertain" as a win OR a loss -- whereas a wrong GREEN costs premium.
+  //
+  // Deliberately narrow: it only fires when price pressure and the fast
+  // timeframes BOTH disagree with the call. A normal pullback inside an
+  // intact trend does not trip it, which is the whole point of the page.
+  // ---------------------------------------------------------------------
+  const fastTfs: TfKey[] = ["15", "30"];
+  const fastReads = fastTfs.map((tf) => structures[tf]).filter((s) => s.available);
+  const fastBearish = fastReads.length > 0 && fastReads.every((s) => s.trend === "bearish" || s.health === "broken");
+  const fastBullish = fastReads.length > 0 && fastReads.every((s) => s.trend === "bullish" && s.health !== "broken");
+
+  let priceActionVeto = false;
+  if (state === "still_bullish" && pricePressure.pressure === "selling" && fastBearish) {
+    state = "uncertain";
+    priceActionVeto = true;
+  } else if (state === "bearish" && pricePressure.pressure === "buying" && fastBullish) {
+    state = "uncertain";
+    priceActionVeto = true;
+  }
+
+  // A slow/fast disagreement that did NOT trip the veto is still worth less
+  // confidence than full agreement -- see the confidence block below.
+  const timeframeSplit =
+    (fastBearish && (structures["240"].trend === "bullish" || structures["60"].trend === "bullish")) ||
+    (fastBullish && (structures["240"].trend === "bearish" || structures["60"].trend === "bearish"));
+
   // Cooldown: a state that only just changed is not allowed to change straight
   // back unless the evidence is overwhelming.
   let heldByCooldown = false;
@@ -727,10 +804,31 @@ export function evaluatePullbackReversal(input: PullbackInput): PullbackResult {
   const pullbackProbability = total > 0 ? Math.round((bullishPullbackScore / total) * 100) : 50;
   const reversalProbability = 100 - pullbackProbability;
 
+  // Confidence.
+  //
+  // THE OLD FORMULA WAS BACKWARDS, and the backtest proved it: signals claiming
+  // 80-89% were right 48% of the time, while signals claiming 50-59% were right
+  // 57%. More confidence meant worse results.
+  //
+  // The cause was `evidence` -- confidence rose with the NUMBER of rules that
+  // fired and how one-sided they were. But those rules are not independent. In
+  // a steady decline the 4H, 1H and 30M structure rules all still read bullish
+  // together, all fire together, all agree with each other, and are all wrong
+  // together. Agreement among correlated inputs was being counted as certainty.
+  // It is the same mistake as reading "80% buy depth" as demand, or "6 of 6
+  // indicators bullish" as six confirmations.
+  //
+  // So: the evidence term is halved, and the things that ACTUALLY predicted
+  // being wrong now cost confidence directly -- fast and slow timeframes
+  // disagreeing, price contradicting the call, and a state only still standing
+  // because whipsaw protection held it there.
   const agreement = total > 0 ? Math.abs(net) / total : 0;
   const evidence = clamp(total / 80, 0, 1);
-  let confidence = Math.round(35 + agreement * 40 + evidence * 20);
+  let confidence = Math.round(35 + agreement * 40 + evidence * 10);
   confidence = Math.round(confidence * (0.6 + (dataQuality / 10) * 0.4));
+  if (timeframeSplit) confidence = Math.min(confidence, 62);
+  if (priceActionVeto) confidence = Math.min(confidence, 50);
+  if (heldByCooldown) confidence = Math.min(confidence, 58);
   if (conflictDetected) confidence = Math.min(confidence, 55);
   if (state === "uncertain") confidence = Math.min(confidence, 65);
   if (majorFundamentalShock && Math.sign(technicalNet) !== Math.sign(newsNet)) confidence = Math.min(confidence, 50);
@@ -758,6 +856,12 @@ export function evaluatePullbackReversal(input: PullbackInput): PullbackResult {
   // 10. The plain-language why (Part 26).
   const reasons = bullLines.sort((a, b) => b.points - a.points).slice(0, 6).map((l) => l.detail);
   const warnings = [...bearLines.sort((a, b) => b.points - a.points).slice(0, 4).map((l) => l.detail), ...ext.warnings];
+  if (priceActionVeto) {
+    warnings.push(
+      "The slower charts still point one way, but price is actively moving the other way right now. That combination used to read as a confident call and was usually wrong, so this now says WAIT instead."
+    );
+  }
+  if (timeframeSplit && !priceActionVeto) warnings.push("The fast and slow timeframes disagree, so confidence is capped until they line up.");
   if (heldByCooldown) warnings.push("Whipsaw protection is holding the previous state: the evidence changed, but not decisively and not for long enough.");
   if (conflictDetected) warnings.push("The chart and the news disagree. That is why this reads UNCERTAIN rather than being forced one way.");
   if (majorFundamentalShock) warnings.push("A major fundamental headline is in play, which can override normal technical behaviour.");
