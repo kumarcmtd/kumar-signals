@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createChart, ColorType, CandlestickSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import { useAppStore } from "../store/appStore";
 import { useCandles, useScan } from "../api/hooks";
+import { TechnicalTableCard } from "../components/TechnicalTableCard";
 import { TechnicalAnalysisPanel } from "../components/TechnicalAnalysisPanel";
 
 const TIMEFRAMES: { value: "5" | "15" | "30" | "1D"; label: string }[] = [
@@ -118,6 +119,16 @@ export function Charts() {
       )}
 
       {candleData?.candles && <TechnicalAnalysisPanel candles={candleData.candles} />}
+
+      {/* Every standard indicator, in the form the public analysis sites quote
+          them, so their numbers can be checked against ours. Reference only --
+          none of it feeds a signal score. */}
+      {candleData?.candles && (
+        <TechnicalTableCard
+          candles={candleData.candles}
+          timeframeLabel={TIMEFRAMES.find((t) => t.value === selectedTimeframe)?.label ?? selectedTimeframe}
+        />
+      )}
 
       <p className="text-[11px] text-[var(--color-muted)] px-1">
         Drawing tools (trend lines, Fibonacci) are planned for a follow-up build — this view currently renders live

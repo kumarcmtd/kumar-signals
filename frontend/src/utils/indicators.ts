@@ -343,3 +343,137 @@ export function computeIndicatorSnapshot(candles: Candle[]): IndicatorSnapshot {
     momentumScore,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Reference indicators.
+//
+// Added so the app's technical read can be cross-checked against the public
+// analysis sites (Moneycontrol, Investing.com, TradingView) that quote these
+// by name. They are DISPLAY values: nothing here feeds a signal score.
+//
+// That is deliberate, not laziness. RSI, Stochastic, CCI, Williams %R and ROC
+// all measure momentum over a similar lookback, so they agree with each other
+// most of the time by construction. Counting them as five independent votes --
+// which is exactly what a "6 of 6 indicators are bullish" summary does -- makes
+// a score look far more confident than the evidence behind it. One momentum
+// reading already feeds the signal engines; these are here so the numbers on
+// screen can be verified, not to outvote anything.
+// ---------------------------------------------------------------------------
+
+/** Simple moving average of the last `period` values. */
+export function sma(values: number[], period: number): number | null {
+  if (values.length < period || period <= 0) return null;
+  const window = values.slice(values.length - period);
+  return window.reduce((s, v) => s + v, 0) / period;
+}
+
+/**
+ * Rate of Change: percentage move against the close `period` bars ago.
+ * Above zero is bullish, below is bearish.
+ */
+export function roc(values: number[], period = 20): number | null {
+  if (values.length < period + 1) return null;
+  const prior = values[values.length - 1 - period];
+  if (!Number.isFinite(prior) || prior === 0) return null;
+  return ((values[values.length - 1] - prior) / prior) * 100;
+}
+
+/**
+ * Williams %R: where the close sits inside the high/low range of the last
+ * `period` bars, as 0 (at the high) down to -100 (at the low).
+ */
+export function williamsR(candles: Candle[], period = 14): number | null {
+  if (candles.length < period) return null;
+  const window = candles.slice(candles.length - period);
+  const highest = Math.max(...window.map((c) => c.high));
+  const lowest = Math.min(...window.map((c) => c.low));
+  if (highest === lowest) return -50; // flat range carries no information
+  return ((highest - window[window.length - 1].close) / (highest - lowest)) * -100;
+}
+
+/**
+ * Classic Stochastic on PRICE -- distinct from stochasticRsi() above, which
+ * runs the same formula over the RSI series instead. Public sites quote this
+ * one, so both now exist rather than one being mistaken for the other.
+ * Returns %K (raw) and %D (the `smooth`-bar average of %K).
+ */
+export function stochastic(candles: Candle[], period = 20, smooth = 3): { k: number; d: number } | null {
+  if (candles.length < period + smooth - 1) return null;
+  const ks: number[] = [];
+  for (let i = candles.length - smooth; i < candles.length; i++) {
+    const window = candles.slice(i - period + 1, i + 1);
+    const highest = Math.max(...window.map((c) => c.high));
+    const lowest = Math.min(...window.map((c) => c.low));
+    ks.push(highest === lowest ? 50 : ((candles[i].close - lowest) / (highest - lowest)) * 100);
+  }
+  const k = ks[ks.length - 1];
+  return { k, d: ks.reduce((s, v) => s + v, 0) / ks.length };
+}
+
+/**
+ * Money Flow Index: RSI weighted by volume, so it reads buying and selling
+ * pressure rather than price alone.
+ *
+ * Returns null when volume is missing, rather than treating absent volume as
+ * zero -- an MFI computed from zeroes would be a real-looking number built on
+ * nothing, which is worse than showing "not available".
+ */
+export function mfi(candles: Candle[], period = 14): number | null {
+  if (candles.length < period + 1) return null;
+  const window = candles.slice(candles.length - period - 1);
+  if (window.some((c) => typeof c.volume !== "number" || !Number.isFinite(c.volume))) return null;
+
+  let positive = 0;
+  let negative = 0;
+  for (let i = 1; i < window.length; i++) {
+    const typical = (window[i].high + window[i].low + window[i].close) / 3;
+    const prevTypical = (window[i - 1].high + window[i - 1].low + window[i - 1].close) / 3;
+    const flow = typical * (window[i].volume ?? 0);
+    if (typical > prevTypical) positive += flow;
+    else if (typical < prevTypical) negative += flow;
+  }
+  if (positive + negative === 0) return 50;
+  if (negative === 0) return 100;
+  return 100 - 100 / (1 + positive / negative);
+}
+
+/**
+ * Keltner Channels: an EMA with bands set `multiplier` ATRs either side.
+ *
+ * Worth having for energy specifically. Crude and Natural Gas change
+ * volatility regime sharply around inventory releases and supply shocks, and
+ * because these bands are built from ATR they widen and narrow with the
+ * instrument's own range instead of assuming a fixed distance.
+ */
+export function keltnerChannels(
+  candles: Candle[],
+  period = 20,
+  multiplier = 2
+): { upper: number; middle: number; lower: number } | null {
+  if (candles.length < period + 1) return null;
+  const middle = emaLast(candles.map((c) => c.close), period);
+  const atrValue = atr(candles, period);
+  if (middle === null || atrValue === null) return null;
+  return { upper: middle + multiplier * atrValue, middle, lower: middle - multiplier * atrValue };
+}
+
+/**
+ * Donchian Channels: the highest high and lowest low of the last `period`
+ * bars -- the original commodity breakout channel.
+ *
+ * `position` is where the last close sits in that range, 0 (at the low) to 100
+ * (at the high), which is what makes it readable at a glance.
+ */
+export function donchianChannels(
+  candles: Candle[],
+  period = 20
+): { upper: number; middle: number; lower: number; position: number } | null {
+  if (candles.length < period) return null;
+  const window = candles.slice(candles.length - period);
+  const upper = Math.max(...window.map((c) => c.high));
+  const lower = Math.min(...window.map((c) => c.low));
+  const middle = (upper + lower) / 2;
+  const close = window[window.length - 1].close;
+  const position = upper === lower ? 50 : ((close - lower) / (upper - lower)) * 100;
+  return { upper, middle, lower, position };
+}
