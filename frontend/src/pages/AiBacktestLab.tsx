@@ -15,13 +15,14 @@
 // significance on a small sample.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlaskConical, Play, Download, AlertTriangle, Info, Loader2 } from "lucide-react";
+import { FlaskConical, Play, Download, AlertTriangle, Info, Loader2, CheckCircle2, XCircle, MinusCircle, Lightbulb } from "lucide-react";
 import { useHistory30m } from "../api/hooks";
 import {
   createBacktestRunner, summarise, calibration, byRegime, byTimeOfDay, bySplit,
   overfittingWarning, supportTest, failureCases, toCsv, THRESHOLDS, HORIZONS,
   type BacktestRun, type Threshold, type Breakdown,
 } from "../utils/backtestEngine";
+import { buildPlainSummary, type Grade } from "../utils/backtestPlainSummary";
 import type { InstrumentSymbol } from "../types";
 
 const SYMBOLS: { key: InstrumentSymbol; label: string }[] = [
@@ -72,6 +73,72 @@ function BreakdownTable({ rows, title, note }: { rows: Breakdown[]; title: strin
         <p className="px-3 py-1.5 text-[9px] text-slate-400 bg-slate-50">
           The right-hand figure is decided signals over total. Anything that reached neither target nor stop inside the horizon stays undecided and is never counted as a win.
         </p>
+      </div>
+    </section>
+  );
+}
+
+const GRADE_VISUAL: Record<Grade, { ink: string; bg: string; border: string; heading: string }> = {
+  good: { ink: "#15803D", bg: "linear-gradient(135deg,#DCFCE7,#F0FDF4)", border: "#86EFAC", heading: "Worth using" },
+  borderline: { ink: "#B45309", bg: "linear-gradient(135deg,#FEF3C7,#FFFBEB)", border: "#FCD34D", heading: "About a coin flip" },
+  poor: { ink: "#B91C1C", bg: "linear-gradient(135deg,#FEE2E2,#FEF2F2)", border: "#FCA5A5", heading: "Did not work" },
+  unusable: { ink: "#475569", bg: "linear-gradient(135deg,#F1F5F9,#F8FAFC)", border: "#CBD5E1", heading: "Can't tell yet" },
+};
+
+const TONE_ICON = { good: CheckCircle2, bad: XCircle, neutral: MinusCircle } as const;
+const TONE_INK = { good: "#15803D", bad: "#B91C1C", neutral: "#64748B" } as const;
+
+/**
+ * The results in plain words, placed ABOVE every technical figure.
+ *
+ * The numbers below it are all correct and all meaningless to someone who does
+ * not already know what precision or a calibration band is. This answers the
+ * five questions a trader actually has, in the order they matter, and states a
+ * bad result plainly instead of leaving it to be worked out from a table.
+ */
+function PlainSummaryCard({ plain }: { plain: ReturnType<typeof buildPlainSummary> }) {
+  const v = GRADE_VISUAL[plain.grade];
+  return (
+    <section>
+      <h2 className="text-[13px] font-black text-slate-800 mb-1.5">What this all means</h2>
+
+      <div className="rounded-2xl p-3.5 border" style={{ background: v.bg, borderColor: v.border }}>
+        <p className="text-[9px] font-black uppercase tracking-wide" style={{ color: v.ink }}>{v.heading}</p>
+        <p className="text-[14px] font-black leading-tight mt-0.5" style={{ color: v.ink }}>{plain.verdict}</p>
+        <p className="text-[10.5px] text-slate-700 leading-snug mt-1.5">{plain.verdictDetail}</p>
+      </div>
+
+      <div className="rounded-2xl bg-white border border-[var(--color-border)] overflow-hidden mt-2">
+        {plain.points.map((pt) => {
+          const Icon = TONE_ICON[pt.tone];
+          return (
+            <div key={pt.question} className="px-3 py-2.5 border-b last:border-b-0 border-slate-100">
+              <div className="flex items-start gap-1.5">
+                <Icon size={12} className="shrink-0 mt-[2px]" style={{ color: TONE_INK[pt.tone] }} />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black text-slate-800">{pt.question}</p>
+                  <p className="text-[11px] font-bold mt-0.5" style={{ color: TONE_INK[pt.tone] }}>{pt.answer}</p>
+                  <p className="text-[9.5px] text-slate-500 leading-snug mt-0.5">{pt.meaning}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="rounded-2xl px-3 py-2.5 mt-2" style={{ background: "#EEF2FF", border: "1px solid #C7D2FE" }}>
+        <p className="text-[10.5px] font-black text-indigo-900 flex items-center gap-1.5">
+          <Lightbulb size={12} className="shrink-0" />
+          What to do next
+        </p>
+        <ul className="mt-1 space-y-1">
+          {plain.actions.map((a) => (
+            <li key={a} className="text-[10px] text-slate-700 leading-snug flex gap-1.5">
+              <span className="text-indigo-400 shrink-0">•</span>
+              {a}
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   );
@@ -134,6 +201,10 @@ export function AiBacktestLab() {
   const support = useMemo(() => (run ? supportTest(run.signals, threshold, horizon.bars) : []), [run, threshold, horizon]);
   const failures = useMemo(() => (run ? failureCases(run.signals, threshold, horizon.bars, 10) : []), [run, threshold, horizon]);
   const overfit = useMemo(() => overfittingWarning(splits), [splits]);
+  const plain = useMemo(
+    () => (summary ? buildPlainSummary(summary, bands, splits, hours, threshold, horizon.label) : null),
+    [summary, bands, splits, hours, threshold, horizon]
+  );
 
   const downloadCsv = () => {
     if (!run) return;
@@ -259,8 +330,14 @@ export function AiBacktestLab() {
             <p className="text-[10px] text-slate-600 leading-snug mt-0.5">{summary.sampleNote}</p>
           </div>
 
+          {plain && <PlainSummaryCard plain={plain} />}
+
           <section>
             <h2 className="text-[13px] font-black text-slate-800 mb-2">Headline results</h2>
+            <p className="text-[10px] text-slate-500 leading-snug mb-1.5">
+              The raw figures behind the summary above. "Green" means it expected price up, "Red" expected down, "Yellow" means it said wait and is never scored. "Undecided"
+              reached neither the target nor the stop in time and never counts as a win.
+            </p>
             <div className="grid grid-cols-3 gap-1.5">
               <Stat label="Signals" value={String(summary.total)} note={`${run.meta.evaluated} bars checked`} />
               <Stat label="Green" value={String(summary.green)} ink="#15803D" note={`${summary.greenSuccess} right`} />
