@@ -13,6 +13,11 @@ import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
+import { istHourInKolkata } from "../utils/canIBuyNow";
+import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
+import { atr } from "../utils/indicators";
+import { useMarketStatus } from "../api/hooks";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
@@ -109,6 +114,11 @@ function LevelCrossChart({ candles, signal, entry }: { candles: Candle[]; signal
 
 function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: ReturnType<typeof useLevelCrossScanner> }) {
   const [chartOpen, setChartOpen] = useState(false);
+  // "Can I Buy Now?" inputs. Declared HERE, above every conditional return in
+  // this component -- hooks must run in the same order on every render, and
+  // this component returns early when there is no open trade.
+  const { result: newsDecision } = useNewsTradeAI(symbol);
+  const { data: marketStatusForBuy } = useMarketStatus();
   const signal = scanner.best[symbol];
   const log = scanner.tradeLogs[symbol];
   const latest = log[log.length - 1];
@@ -227,6 +237,25 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
       {tradeLight && (
         <div className="px-4 pt-4">
           <TradeLightSignal verdict={tradeLight} />
+        </div>
+      )}
+
+      {!latest.closed && entryTiming && nextTarget !== null && (
+        <div className="px-4 pt-4">
+          <CanIBuyNowButton
+            livePremium={liveLtp}
+            stop={effectiveStopFor(latest)}
+            target={nextTarget}
+            lotSize={LOT_SIZE[symbol]}
+            marketOpen={marketStatusForBuy?.isOpen ?? false}
+            timingTier={entryTiming.tier}
+            conflict={newsDecision?.tradeConfirmation === "WAIT_CONFLICT"}
+            netScore={typeof newsDecision?.finalNet === "number" ? newsDecision.finalNet : null}
+            optSide={latest.optSide}
+            premiumSwingPerCandle={(() => { const a = atr(candles, 14); return a === null ? null : a * 0.6; })()}
+            istHour={istHourInKolkata()}
+            signalAgeMinutes={latest.openedAt ? (Date.now() - new Date(latest.openedAt).getTime()) / 60000 : null}
+          />
         </div>
       )}
 

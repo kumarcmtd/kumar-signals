@@ -23,6 +23,10 @@ import { checkVolumeSupport } from "../utils/volumeSupport";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble, TradeLightSignal } from "../components/CallCardKit";
 import { computeTradeLight } from "../utils/tradeLight";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
+import { istHourInKolkata } from "../utils/canIBuyNow";
+import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
+import { atr } from "../utils/indicators";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
@@ -198,6 +202,18 @@ function TwentyCandidateCard({
   const volumeSupport = openTrade ? checkVolumeSupport(candles, direction) : null;
   const potential = latest && heroNextTarget !== null ? calculatePotentialLeft(latest.entry, latest.stop, heroNextTarget, liveLtp ?? latest.entry) : null;
   const tradeLight = heroEntryTiming && heroLegFloor !== null && heroNextTarget !== null && latest ? computeTradeLight(heroEntryTiming, rebound, heroLegFloor, heroNextTarget, effectiveStopFor(latest)) : null;
+
+  // "Can I Buy Now?" inputs. All reused from what this page already loads --
+  // the combined news/market score comes from the same hook NewsImpactCard
+  // renders below, so the button and that card can never disagree, which is
+  // exactly what went wrong when the green badge sat above a red CONFLICT.
+  const { result: newsDecision } = useNewsTradeAI(symbolKey);
+  const { data: marketStatusForBuy } = useMarketStatus();
+  const premiumSwingPerCandle = useMemo(() => {
+    const a = atr(candles, 14);
+    return a === null ? null : a * 0.6; // premium moves a fraction of the underlying
+  }, [candles]);
+
   // The point move that gets you to the profit-per-lot target is
   // symbol-specific (Crude Oil's own lot size makes that a 20-point move;
   // Natural Gas's much larger lot size means the same profit only needs a
@@ -269,6 +285,27 @@ function TwentyCandidateCard({
       {tradeLight && (
         <div className="px-4 pt-4">
           <TradeLightSignal verdict={tradeLight} />
+        </div>
+      )}
+
+      {/* One answer, from every gate at once. Placed directly above the
+          news/market score it reads, so the two are never read separately. */}
+      {latest && heroNextTarget !== null && heroEntryTiming && (
+        <div className="px-4 pt-4">
+          <CanIBuyNowButton
+            livePremium={liveLtp}
+            stop={effectiveStopFor(latest)}
+            target={heroNextTarget}
+            lotSize={lotSize}
+            marketOpen={marketStatusForBuy?.isOpen ?? false}
+            timingTier={heroEntryTiming.tier}
+            conflict={newsDecision?.tradeConfirmation === "WAIT_CONFLICT"}
+            netScore={typeof newsDecision?.finalNet === "number" ? newsDecision.finalNet : null}
+            optSide={latest.optSide}
+            premiumSwingPerCandle={premiumSwingPerCandle}
+            istHour={istHourInKolkata()}
+            signalAgeMinutes={latest.openedAt ? (Date.now() - new Date(latest.openedAt).getTime()) / 60000 : null}
+          />
         </div>
       )}
 
