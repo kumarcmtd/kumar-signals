@@ -104,9 +104,20 @@ function NtfyPushSetup() {
       <p className="px-4 pt-3 pb-1 text-xs font-bold uppercase text-[var(--color-muted)]">Background Push (works with app closed)</p>
       <div className="px-4 py-3 space-y-3">
         <p className="text-xs text-[var(--color-muted)] leading-relaxed">
-          Uses <span className="font-semibold">ntfy.sh</span>, a free push relay with no account needed. A server-side check runs every
-          5 minutes and sends a notification here whenever Best Call opens a new pick — even with this site fully closed.
+          Uses <span className="font-semibold">ntfy.sh</span>, a free push relay with no account needed. A check runs on the server every
+          5 minutes and pushes to your phone with this site completely closed — which is the point, since the calls fire while you are working.
         </p>
+        <div className="rounded-xl px-3 py-2.5" style={{ background: "#EEF2FF", border: "1px solid #C7D2FE" }}>
+          <p className="text-[11px] font-black text-indigo-900 mb-1">Set it up once — three steps</p>
+          <ol className="text-[11px] text-slate-700 leading-snug space-y-1 list-decimal pl-4">
+            <li>Type any private word below and tap Save. Treat it like a password: anyone who knows it can read your alerts, so do not use your name.</li>
+            <li>Install the free <b>ntfy</b> app from the Play Store, tap +, and subscribe to that exact word.</li>
+            <li>Tap <b>Send test</b> below. If it arrives on your phone, you are done.</li>
+          </ol>
+          <p className="text-[10px] text-slate-500 leading-snug mt-1.5">
+            You will get <b>Ai20-20</b> and <b>Best Call</b> pushes during market hours only (9:00 AM – 11:30 PM IST). Each call is sent once, not repeated.
+          </p>
+        </div>
 
         {!isLoading && (
           <>

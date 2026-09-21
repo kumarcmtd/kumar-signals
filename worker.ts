@@ -14,6 +14,7 @@ import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCa
 import { scoreArticles, scoreEiaChange, clusterEvents, stripPublisherSuffix, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
 import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
+import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE as TWENTY_LOT_SIZE } from "./frontend/src/utils/aiTwentyTwentyEngine";
 import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
 import { buildSlotSessions, buildTimeProfile, testClaims, scheduledEvents, eventProfile, type ClaimResult, type ScheduledEvent, type EventProfile } from "./frontend/src/utils/timeProfileEngine";
 import { evaluatePullbackReversal, type PullbackResult, type TfKey, type ExternalSignal } from "./frontend/src/utils/pullbackReversalEngine";
@@ -3197,6 +3198,124 @@ async function sendNtfyNotification(topic: string, title: string, body: string):
   }
 }
 
+// ---- Ai20-20 background push (ntfy.sh) ----
+//
+// The page this is built for is the one actually traded, and the trader is at
+// work when its calls fire. Everything below therefore runs on the Cron with
+// no browser open, importing the SAME pure engine the page renders
+// (aiTwentyTwentyEngine) so a pushed call and an on-screen call can never
+// disagree.
+//
+// The one thing the Worker does not get for free is premium MOMENTUM. The page
+// builds it from a rolling buffer of ATM CE/PE prices collected while it is
+// open; the Worker keeps the equivalent buffer in KV across Cron ticks. The
+// buffer resets whenever the ATM strike rolls, exactly as the page's does --
+// an old strike's premium history says nothing about a freshly repriced one.
+const TWENTY_SAMPLES_KV_KEY = "twenty20:samples:v1";
+const TWENTY_MAX_SAMPLES = 12;
+
+interface TwentySampleBuffer {
+  [symbol: string]: { strike: number | null; ce: number[]; pe: number[] };
+}
+
+function twentyMomentumPct(samples: number[]): number | null {
+  if (samples.length < 3 || samples[0] <= 0) return null;
+  return ((samples[samples.length - 1] - samples[0]) / samples[0]) * 100;
+}
+
+function twentySignature(symbol: string, strike: number, optSide: string, entry: number): string {
+  return `${symbol}-${strike}-${optSide}-${entry.toFixed(2)}`;
+}
+
+/**
+ * One Cron tick of the Ai20-20 watcher.
+ *
+ * Deliberately gated on market hours: outside them there is nothing to enter,
+ * the sample buffer would fill with stale prices, and every tick would be a KV
+ * write against a 1,000/day free limit for no benefit.
+ */
+async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> {
+  if (!getMarketStatus().isOpen) return;
+  const token = await env.COMMODITY_KV.get("access_token");
+  if (!token) return;
+  const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+  if (!topic) return;
+
+  let buffers: TwentySampleBuffer = {};
+  try {
+    buffers = JSON.parse((await env.COMMODITY_KV.get(TWENTY_SAMPLES_KV_KEY)) ?? "{}") as TwentySampleBuffer;
+  } catch {
+    buffers = {};
+  }
+
+  let buffersChanged = false;
+
+  for (const symbol of OPTION_SYMBOLS) {
+    try {
+      const fut = await getNearestFuture(token, symbol as Symbol);
+      if (!fut) continue;
+      const fast = await getCandlesForTF(env, token, fut, "5");
+      if ("error" in fast || fast.length === 0) continue;
+
+      const optionsResult = await computeOptionsAnalytics(env, token, symbol as Symbol);
+      const options = "error" in optionsResult ? undefined : optionsResult;
+
+      // --- keep the momentum buffer -------------------------------------
+      const atmRow = options && options.atmStrike !== null ? options.rows.find((r) => r.strike === options.atmStrike) : undefined;
+      const strike = atmRow?.strike ?? null;
+      const prev = buffers[symbol];
+      const buf = prev && prev.strike === strike ? prev : { strike, ce: [], pe: [] };
+      const ceLtp = atmRow?.call.ltp ?? null;
+      const peLtp = atmRow?.put.ltp ?? null;
+      if (typeof ceLtp === "number") buf.ce = [...buf.ce, ceLtp].slice(-TWENTY_MAX_SAMPLES);
+      if (typeof peLtp === "number") buf.pe = [...buf.pe, peLtp].slice(-TWENTY_MAX_SAMPLES);
+      buffers[symbol] = buf;
+      buffersChanged = true;
+
+      // --- the same engine the page runs --------------------------------
+      const analysis = analyzeImmediate(fast, twentyMomentumPct(buf.ce), twentyMomentumPct(buf.pe));
+      const candidates = scanForAiTwenty([{ symbol, analysis }]);
+      if (candidates.length === 0) continue;
+      const projection = projectPremium20(analysis, options);
+      if (!projection) continue;
+
+      const sig = twentySignature(symbol, projection.strike, projection.optSide, projection.entry);
+      const sigKey = `notified:TWENTY20-${symbol}`;
+      if ((await env.COMMODITY_KV.get(sigKey)) === sig) continue;
+      await env.COMMODITY_KV.put(sigKey, sig);
+
+      const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
+      const lot = TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1;
+      const t1 = projection.targets[0];
+      await sendNtfyNotification(
+        topic,
+        `Ai20-20: ${displayName} ${projection.strike} ${projection.optSide}`,
+        [
+          `BUY ${displayName} ${projection.strike} ${projection.optSide}`,
+          "",
+          `Entry: Rs ${projection.entry}`,
+          `Target 1: Rs ${t1}`,
+          `Stop: Rs ${projection.stop}`,
+          "",
+          `About Rs ${Math.round((t1 - projection.entry) * lot)} per lot at Target 1.`,
+          "",
+          "Open the app and tap Can I Buy Now? before entering -- this call was",
+          "sent the moment it fired, and price may have moved since.",
+        ].join("\n")
+      );
+    } catch {
+      // One symbol failing must never stop the other, and must never fail the
+      // whole Cron run.
+    }
+  }
+
+  if (buffersChanged) {
+    // A single key for both symbols, written once per tick and only during
+    // market hours -- roughly 175 writes a day rather than 576.
+    await env.COMMODITY_KV.put(TWENTY_SAMPLES_KV_KEY, JSON.stringify(buffers), { expirationTtl: 24 * 60 * 60 });
+  }
+}
+
 // Runs the exact same 3-engine comparison (AI Elite + Directional Gate +
 // Kimi playbook -> pickBestCall) the frontend's Best Call page displays,
 // entirely server-side so it can run on a schedule with nobody's browser
@@ -3675,6 +3794,8 @@ export default {
   // notifications actually reach the user with the app fully closed.
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runBestCallNotificationCheck(env));
+    // Ai20-20 -- the page actually traded, pushed with the app closed.
+    ctx.waitUntil(runTwentyTwentyNotificationCheck(env));
     ctx.waitUntil(runExpiryAlertCheck(env));
     ctx.waitUntil(runTradeLogAdvanceCheck(env));
     // Builds the Price-Alerts profile off the request path. Does nothing on a
