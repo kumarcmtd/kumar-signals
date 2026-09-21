@@ -58,6 +58,7 @@ export function useAlertEngine(): void {
   const lastSignatureRef = useRef<Map<string, string>>(new Map());
   const kimiPresentRef = useRef<Set<string>>(new Set());
   const bestCallLastIdRef = useRef<Map<string, string>>(new Map());
+  const twenty20LastIdRef = useRef<Map<string, string>>(new Map());
   const firstRunRef = useRef(true);
 
   useEffect(() => {
@@ -182,6 +183,36 @@ export function useAlertEngine(): void {
       }
     }
 
+    // Ai20-20. Deliberately driven off the trade log rather than by re-running
+    // the engine here: the page writes every call it makes into TWENTY20-*
+    // keys, so watching those alerts on EXACTLY what the page showed, costs no
+    // extra queries, and cannot drift from it.
+    if (alertSettings.sources.twenty20) {
+      for (const [key, log] of Object.entries(tradeLogs)) {
+        if (!key.startsWith("TWENTY20-")) continue;
+        const latest = log[log.length - 1];
+        if (!latest) continue;
+        if (twenty20LastIdRef.current.get(key) === latest.id) continue;
+        twenty20LastIdRef.current.set(key, latest.id);
+        // The first pass only records what already exists, so opening the app
+        // does not replay every historical call as a new alert.
+        if (firstRunRef.current) continue;
+        const symbol: TradableSymbol = key.includes("NATURALGAS") ? "NATURALGAS" : "CRUDEOIL";
+        const tf = key.split("-").pop() ?? "";
+        fresh.push({
+          id: `${key}-${latest.id}`,
+          createdAt: now,
+          source: "Twenty20",
+          symbol,
+          tfLabel: tf ? `${tf}m` : "Ai20-20",
+          title: `Ai20-20 — ${DISPLAY_NAME[symbol]} ${latest.strike} ${latest.optSide}`,
+          detail: `Entry ₹${latest.entry} · Target ₹${latest.targets[0]} · SL ₹${latest.stop}`,
+          read: false,
+          bearish: latest.optSide === "PE",
+        });
+      }
+    }
+
     firstRunRef.current = false;
     if (!fresh.length) return;
 
@@ -198,6 +229,8 @@ export function useAlertEngine(): void {
     alertSettings.sources.elite,
     alertSettings.sources.kimi,
     alertSettings.sources.bestCall,
+    alertSettings.sources.twenty20,
+    tradeLogs,
     alertSettings.browserNotifications,
     alertSettings.soundEnabled,
     crudeOil.analyses,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair } from "lucide-react";
+import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair, Target } from "lucide-react";
 import { useAppStore, type AlertEntry, type AlertSource } from "../store/appStore";
 import { notificationPermission, requestNotificationPermission } from "../utils/notify";
 
@@ -8,6 +8,7 @@ const SOURCE_STYLE: Record<AlertSource, { label: string; icon: typeof FlaskConic
   Elite: { label: "AI Elite", icon: ShieldCheck, bg: "#EDE9FE", text: "#6D28D9" },
   Kimi: { label: "Kimi AI Playbook", icon: Radar, bg: "#DCFCE7", text: "#15803D" },
   BestCall: { label: "Best Call", icon: Crosshair, bg: "#CFFAFE", text: "#0E7490" },
+  Twenty20: { label: "Ai20-20", icon: Target, bg: "#E0E7FF", text: "#4338CA" },
 };
 
 function formatTime(ts: number): string {
@@ -102,6 +103,15 @@ export function Alerts() {
         <div className="pt-1 space-y-1">
           <p className="text-sm mb-1">Sources</p>
           <ToggleRow label="AI-Test V2 / Pro (timeframe signals)" checked={alertSettings.sources.timeframe} onChange={(v) => setAlertSources({ timeframe: v })} compact />
+          <button
+            type="button"
+            onClick={() => setAlertSources({ twenty20: true, timeframe: false, elite: false, kimi: false, bestCall: false })}
+            className="w-full mb-2 rounded-xl py-2 text-[11.5px] font-black"
+            style={{ background: "#4F46E5", color: "#fff" }}
+          >
+            Only Ai20-20 — turn the rest off
+          </button>
+          <ToggleRow label="Ai20-20 (the calls you actually trade)" checked={alertSettings.sources.twenty20} onChange={(v) => setAlertSources({ twenty20: v })} compact />
           <ToggleRow label="AI Elite (strict confluence)" checked={alertSettings.sources.elite} onChange={(v) => setAlertSources({ elite: v })} compact />
           <ToggleRow label="Kimi AI (playbook setups)" checked={alertSettings.sources.kimi} onChange={(v) => setAlertSources({ kimi: v })} compact />
           <ToggleRow label="Best Call (single highest-confidence pick)" checked={alertSettings.sources.bestCall} onChange={(v) => setAlertSources({ bestCall: v })} compact />

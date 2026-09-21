@@ -20,7 +20,7 @@ interface RiskSettings {
 // (useAlertEngine) never invents a signal -- every entry mirrors a decision
 // the corresponding page (AI-Test V2/Pro, AI Elite, or Kimi AI) is already
 // showing live, just surfaced app-wide instead of only on that one page.
-export type AlertSource = "Timeframe" | "Elite" | "Kimi" | "BestCall";
+export type AlertSource = "Timeframe" | "Elite" | "Kimi" | "BestCall" | "Twenty20";
 
 export interface AlertEntry {
   id: string;
@@ -46,7 +46,12 @@ export interface AlertSettings {
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.
   minTier: "strong" | "all";
-  sources: { timeframe: boolean; elite: boolean; kimi: boolean; bestCall: boolean };
+  // twenty20 was added after the others and is the one most people actually
+  // want, so it defaults ON and everything else defaults OFF. Settings saved
+  // before it existed have no `twenty20` key at all, which would read as
+  // undefined/false -- the store's rehydrate step fills it in rather than
+  // leaving the alert he asked for silently switched off.
+  sources: { timeframe: boolean; elite: boolean; kimi: boolean; bestCall: boolean; twenty20: boolean };
 }
 
 const MAX_ALERTS = 200;
@@ -222,7 +227,11 @@ export const useAppStore = create<AppState>()(
         browserNotifications: false,
         soundEnabled: true,
         minTier: "strong",
-        sources: { timeframe: true, elite: true, kimi: true, bestCall: true },
+        // Only Ai20-20 by default. Having all four legacy engines on is what
+        // produced 199 unread alerts from pages that were not being traded,
+        // which trains you to ignore the bell -- the opposite of what an alert
+        // is for.
+        sources: { timeframe: false, elite: false, kimi: false, bestCall: false, twenty20: true },
       },
       setAlertSettings: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, ...patch } })),
       setAlertSources: (patch) => set((s) => ({ alertSettings: { ...s.alertSettings, sources: { ...s.alertSettings.sources, ...patch } } })),
@@ -245,7 +254,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "kumar-signals-pro-store",
-      version: 1,
+      version: 2,
       // v0 -> v1: the Kimi AI Trade ledger used to open a line for ANY
       // scanner hit (a pattern match alone, no confluence/edge-score bar),
       // which produced a genuinely broken ~9% win rate. Now that a real
@@ -255,13 +264,21 @@ export const useAppStore = create<AppState>()(
       // V2/Pro and Elite's own trade logs are untouched) so the win rate
       // starts clean instead of dragging a broken average for a long time.
       migrate: (persistedState, version) => {
-        const state = persistedState as { tradeLogs?: Record<string, TradeLogEntry[]> } | undefined;
+        const state = persistedState as { tradeLogs?: Record<string, TradeLogEntry[]>; alertSettings?: { sources?: AlertSettings["sources"] } } | undefined;
         if (version < 1 && state?.tradeLogs) {
           const filtered: Record<string, TradeLogEntry[]> = {};
           for (const [k, v] of Object.entries(state.tradeLogs)) {
             if (!k.startsWith("KIMI-")) filtered[k] = v;
           }
           state.tradeLogs = filtered;
+        }
+        // v1 -> v2: the Ai20-20 alert source did not exist before, so saved
+        // settings have no `twenty20` key -- it would read as false and the
+        // one alert actually wanted would stay silent. Switch it on, and turn
+        // the legacy sources off: four engines alerting at once is what
+        // produced 199 unread alerts from pages that were not being traded.
+        if (version < 2 && state?.alertSettings?.sources) {
+          state.alertSettings.sources = { timeframe: false, elite: false, kimi: false, bestCall: false, twenty20: true };
         }
         return state;
       },
