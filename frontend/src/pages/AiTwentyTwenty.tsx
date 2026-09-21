@@ -295,7 +295,8 @@ function TwentyCandidateCard({
           <CanIBuyNowButton
             livePremium={liveLtp}
             stop={effectiveStopFor(latest)}
-            target={heroNextTarget}
+            signalEntry={latest.entry}
+            targets={latest.targets}
             lotSize={lotSize}
             marketOpen={marketStatusForBuy?.isOpen ?? false}
             timingTier={heroEntryTiming.tier}

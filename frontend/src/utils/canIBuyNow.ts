@@ -21,6 +21,22 @@
 //  2. Invent a level. Entry, target and stop are recalculated from the live
 //     premium and the card's own levels, never made up -- and if entering late
 //     has ruined the risk/reward, it says so with the new numbers.
+//
+// THE LATE-ENTRY CASE, which is the normal one for someone with a day job.
+// The call fires, you are at work, and you look at it two hours later with
+// price already part-way to its target. The question then is NOT "is the
+// original trade good" -- that trade is gone. It is "is there enough of this
+// move LEFT, and what stop and target would I use entering here".
+//
+// Answering that needs two corrections, and getting either wrong produces
+// nonsense:
+//   * The target must be the next target price has NOT already reached. Using
+//     a target 6 paise away, which price is about to touch, makes every late
+//     look absurd.
+//   * The stop cannot be the original one. It was placed relative to an entry
+//     far below; carrying it over means a late entrant risks the whole move
+//     that already happened to chase what is left. A late entry gets a stop
+//     measured from where YOU are getting in.
 
 export type BuyVerdict = "yes" | "wait" | "no";
 
@@ -45,6 +61,14 @@ export interface BuyPlan {
   rewardPerLot: number;
   /** Reward divided by risk. Below 1 means risking more than you stand to make. */
   riskReward: number;
+  /** 1-based number of the target being aimed at, skipping any already reached. */
+  targetNumber: number;
+  /** True when the stop was moved up because this is a late entry. */
+  stopMovedUp: boolean;
+  /** Rupees per lot of this move that already happened before you looked. */
+  missedPerLot: number;
+  /** True when the live premium is above the signal's own entry price. */
+  late: boolean;
 }
 
 export interface BuyAnswer {
@@ -64,9 +88,12 @@ export interface BuyAnswer {
 export interface BuyCheckInput {
   /** Live premium of the option right now. */
   livePremium: number | null;
-  /** The card's stop and next target for this leg. */
+  /** The premium the signal itself was created at, so lateness can be measured. */
+  signalEntry: number;
+  /** The signal's ORIGINAL stop. Replaced by a closer one on a late entry. */
   stop: number;
-  target: number;
+  /** Every target in order. The first one still above the live price is used. */
+  targets: number[];
   /** Contract multiplier, so risk can be shown in rupees. */
   lotSize: number;
   /** Is MCX actually open? */
@@ -102,6 +129,8 @@ export function istHourInKolkata(now: Date = new Date()): number | null {
 
 /** A stop closer than this many candle-swings is inside normal noise. */
 const MIN_STOP_IN_SWINGS = 1.2;
+/** How far below a LATE entry the replacement stop is placed, in candle-swings. */
+const LATE_STOP_SWINGS = 2;
 /** Below this reward-to-risk, a premium buy is not worth taking. */
 const MIN_RISK_REWARD = 1;
 /** Hours the backtest found materially worse on this engine (IST). */
@@ -112,7 +141,7 @@ const STALE_AFTER_MINUTES = 45;
 export function canIBuyNow(input: BuyCheckInput): BuyAnswer {
   const gates: BuyGate[] = [];
   const {
-    livePremium, stop, target, lotSize, marketOpen, timingTier, conflict,
+    livePremium, signalEntry, stop: originalStop, targets, lotSize, marketOpen, timingTier, conflict,
     netScore, optSide, premiumSwingPerCandle, istHour, signalAgeMinutes,
   } = input;
 
@@ -139,12 +168,54 @@ export function canIBuyNow(input: BuyCheckInput): BuyAnswer {
 
   const entry = livePremium!;
 
+  // --- How late is this? -------------------------------------------------
+  const late = entry > signalEntry;
+  const missedPerLot = Number((Math.max(0, entry - signalEntry) * lotSize).toFixed(0));
+
+  // --- The stop a LATE entrant should actually use -----------------------
+  // Carrying the original stop over means risking the whole move that already
+  // happened in order to chase what is left -- which is exactly the ₹3,125-to-
+  // make-₹75 nonsense this page produced before. A late entry gets a stop
+  // measured from where you are getting in, and it can only ever be TIGHTER
+  // than the original, never looser.
+  let stop = originalStop;
+  let stopMovedUp = false;
+  if (late && premiumSwingPerCandle !== null && premiumSwingPerCandle > 0) {
+    const fromHere = entry - LATE_STOP_SWINGS * premiumSwingPerCandle;
+    if (fromHere > originalStop) {
+      stop = Number(fromHere.toFixed(2));
+      stopMovedUp = true;
+    }
+  }
+
+  // --- Which target is actually worth aiming at? -------------------------
+  // Not simply the next one. If price is about to touch Target 1, aiming at it
+  // leaves paise of reward against a real stop, and the honest answer for a
+  // late entrant is usually the target BEYOND it -- which is what a trader
+  // would do by hand. So: walk the targets still ahead and take the first that
+  // pays for the risk. If none does, keep the furthest one so the risk/reward
+  // gate can block it with real numbers rather than pretending.
+  const sorted = [...targets].filter((t) => Number.isFinite(t)).sort((a, b) => a - b);
+  const ahead = sorted.map((t, i) => ({ t, n: i + 1 })).filter((x) => x.t > entry);
+  const riskNow = entry - stop;
+  const worthIt = ahead.find((x) => riskNow > 0 && (x.t - entry) / riskNow >= MIN_RISK_REWARD);
+  const chosen = worthIt ?? ahead[ahead.length - 1] ?? null;
+  const target = chosen ? chosen.t : null;
+  const targetNumber = chosen ? chosen.n : sorted.length;
+
   // --- Gate 3: is the trade still alive at all? -------------------------
   const pastStop = entry <= stop;
-  add("Still above the stop", !pastStop, pastStop ? `Premium ₹${entry.toFixed(2)} is already at or below the stop ₹${stop.toFixed(2)} — this is an exit, not an entry.` : `Premium is ₹${(entry - stop).toFixed(2)} above the stop.`, true);
+  add("Still above the stop", !pastStop, pastStop ? `Premium ₹${entry.toFixed(2)} is already at or below the stop ₹${stop.toFixed(2)} — this is an exit, not an entry.` : `Premium is ₹${(entry - stop).toFixed(2)} above the stop${stopMovedUp ? " (stop moved up for a late entry)" : ""}.`, true);
 
-  const pastTarget = entry >= target;
-  add("Target not already reached", !pastTarget, pastTarget ? `Premium ₹${entry.toFixed(2)} has already passed the target ₹${target.toFixed(2)} — entering now is chasing.` : `Target is ₹${(target - entry).toFixed(2)} away.`, true);
+  const haveTarget = target !== null;
+  add(
+    "There is still a target ahead",
+    haveTarget,
+    haveTarget
+      ? `Target ${targetNumber} at ₹${target!.toFixed(2)} is ₹${(target! - entry).toFixed(2)} away.`
+      : `Every target on this call has already been reached. The move you are looking at is finished — entering now is chasing it. Wait for a fresh call.`,
+    true
+  );
 
   // --- Gate 4: news and chart agreement ---------------------------------
   // The gate the old green badge ignored entirely.
@@ -183,15 +254,15 @@ export function canIBuyNow(input: BuyCheckInput): BuyAnswer {
 
   // --- Gate 7: risk and reward at the CURRENT price ---------------------
   const riskPerLot = Number(((entry - stop) * lotSize).toFixed(0));
-  const rewardPerLot = Number(((target - entry) * lotSize).toFixed(0));
+  const rewardPerLot = target === null ? 0 : Number(((target - entry) * lotSize).toFixed(0));
   const riskReward = riskPerLot > 0 ? Number((rewardPerLot / riskPerLot).toFixed(2)) : 0;
   const rrOk = riskReward >= MIN_RISK_REWARD;
   add(
     "Worth the risk at this price",
     rrOk,
     rrOk
-      ? `Risking ₹${riskPerLot.toLocaleString("en-IN")} to make ₹${rewardPerLot.toLocaleString("en-IN")} — ${riskReward}:1.`
-      : `Risking ₹${riskPerLot.toLocaleString("en-IN")} to make only ₹${rewardPerLot.toLocaleString("en-IN")} — ${riskReward}:1. Entering this late has spoiled the trade even though the direction may still be right.`,
+      ? `Risking ₹${riskPerLot.toLocaleString("en-IN")} to make ₹${rewardPerLot.toLocaleString("en-IN")} — ${riskReward}:1${stopMovedUp ? ", using a stop set from today's price rather than the original one" : ""}.`
+      : `Risking ₹${riskPerLot.toLocaleString("en-IN")} to make only ₹${rewardPerLot.toLocaleString("en-IN")} — ${riskReward}:1. There is not enough of this move left to be worth the risk from here, even though the direction may still be right.`,
     true
   );
 
@@ -225,7 +296,20 @@ export function canIBuyNow(input: BuyCheckInput): BuyAnswer {
   // --- Verdict -----------------------------------------------------------
   const failedBlocking = gates.filter((g) => g.blocking && !g.passed);
   const failedSoft = gates.filter((g) => !g.blocking && !g.passed);
-  const plan: BuyPlan = { entry: Number(entry.toFixed(2)), stop: Number(stop.toFixed(2)), target: Number(target.toFixed(2)), riskPerLot, rewardPerLot, riskReward };
+  const plan: BuyPlan | null = target === null
+    ? null
+    : {
+        entry: Number(entry.toFixed(2)),
+        stop: Number(stop.toFixed(2)),
+        target: Number(target.toFixed(2)),
+        riskPerLot,
+        rewardPerLot,
+        riskReward,
+        targetNumber,
+        stopMovedUp,
+        missedPerLot,
+        late,
+      };
 
   if (failedBlocking.length > 0) {
     return {

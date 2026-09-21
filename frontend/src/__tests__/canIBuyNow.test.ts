@@ -6,8 +6,9 @@ import { canIBuyNow, type BuyCheckInput } from "../utils/canIBuyNow";
 function base(over: Partial<BuyCheckInput> = {}): BuyCheckInput {
   return {
     livePremium: 1035.1,
+    signalEntry: 1035.1,
     stop: 1023.1,
-    target: 1055.1,
+    targets: [1055.1, 1067.1, 1080.1],
     lotSize: 100,
     marketOpen: true,
     timingTier: "good",
@@ -31,8 +32,9 @@ test("a clean setup answers yes and prints the plan", () => {
 });
 
 test("risk and reward are in rupees, from the LIVE price not the original entry", () => {
-  // Entered 2 rupees higher than the signal's own price, so both sides change.
-  const a = canIBuyNow(base({ livePremium: 1037 }));
+  // The signal itself was created at 1037, so this is on time -- the point
+  // here is only that the maths uses the live price, not a stale one.
+  const a = canIBuyNow(base({ livePremium: 1037, signalEntry: 1037 }));
   // (1037 - 1023.1) * 100 = 1390 risked; (1055.1 - 1037) * 100 = 1810 to make.
   assert.equal(a.plan!.riskPerLot, 1390);
   assert.equal(a.plan!.rewardPerLot, 1810);
@@ -85,10 +87,19 @@ test("a premium already past the stop is an exit, not an entry", () => {
   assert.match(a.reason, /exit, not an entry/i);
 });
 
-test("a premium already past the target is chasing", () => {
-  const a = canIBuyNow(base({ livePremium: 1060 }));
+test("a premium past one target simply aims at the next one", () => {
+  // 1060 is past Target 1 (1055.1) but Target 2 (1067.1) is still ahead.
+  const a = canIBuyNow(base({ livePremium: 1060, signalEntry: 1035.1, premiumSwingPerCandle: 3 }));
+  assert.equal(a.plan?.target, 1067.1);
+  assert.equal(a.plan?.targetNumber, 2);
+});
+
+test("every target already reached means the move is finished", () => {
+  const a = canIBuyNow(base({ livePremium: 1090, signalEntry: 1035.1 }));
   assert.equal(a.verdict, "no");
-  assert.match(a.reason, /chasing/i);
+  assert.match(a.reason, /already been reached/i);
+  assert.match(a.reason, /wait for a fresh call/i);
+  assert.equal(a.plan, null);
 });
 
 test("a stop inside normal candle noise blocks the entry", () => {
@@ -99,11 +110,61 @@ test("a stop inside normal candle noise blocks the entry", () => {
   assert.match(a.reason, /ordinary wobble/i);
 });
 
-test("entering too late is blocked on risk/reward even when direction is right", () => {
-  // At 1051 you risk 2790 to make only 410.
-  const a = canIBuyNow(base({ livePremium: 1051 }));
+// ===========================================================================
+// THE LATE-ENTRY CASE. The call fires while he is at work; he looks two hours
+// later with price already part-way to target. Getting this wrong produced a
+// "risk ₹3,125 to make ₹75" answer that described a trade nobody was offered.
+// ===========================================================================
+
+test("a late entry gets a stop measured from TODAY'S price, not the original", () => {
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1050, premiumSwingPerCandle: 3 }));
+  assert.ok(a.plan, "a late entry with a target ahead must still produce a plan");
+  assert.equal(a.plan!.late, true);
+  assert.equal(a.plan!.stopMovedUp, true);
+  // 1050 - 2 * 3 = 1044, well above the original 1023.1.
+  assert.equal(a.plan!.stop, 1044);
+  assert.ok(a.plan!.stop > 1023.1, "the replacement stop must be tighter than the original, never looser");
+});
+
+test("the late stop turns an impossible risk/reward into a real one", () => {
+  const withOldStop = (1050 - 1023.1) * 100; // 2,690 risked under the old logic
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1050, premiumSwingPerCandle: 3 }));
+  assert.ok(a.plan!.riskPerLot < withOldStop, `risk should fall from ${withOldStop}, got ${a.plan!.riskPerLot}`);
+  assert.equal(a.plan!.riskPerLot, 600);
+  assert.ok(a.plan!.riskReward >= 1, `a late entry that survives must still pay for its risk, got ${a.plan!.riskReward}:1`);
+});
+
+test("a target about to be touched is skipped for the one beyond it", () => {
+  // At 1050 with a stop at 1044, Target 1 (1055.1) pays only 0.85:1 -- what a
+  // trader would actually do here is aim at Target 2, and so does this.
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1050, premiumSwingPerCandle: 3 }));
+  assert.equal(a.plan!.target, 1067.1);
+  assert.equal(a.plan!.targetNumber, 2);
+  assert.equal(a.plan!.rewardPerLot, 1710);
+});
+
+test("what was already missed is reported, not hidden", () => {
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1050, premiumSwingPerCandle: 3 }));
+  assert.equal(a.plan!.missedPerLot, 1490); // (1050 - 1035.1) * 100
+});
+
+test("an on-time entry keeps the original stop untouched", () => {
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1035.1 }));
+  assert.equal(a.plan!.late, false);
+  assert.equal(a.plan!.stopMovedUp, false);
+  assert.equal(a.plan!.stop, 1023.1);
+});
+
+test("a late entry with no room left is still blocked", () => {
+  // Target 3 is 1080.1; entering at 1079.5 leaves 6 paise of room.
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1079.5, premiumSwingPerCandle: 3 }));
   assert.equal(a.verdict, "no");
-  assert.match(a.reason, /spoiled the trade/i);
+  assert.match(a.reason, /not enough of this move left/i);
+});
+
+test("with no candle-swing data a late entry keeps the original stop rather than inventing one", () => {
+  const a = canIBuyNow(base({ signalEntry: 1035.1, livePremium: 1050, premiumSwingPerCandle: null }));
+  assert.equal(a.plan?.stopMovedUp ?? false, false);
 });
 
 test("one soft warning downgrades to wait but still shows the numbers", () => {

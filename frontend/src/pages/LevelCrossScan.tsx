@@ -245,7 +245,8 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
           <CanIBuyNowButton
             livePremium={liveLtp}
             stop={effectiveStopFor(latest)}
-            target={nextTarget}
+            signalEntry={latest.entry}
+            targets={latest.targets}
             lotSize={LOT_SIZE[symbol]}
             marketOpen={marketStatusForBuy?.isOpen ?? false}
             timingTier={entryTiming.tier}

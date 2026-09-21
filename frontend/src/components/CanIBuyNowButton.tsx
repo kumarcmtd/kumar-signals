@@ -63,6 +63,24 @@ export function CanIBuyNowButton(props: BuyCheckInput & { lots?: number }) {
                   <p className="text-[10px] font-black uppercase text-slate-400 mb-1">
                     {answer.verdict === "yes" ? "Your entry, at this price" : "If you took it anyway"}
                   </p>
+
+                  {/* The late-entry story. The usual case for someone who was
+                      at work when the call fired: part of the move is gone,
+                      and what matters is what is left, not the original trade. */}
+                  {answer.plan.late && (
+                    <div className="rounded-xl px-2.5 py-2 mb-1.5" style={{ background: "#F1F5F9", border: "1px solid #E2E8F0" }}>
+                      <p className="text-[10px] text-slate-600 leading-snug">
+                        You are entering late. ₹{(answer.plan.missedPerLot * lots).toLocaleString("en-IN")} of this move already happened before you looked — that part is gone and is not
+                        counted below. These numbers are only for what is still ahead, aiming at <b>Target {answer.plan.targetNumber}</b>.
+                      </p>
+                      {answer.plan.stopMovedUp && (
+                        <p className="text-[9.5px] text-slate-500 leading-snug mt-1">
+                          The stop shown is <b>not</b> the original one. Entering here with the original stop would mean risking the whole move that already happened to chase what is
+                          left, so it has been moved up to sit just under today's price.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-1.5">
                     {[
                       { label: "Buy at", value: `₹${answer.plan.entry.toFixed(2)}`, ink: "#334155" },
