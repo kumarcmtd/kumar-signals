@@ -98,8 +98,13 @@ export interface BuyCheckInput {
   lotSize: number;
   /** Is MCX actually open? */
   marketOpen: boolean;
-  /** The entry-timing tier already computed for the card. */
-  timingTier: "excellent" | "good" | "fair" | "late" | "underwater" | "past_target" | "past_stop";
+  /**
+   * The entry-timing tier already computed for the card, or null when it could
+   * not be worked out (no live price yet, market shut). Null is skipped rather
+   * than counted against the entry -- the button must still be usable outside
+   * market hours, which is exactly when someone at work looks at it.
+   */
+  timingTier: "excellent" | "good" | "fair" | "late" | "underwater" | "past_target" | "past_stop" | null;
   /** True when news and technicals point opposite ways. */
   conflict: boolean;
   /** Combined score, -100..100, positive = bullish. */
@@ -267,11 +272,15 @@ export function canIBuyNow(input: BuyCheckInput): BuyAnswer {
   );
 
   // --- Gate 8 (soft): entry timing --------------------------------------
-  const timingOk = timingTier === "excellent" || timingTier === "good";
+  const timingOk = timingTier === null || timingTier === "excellent" || timingTier === "good";
   add(
     "Entry is not late",
     timingOk,
-    timingOk ? "Most of the expected move is still ahead." : "A good part of this move has already happened, so the reward left is smaller than it was.",
+    timingTier === null
+      ? "Entry timing could not be worked out, so it is not being counted either way."
+      : timingOk
+        ? "Most of the expected move is still ahead."
+        : "A good part of this move has already happened, so the reward left is smaller than it was.",
     false
   );
 

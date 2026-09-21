@@ -240,7 +240,7 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
         </div>
       )}
 
-      {!latest.closed && entryTiming && nextTarget !== null && (
+      {!latest.closed && (
         <div className="px-4 pt-4">
           <CanIBuyNowButton
             livePremium={liveLtp}
@@ -249,7 +249,7 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
             targets={latest.targets}
             lotSize={LOT_SIZE[symbol]}
             marketOpen={marketStatusForBuy?.isOpen ?? false}
-            timingTier={entryTiming.tier}
+            timingTier={entryTiming?.tier ?? null}
             conflict={newsDecision?.tradeConfirmation === "WAIT_CONFLICT"}
             netScore={typeof newsDecision?.finalNet === "number" ? newsDecision.finalNet : null}
             optSide={latest.optSide}

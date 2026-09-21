@@ -226,3 +226,24 @@ test("every gate explains itself", () => {
     assert.ok(g.detail.length > 10, `gate "${g.name}" needs a real explanation`);
   }
 });
+
+// ===========================================================================
+// The button must still be usable when the market is shut or no live price
+// has arrived -- that is exactly when someone at a day job looks at it. It
+// used to disappear entirely, which reads as a broken page.
+// ===========================================================================
+
+test("an unknown entry timing is skipped, not counted against the entry", () => {
+  const a = canIBuyNow(base({ timingTier: null }));
+  const gate = a.gates.find((g) => /not late/i.test(g.name));
+  assert.equal(gate?.passed, true, "null timing must not be treated as 'late'");
+  assert.match(gate!.detail, /not being counted either way/i);
+  assert.equal(a.verdict, "yes");
+});
+
+test("a closed market with unknown timing still answers rather than breaking", () => {
+  const a = canIBuyNow(base({ marketOpen: false, timingTier: null, livePremium: null }));
+  assert.equal(a.verdict, "no");
+  assert.match(a.headline, /closed/i);
+  assert.ok(a.gates.length > 0, "it must still show which checks it got to");
+});

@@ -290,7 +290,20 @@ function TwentyCandidateCard({
 
       {/* One answer, from every gate at once. Placed directly above the
           news/market score it reads, so the two are never read separately. */}
-      {latest && heroNextTarget !== null && heroEntryTiming && (
+      {/* No call at all. The button used to simply vanish here, which reads as
+          a broken page rather than as "there is nothing to check". */}
+      {!latest && (
+        <div className="px-4 pt-4">
+          <div className="rounded-xl px-3 py-2.5 text-center" style={{ background: "var(--color-surface-soft)", border: "1px dashed var(--color-border)" }}>
+            <p className="text-[11.5px] font-black text-slate-600">Nothing to check yet</p>
+            <p className="text-[10px] text-slate-500 leading-snug mt-0.5">
+              "Can I Buy Now?" appears here as soon as Ai20-20 makes a call. There is no open call right now, so there is nothing to enter.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {latest && (
         <div className="px-4 pt-4">
           <CanIBuyNowButton
             livePremium={liveLtp}
@@ -299,7 +312,7 @@ function TwentyCandidateCard({
             targets={latest.targets}
             lotSize={lotSize}
             marketOpen={marketStatusForBuy?.isOpen ?? false}
-            timingTier={heroEntryTiming.tier}
+            timingTier={heroEntryTiming?.tier ?? null}
             conflict={newsDecision?.tradeConfirmation === "WAIT_CONFLICT"}
             netScore={typeof newsDecision?.finalNet === "number" ? newsDecision.finalNet : null}
             optSide={latest.optSide}
