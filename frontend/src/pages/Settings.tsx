@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { LayoutGrid, Globe2, ListTree, Bell, ChevronRight, Smartphone, Send, Trash2 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 import { notificationPermission } from "../utils/notify";
+import { BackupRestoreCard } from "../components/BackupRestoreCard";
 import { useNtfyTopic, useSaveNtfyTopic, useDeleteNtfyTopic, useSendTestNotification, useCheckNotificationsNow } from "../api/hooks";
 
 export function Settings() {
@@ -57,6 +58,7 @@ export function Settings() {
       </SettingsGroup>
 
       <NtfyPushSetup />
+      <BackupRestoreCard />
 
       <SettingsGroup title="Trading (future)">
         <SettingsRow label="Broker Order Placement" value="Not connected" note="Future" />
