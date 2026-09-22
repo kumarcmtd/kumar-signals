@@ -24,6 +24,7 @@ import {
   Activity, Moon, CheckCircle2, XCircle, AlertTriangle, Info, Flame, Fuel,
 } from "lucide-react";
 import { useTimeProfile, useMarketStatus } from "../api/hooks";
+import { OvernightFollowThroughCard } from "../components/OvernightFollowThroughCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -384,6 +385,11 @@ export function PriceAlerts() {
           </div>
         </Card>
       )}
+
+      {/* Overnight move -> next-day follow-through. Rendered whatever the
+          time-profile query did: it reads its own 30-minute history, so a
+          missing time profile must not hide it. */}
+      <OvernightFollowThroughCard symbol={symbol} />
 
       {data && !data.available && !isLoading && (
         <Card tone={`${C.warn}55`}>
