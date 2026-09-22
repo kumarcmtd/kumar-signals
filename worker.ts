@@ -2630,7 +2630,35 @@ interface OptionsAnalytics {
   rows: OptionRowAnalytics[];
 }
 
+// The option chain is the single most expensive upstream call in the app and
+// it was NOT shared: the options page, the depth badge, the Best Call cron and
+// the Ai20-20 cron each triggered their own fetch, and within one Cron tick the
+// two background checks fetched the same chain twice over for each symbol.
+//
+// Same in-flight-promise pattern as getIntradayCandles above, for the same
+// reason: callers arrive together, so caching only the RESULT would still let
+// them all miss and fetch in parallel. Sharing the promise means they await one
+// call. TTL is deliberately tiny so nothing gets staler than the client's own
+// poll already made it, and a failure is evicted immediately so the next
+// attempt retries rather than being stuck with a cached error.
+const OPTIONS_CACHE_TTL_MS = 8_000;
+const optionsCache = new Map<string, { at: number; promise: Promise<OptionsAnalytics | { error: string }> }>();
+
 async function computeOptionsAnalytics(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
+  const key = `${symbol}|${[...pinnedStrikes].sort((a, b) => a - b).join(",")}`;
+  const hit = optionsCache.get(key);
+  if (hit && Date.now() - hit.at < OPTIONS_CACHE_TTL_MS) return hit.promise;
+  const promise = computeOptionsAnalyticsUncached(env, token, symbol, pinnedStrikes);
+  optionsCache.set(key, { at: Date.now(), promise });
+  promise
+    .then((v) => {
+      if ("error" in v) optionsCache.delete(key);
+    })
+    .catch(() => optionsCache.delete(key));
+  return promise;
+}
+
+async function computeOptionsAnalyticsUncached(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
 
@@ -3235,9 +3263,16 @@ function twentySignature(symbol: string, strike: number, optSide: string, entry:
  * write against a 1,000/day free limit for no benefit.
  */
 async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> {
+  // Gated on market hours for three reasons, not one: there is nothing to
+  // enter outside them, the sample buffer would fill with stale prices, and
+  // every tick would spend Upstox requests -- which is what pushes the app
+  // into Upstox's 1015 rate limit -- for no possible benefit.
   if (!getMarketStatus().isOpen) return;
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
+  // Checked BEFORE any upstream call. With no ntfy topic saved there is
+  // nowhere to send a push, so fetching the data to build one would be pure
+  // waste against the rate limit.
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
   if (!topic) return;
 
