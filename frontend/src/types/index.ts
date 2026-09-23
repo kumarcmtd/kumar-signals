@@ -223,6 +223,33 @@ export interface PortfolioTrade {
   source?: "manual" | "master-ai" | "signal";
 }
 
+/**
+ * How far WTI / Brent / Henry Hub have moved SINCE MCX SHUT.
+ *
+ * Distinct from GlobalQuote.changePercent, which Yahoo measures from the
+ * previous US session close -- a different and usually longer window that
+ * partly covers ground MCX had already priced in before its own close.
+ */
+export interface OvernightMove {
+  symbol: string;
+  name: string;
+  tracksMCX: string;
+  /** The price recorded when MCX closed. Null until the first snapshot exists. */
+  anchorPrice: number | null;
+  price: number | null;
+  /** Move since MCX closed. Null when there is no anchor to measure from. */
+  changePct: number | null;
+  /** Yahoo's own day change, over its own window. Labelled as such on screen. */
+  dayChangePct: number | null;
+  error?: string;
+}
+
+export interface OvernightTrackerResponse {
+  anchor: { takenAt: string; istDate: string } | null;
+  moves: OvernightMove[];
+  marketStatus: MarketStatus;
+}
+
 export interface GlobalQuote {
   symbol: string;
   name: string;

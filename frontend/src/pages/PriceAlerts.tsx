@@ -26,6 +26,7 @@ import {
 import { useTimeProfile, useMarketStatus } from "../api/hooks";
 import { OvernightFollowThroughCard } from "../components/OvernightFollowThroughCard";
 import { LiveSessionTrendCard } from "../components/LiveSessionTrendCard";
+import { OvernightToNowCard } from "../components/OvernightToNowCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -393,6 +394,13 @@ export function PriceAlerts() {
           at 11:40 AM with a position on. Both read their own candles, so a
           failed time-profile query must not hide either. */}
       <LiveSessionTrendCard symbol={symbol} />
+
+      {/* The chain in three steps: how far the world moved after MCX shut,
+          what MCX did with that at 9:00, and where it has gone since --
+          including how much of a typical day's range is left. Sits between the
+          live read and the historical study because that is the order the
+          questions actually arrive in on a trading morning. */}
+      <OvernightToNowCard symbol={symbol} />
 
       {/* Overnight move -> next-day follow-through. Rendered whatever the
           time-profile query did: it reads its own 30-minute history, so a

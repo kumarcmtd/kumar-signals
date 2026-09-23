@@ -1597,7 +1597,7 @@ async function getYahooQuote(symbol: string, name: string, tracksMCX: string): P
   };
 }
 
-async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
+async function computeGlobalMarketsUncached(): Promise<GlobalQuote[]> {
   const results = await Promise.all(
     GLOBAL_INSTRUMENTS.map(async (inst) => {
       try {
@@ -1608,6 +1608,133 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
     })
   );
   return results;
+}
+
+// Three Yahoo fetches per call, and now wanted by two pages plus the cron.
+// Module-memory memo with an IN-FLIGHT promise, the same shape used for the
+// option chain: without it, two requests landing together each start their own
+// three fetches, and the duplicate pair is pure waste.
+const GLOBAL_CACHE_TTL_MS = 60_000;
+let globalCache: { at: number; promise: Promise<GlobalQuote[]> } | null = null;
+
+async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
+  const now = Date.now();
+  if (globalCache && now - globalCache.at < GLOBAL_CACHE_TTL_MS) return globalCache.promise;
+  const promise = computeGlobalMarketsUncached();
+  globalCache = { at: now, promise };
+  // A failed fetch must not be cached for a minute, or one Yahoo blip freezes
+  // the page for everyone who asks during that window.
+  promise.catch(() => {
+    if (globalCache?.promise === promise) globalCache = null;
+  });
+  return promise;
+}
+
+// ---- Overnight anchor: where the world was when MCX shut ----
+//
+// The change percentage Yahoo reports is measured from the previous US SESSION
+// close, which is not the window a MCX trader cares about. "WTI is down 5.96%"
+// can span a period that starts well before MCX shut, so reading it as "what
+// happened overnight" silently double-counts a move MCX already priced in
+// before its own close.
+//
+// There is no way to look this up after the fact -- the app holds only the
+// CURRENT quote, with no historical intraday record of where WTI was at 11:30
+// PM on a past date. So it is RECORDED at the time instead: the cron takes one
+// snapshot just after MCX closes, and "since MCX closed" is then measured
+// against a real observed price rather than estimated from a US chart.
+//
+// Cost: exactly one KV write per trading day. The 23:30-23:59 IST window is six
+// cron ticks; the first one writes and the rest see today's date already stored
+// and do nothing.
+const OVERNIGHT_ANCHOR_KEY = "overnight:anchor:v1";
+
+interface OvernightAnchor {
+  /** When the snapshot was actually taken. */
+  takenAt: string;
+  /** The IST trading date it belongs to, so it is written only once per day. */
+  istDate: string;
+  /** Symbol -> price at MCX close. */
+  prices: Record<string, number>;
+}
+
+function istPartsNow(now = new Date()): { day: number; minutes: number; date: string } {
+  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return {
+    day: ist.getUTCDay(),
+    minutes: ist.getUTCHours() * 60 + ist.getUTCMinutes(),
+    date: `${ist.getUTCFullYear()}-${p(ist.getUTCMonth() + 1)}-${p(ist.getUTCDate())}`,
+  };
+}
+
+async function captureOvernightAnchor(env: Env): Promise<void> {
+  const { day, minutes, date } = istPartsNow();
+  // Weekdays only. MCX is shut all weekend, so Monday's gap is measured against
+  // FRIDAY's close -- and Friday's anchor is the one that says where the world
+  // was at that moment. Overwriting it on Saturday would be wrong twice over:
+  // it would move the reference point, and NYMEX is shut then anyway.
+  if (day < 1 || day > 5) return;
+  if (minutes < 23 * 60 + 30) return;
+
+  const existing = await env.COMMODITY_KV.get(OVERNIGHT_ANCHOR_KEY, "json").catch(() => null) as OvernightAnchor | null;
+  if (existing?.istDate === date) return;
+
+  const quotes = await computeGlobalMarkets();
+  const prices: Record<string, number> = {};
+  for (const q of quotes) {
+    if (typeof q.price === "number" && q.price > 0) prices[q.symbol] = q.price;
+  }
+  // A partial snapshot is worse than none: a missing leg would silently read as
+  // "no overnight move" on that contract tomorrow morning.
+  if (Object.keys(prices).length < GLOBAL_INSTRUMENTS.length) return;
+
+  const anchor: OvernightAnchor = { takenAt: new Date().toISOString(), istDate: date, prices };
+  await env.COMMODITY_KV.put(OVERNIGHT_ANCHOR_KEY, JSON.stringify(anchor)).catch(() => undefined);
+}
+
+interface OvernightMove {
+  symbol: string;
+  name: string;
+  tracksMCX: string;
+  anchorPrice: number | null;
+  price: number | null;
+  changePct: number | null;
+  /** Yahoo's own day change, which covers a DIFFERENT window. Labelled as such. */
+  dayChangePct: number | null;
+  error?: string;
+}
+
+async function computeOvernightTracker(env: Env): Promise<{
+  anchor: { takenAt: string; istDate: string } | null;
+  moves: OvernightMove[];
+  marketStatus: ReturnType<typeof getMarketStatus>;
+}> {
+  const [anchor, quotes] = await Promise.all([
+    env.COMMODITY_KV.get(OVERNIGHT_ANCHOR_KEY, "json").catch(() => null) as Promise<OvernightAnchor | null>,
+    computeGlobalMarkets(),
+  ]);
+
+  const moves: OvernightMove[] = quotes.map((q) => {
+    const anchorPrice = anchor?.prices?.[q.symbol] ?? null;
+    const changePct = anchorPrice && anchorPrice > 0 && typeof q.price === "number" ? r2(((q.price - anchorPrice) / anchorPrice) * 100) : null;
+    return {
+      symbol: q.symbol,
+      name: q.name,
+      tracksMCX: q.tracksMCX,
+      anchorPrice,
+      price: q.price,
+      changePct,
+      dayChangePct: q.changePercent,
+      error: q.error,
+    };
+  });
+
+  return {
+    anchor: anchor ? { takenAt: anchor.takenAt, istDate: anchor.istDate } : null,
+    moves,
+    marketStatus: getMarketStatus(),
+  };
 }
 
 // ---- Pullback vs Reversal ----
@@ -3541,6 +3668,12 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
           return json(await computeGlobalMarkets());
         }
 
+        // "How far has the world moved since MCX shut." Two KV-and-memo reads,
+        // no Upstox call, so it is safe to poll from the Price-Alerts page.
+        if (url.pathname === "/api/overnight-tracker") {
+          return json(await computeOvernightTracker(env));
+        }
+
         // GPT News only. Kept off /api/global-markets so the Global Markets
         // page keeps rendering exactly the three energy benchmarks it always has.
         if (url.pathname === "/api/macro-markets") {
@@ -3839,5 +3972,8 @@ export default {
     // Keeps the news feeds warm so no browser request ever has to rebuild
     // ~35 RSS sources inside a 10ms CPU budget. See NEWS_CACHE_TTL_SECONDS.
     ctx.waitUntil(warmEnergyNews(env));
+    // One snapshot per trading day, just after MCX shuts, so tomorrow morning
+    // "moved since MCX closed" is a measured figure rather than an estimate.
+    ctx.waitUntil(captureOvernightAnchor(env));
   },
 };

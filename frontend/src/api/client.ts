@@ -1,4 +1,4 @@
-import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
+import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, OvernightTrackerResponse, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
 import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
 import type { MorningGapRecord } from "../utils/overnightGapEngine";
@@ -113,6 +113,7 @@ export const api = {
   // economic-calendar payloads, and it polls far more often than that page.
   newsFeed: () => getJSON<NewsFeedResponse>("/news"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
+  overnightTracker: () => getJSON<OvernightTrackerResponse>("/overnight-tracker"),
   macroMarkets: () => getJSON<MacroMarketsResponse>("/macro-markets"),
   expiryAlerts: () => getJSON<{ alerts: ExpiryAlert[] }>("/expiry-alerts"),
   whyToday: () => getJSON<WhyTodayResponse>("/why-today"),

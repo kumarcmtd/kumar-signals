@@ -280,6 +280,21 @@ export function useHistory30m(symbol: InstrumentSymbol, enabled: boolean) {
   });
 }
 
+// How far WTI / Brent / Henry Hub have moved since MCX shut.
+//
+// Two KV-and-memo reads on the Worker and no Upstox call, so a five-minute
+// cadence here is genuinely cheap. It stays on overnight and through the
+// morning, which is exactly when it is worth reading and when nothing else on
+// the page is polling.
+export function useOvernightTracker() {
+  return useQuery({
+    queryKey: ["overnight-tracker"],
+    queryFn: api.overnightTracker,
+    staleTime: 4 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
 // Today's forming candles, for the live session-trend card on Price-Alerts.
 //
 // Deliberately NOT routed through usePollInterval, which is the only hook here
