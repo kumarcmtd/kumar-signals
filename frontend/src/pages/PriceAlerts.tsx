@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useTimeProfile, useMarketStatus } from "../api/hooks";
 import { OvernightFollowThroughCard } from "../components/OvernightFollowThroughCard";
+import { LiveSessionTrendCard } from "../components/LiveSessionTrendCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -385,6 +386,13 @@ export function PriceAlerts() {
           </div>
         </Card>
       )}
+
+      {/* Today's session, live. Deliberately ABOVE the historical study: once
+          the market is open, "is the move I am in still working" beats "what
+          a gap this size usually did", and that is the question a trader has
+          at 11:40 AM with a position on. Both read their own candles, so a
+          failed time-profile query must not hide either. */}
+      <LiveSessionTrendCard symbol={symbol} />
 
       {/* Overnight move -> next-day follow-through. Rendered whatever the
           time-profile query did: it reads its own 30-minute history, so a

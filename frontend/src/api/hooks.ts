@@ -280,6 +280,29 @@ export function useHistory30m(symbol: InstrumentSymbol, enabled: boolean) {
   });
 }
 
+// Today's forming candles, for the live session-trend card on Price-Alerts.
+//
+// Deliberately NOT routed through usePollInterval, which is the only hook here
+// that is not. Price-Alerts is not one of the six always-live pages, so the
+// shared gate would return `false` and the card would freeze on whichever bar
+// happened to be forming when the page opened -- a card whose entire purpose
+// is to track a move as it develops, quietly showing 11:15's reading at 2 PM.
+// A live card that is not live is worse than no card.
+//
+// The cost is bounded instead of gated: `live` is false whenever MCX is shut,
+// so this is silent outside 9:00 AM - 11:30 PM; the query key is the SAME one
+// useCandles(symbol, "15") uses, so it shares that cache entry rather than
+// opening a second one; and the Worker serves these candles from KV, so a
+// 60-second cadence costs no extra Upstox call against the 1015 limit.
+export function useSessionCandles(symbol: InstrumentSymbol, live: boolean) {
+  return useQuery({
+    queryKey: ["candles", symbol, "15"],
+    queryFn: () => api.candles(symbol, "15"),
+    staleTime: 50_000,
+    refetchInterval: live ? 60_000 : false,
+  });
+}
+
 export function usePortfolio() {
   return useQuery({
     queryKey: ["portfolio"],
