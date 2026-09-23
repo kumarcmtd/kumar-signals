@@ -38,10 +38,12 @@ function BandRow({ b }: { b: BandStudy }) {
       )}
 
       {b.usualPeakWindow && !b.thin && (
-        <p className="text-[10px] text-slate-600 leading-snug mt-1.5 flex items-start gap-1">
+        <div className="flex items-start gap-1 mt-1.5">
           <Clock size={10} className="shrink-0 mt-[2px] text-indigo-500" />
-          Ran furthest during <b className="mx-1">{b.usualPeakWindow}</b> on {b.usualPeakCount} of {b.sessions} days.
-        </p>
+          <p className="text-[10px] text-slate-600 leading-snug">
+            Ran furthest during <b>{b.usualPeakWindow}</b> on {b.usualPeakCount} of {b.sessions} days.
+          </p>
+        </div>
       )}
 
       <p className="text-[10px] text-slate-500 leading-snug mt-1">{b.verdict}</p>

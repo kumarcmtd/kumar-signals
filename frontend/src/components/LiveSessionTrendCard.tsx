@@ -127,10 +127,10 @@ export function LiveSessionTrendCard({ symbol }: { symbol: InstrumentSymbol }) {
           <span className="text-[9px] text-slate-400 ml-auto">{trend.bars} bars · {trend.barMinutes}m</span>
         </div>
 
-        <p className="text-[14px] font-black mt-1.5 leading-tight flex items-start gap-1.5" style={{ color: tone.ink }}>
-          <tone.Icon size={16} className="shrink-0 mt-[2px]" />
-          {trend.headline}
-        </p>
+        <div className="flex items-start gap-1.5 mt-1.5">
+          <tone.Icon size={16} className="shrink-0 mt-[2px]" style={{ color: tone.ink }} />
+          <p className="text-[14px] font-black leading-tight" style={{ color: tone.ink }}>{trend.headline}</p>
+        </div>
 
         {trend.story && <p className="text-[11px] text-slate-700 leading-snug mt-1">{trend.story}</p>}
 
@@ -170,10 +170,12 @@ export function LiveSessionTrendCard({ symbol }: { symbol: InstrumentSymbol }) {
       )}
 
       {trend.gapPct !== null && trend.prevClose !== null && (
-        <p className="text-[9.5px] text-slate-500 leading-snug px-0.5 flex items-start gap-1">
+        <div className="flex items-start gap-1 px-0.5">
           <ArrowRight size={10} className="shrink-0 mt-[2px] text-indigo-500" />
-          It opened {trend.gapPct > 0 ? "+" : ""}{trend.gapPct}% against yesterday's {fmtPrice(trend.prevClose)} close. The card below shows what a gap that size usually did next.
-        </p>
+          <p className="text-[9.5px] text-slate-500 leading-snug">
+            It opened {trend.gapPct > 0 ? "+" : ""}{trend.gapPct}% against yesterday's {fmtPrice(trend.prevClose)} close. The card below shows what a gap that size usually did next.
+          </p>
+        </div>
       )}
 
       <p className="text-[9.5px] text-slate-400 leading-relaxed px-0.5">
