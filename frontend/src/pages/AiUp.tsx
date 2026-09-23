@@ -8,6 +8,8 @@ import { EntryTimingBadge } from "../components/EntryTimingBadge";
 import { PriceScale, ProfitEstimate, fmtWhen } from "../components/CallCardKit";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
+import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { LevelProximityWarning } from "../components/LevelProximityWarning";
@@ -64,6 +66,19 @@ function SymbolReversalCard({ symbol }: { symbol: AiUpSymbol }) {
   const legFloor = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : 0;
   const entryTiming = hasLiveCall && liveLtp !== null ? evaluateEntryTiming(legFloor, nextTarget, effStop, liveLtp) : null;
 
+  const buyInput = useBuyCheckInput({
+    symbol,
+    trade: hasLiveCall ? latest ?? null : null,
+    livePremium: liveLtp,
+    // effStop falls back to 0 for the no-trade case above; a zero stop would
+    // read as "risking the entire premium", so it is only passed through when
+    // there is actually a trade behind it.
+    stop: hasLiveCall ? effStop : null,
+    candles,
+    lotSize: LOT_SIZE[symbol],
+    timingTier: entryTiming?.tier ?? null,
+  });
+
   return (
     <div className="rounded-2xl overflow-hidden shadow-sm border-2 bg-white" style={{ borderColor: `${accent}44` }}>
       <div className="px-4 pt-3.5 flex items-center justify-between">
@@ -113,6 +128,11 @@ function SymbolReversalCard({ symbol }: { symbol: AiUpSymbol }) {
             )}
             {entryTiming && <EntryTimingBadge verdict={entryTiming} className="max-w-[170px]" />}
           </div>
+
+          {/* Directly beneath the timing badge, because that badge is the one
+              most easily misread as permission to enter: it describes how far
+              through the leg price is, not whether the entry still holds up. */}
+          {buyInput && <CanIBuyNowButton {...buyInput} />}
 
           <PriceScale entry={latest} current={liveLtp} />
           <ProfitEstimate trade={latest} current={liveLtp} lotSize={LOT_SIZE[symbol]} />

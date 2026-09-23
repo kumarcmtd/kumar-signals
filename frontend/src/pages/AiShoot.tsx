@@ -16,6 +16,8 @@ import { LevelProximityWarning } from "../components/LevelProximityWarning";
 import { TradeConsensusLights } from "../components/TradeConsensusLights";
 import { findConfluenceCalls } from "../utils/confluenceEngine";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
+import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
+import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { CallStrengthButton } from "../components/CallStrengthButton";
 import { ExpectedHoldBadge } from "../components/ExpectedHoldBadge";
 import { DepthPressureBadge } from "../components/DepthPressureBadge";
@@ -160,6 +162,16 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
       ? evaluateEntryTiming(heroLegFloor, heroNextTarget, effectiveStopFor(latest), liveLtp)
       : null;
 
+  const buyInput = useBuyCheckInput({
+    symbol: symbolKey,
+    trade: latest ?? null,
+    livePremium: liveLtp,
+    stop: latest ? effectiveStopFor(latest) : null,
+    candles,
+    lotSize: LOT_SIZE[symbolKey],
+    timingTier: heroEntryTiming?.tier ?? null,
+  });
+
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
       <div className="p-4 flex items-start justify-between gap-3" style={{ background: bullish ? "linear-gradient(135deg,#ECFDF5,#FFFFFF)" : "linear-gradient(135deg,#FEF2F2,#FFFFFF)" }}>
@@ -195,6 +207,11 @@ function ShootCallCard({ call, tradeLogs, options, keyPrefix, candles }: { call:
           <MiniStat label="Live Premium" value={liveLtp !== null ? `₹${liveLtp}` : "—"} color="#0EA5E9" />
         </div>
         {heroEntryTiming && <EntryTimingBadge verdict={heroEntryTiming} theme="light" />}
+
+        {/* Beneath the timing badge and the R:R tile, both of which look like
+            permission to enter on their own. This is the line that is allowed
+            to say no. */}
+        {buyInput && <CanIBuyNowButton {...buyInput} />}
 
         {openTrade && (
           <>

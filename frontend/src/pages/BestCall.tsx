@@ -22,6 +22,8 @@ import { DepthPressureBadge } from "../components/DepthPressureBadge";
 import { ProfitMilestones } from "../components/ProfitMilestones";
 import { tickMarks, fmtWhen, formatExpiryTip, DetailRow, CallChart, PriceScale, ProfitEstimate, ReboundStrengthCard, VolumeSupportCard, ChatBubble } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
+import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
+import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 
@@ -461,6 +463,27 @@ function BestCallCard({
   const best = data.best;
   const log = tradeLogs[data.trackingKey] ?? [];
   const latest = log[log.length - 1];
+
+  // Every hook must run before the early return below, or the render where a
+  // trade closes changes the hook count and React throws. `latest` is
+  // deliberately allowed to be undefined here; the hook handles null itself.
+  const liveLtpForBuy = latest && !latest.closed ? liveLtpFor(data.options, latest.strike, latest.optSide) : null;
+  const effStopForBuy = latest ? effectiveStopFor(latest) : null;
+  const nextTargetForBuy = latest ? (latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0]) : null;
+  const legFloorForBuy = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : null;
+  const buyInput = useBuyCheckInput({
+    symbol,
+    trade: latest ?? null,
+    livePremium: liveLtpForBuy,
+    stop: effStopForBuy,
+    candles: data.underlyingCandles,
+    lotSize: LOT_SIZE[symbol],
+    timingTier:
+      latest && !latest.closed && liveLtpForBuy !== null && effStopForBuy !== null && nextTargetForBuy !== null && legFloorForBuy !== null
+        ? evaluateEntryTiming(legFloorForBuy, nextTargetForBuy, effStopForBuy, liveLtpForBuy).tier
+        : null,
+  });
+
   if (!latest) return null;
   const effStop = effectiveStopFor(latest);
   const handleForceStop = () => {
@@ -542,6 +565,15 @@ function BestCallCard({
           {entryTiming && <EntryTimingBadge verdict={entryTiming} className="mt-1 max-w-[160px]" />}
         </div>
       </div>
+
+      {/* Placed directly under the headline numbers, above everything else:
+          the whole point is that it is seen BEFORE the badges further down,
+          which is where the contradiction used to hide. */}
+      {buyInput && (
+        <div className="px-4 pt-3">
+          <CanIBuyNowButton {...buyInput} />
+        </div>
+      )}
 
       <pre className="mx-4 mt-3 rounded-xl bg-[var(--color-surface-soft)] px-3.5 py-3 text-[13px] leading-6 whitespace-pre-wrap font-sans">{tip}</pre>
 

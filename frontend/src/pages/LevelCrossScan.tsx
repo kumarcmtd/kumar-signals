@@ -14,10 +14,7 @@ import { ProfitMilestones } from "../components/ProfitMilestones";
 import { PriceScale, ProfitEstimate, DetailRow, CallChart, tickMarks, fmtWhen, TradeLightSignal } from "../components/CallCardKit";
 import { NewsImpactCard } from "../components/NewsImpactCard";
 import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
-import { istHourInKolkata } from "../utils/canIBuyNow";
-import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
-import { atr } from "../utils/indicators";
-import { useMarketStatus } from "../api/hooks";
+import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { TradeChart, type ChartMarkerSpec } from "../components/TradeChart";
@@ -114,11 +111,6 @@ function LevelCrossChart({ candles, signal, entry }: { candles: Candle[]; signal
 
 function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: ReturnType<typeof useLevelCrossScanner> }) {
   const [chartOpen, setChartOpen] = useState(false);
-  // "Can I Buy Now?" inputs. Declared HERE, above every conditional return in
-  // this component -- hooks must run in the same order on every render, and
-  // this component returns early when there is no open trade.
-  const { result: newsDecision } = useNewsTradeAI(symbol);
-  const { data: marketStatusForBuy } = useMarketStatus();
   const signal = scanner.best[symbol];
   const log = scanner.tradeLogs[symbol];
   const latest = log[log.length - 1];
@@ -129,6 +121,19 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
   const nextTarget = latest ? (latest.targetsHit[1] ? latest.targets[2] : latest.targetsHit[0] ? latest.targets[1] : latest.targets[0]) : null;
   const legFloor = latest ? (latest.targetsHit[1] ? latest.targets[1] : latest.targetsHit[0] ? latest.targets[0] : latest.entry) : null;
   const entryTiming = liveLtp !== null && nextTarget !== null && legFloor !== null && latest ? evaluateEntryTiming(legFloor, nextTarget, effectiveStopFor(latest), liveLtp) : null;
+
+  // "Can I Buy Now?" inputs. Declared HERE, above every conditional return in
+  // this component -- hooks must run in the same order on every render, and
+  // this component returns early when there is no open trade.
+  const buyInput = useBuyCheckInput({
+    symbol,
+    trade: latest ?? null,
+    livePremium: liveLtp,
+    stop: latest ? effectiveStopFor(latest) : null,
+    candles: scanner.chartCandles[symbol] ?? [],
+    lotSize: LOT_SIZE[symbol],
+    timingTier: entryTiming?.tier ?? null,
+  });
 
   // A call must keep showing (and stay force-stoppable) for as long as it's
   // still RUNNING, even if this particular poll's fresh re-scan doesn't
@@ -240,23 +245,9 @@ function SymbolCard({ symbol, scanner }: { symbol: TradableSymbol; scanner: Retu
         </div>
       )}
 
-      {!latest.closed && (
+      {!latest.closed && buyInput && (
         <div className="px-4 pt-4">
-          <CanIBuyNowButton
-            livePremium={liveLtp}
-            stop={effectiveStopFor(latest)}
-            signalEntry={latest.entry}
-            targets={latest.targets}
-            lotSize={LOT_SIZE[symbol]}
-            marketOpen={marketStatusForBuy?.isOpen ?? false}
-            timingTier={entryTiming?.tier ?? null}
-            conflict={newsDecision?.tradeConfirmation === "WAIT_CONFLICT"}
-            netScore={typeof newsDecision?.finalNet === "number" ? newsDecision.finalNet : null}
-            optSide={latest.optSide}
-            premiumSwingPerCandle={(() => { const a = atr(candles, 14); return a === null ? null : a * 0.6; })()}
-            istHour={istHourInKolkata()}
-            signalAgeMinutes={latest.openedAt ? (Date.now() - new Date(latest.openedAt).getTime()) / 60000 : null}
-          />
+          <CanIBuyNowButton {...buyInput} />
         </div>
       )}
 
