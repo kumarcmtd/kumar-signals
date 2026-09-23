@@ -77,25 +77,95 @@ function SectionHead({ icon, title, note }: { icon: React.ReactNode; title: stri
   );
 }
 
-/** Movement bar. Length is the slot's range against the busiest slot of the day. */
+/**
+ * The colour of a half-hour bar: which way it USUALLY went.
+ *
+ * Green and red are earned, not given. A slot is only coloured when its
+ * up/down split cleared the significance bar in timeProfileEngine -- 2.8 sigma
+ * for "reliable", 2.0 for "leaning" -- which is already widened to account for
+ * 29 slots being tested at once. Anything short of that is amber, because a
+ * 55/45 split over 59 days IS a coin flip and painting it green would be
+ * inventing an edge that the data does not contain.
+ *
+ * Grey is kept separate from amber on purpose: "not enough days yet" and
+ * "genuinely balanced" are different statements, and collapsing them would
+ * hide which one you are looking at.
+ */
+const SLOT_COLORS = {
+  upStrong: "#16A34A",
+  upWeak: "#4ADE80",
+  downStrong: "#DC2626",
+  downWeak: "#F87171",
+  neutral: "#F59E0B",
+  noData: "#CBD5E1",
+} as const;
+
+function slotColor(slot: SlotStat): string {
+  if (slot.confidence === "insufficient") return SLOT_COLORS.noData;
+  if (slot.confidence === "coin_flip") return SLOT_COLORS.neutral;
+  if (slot.bias === "up") return slot.confidence === "reliable" ? SLOT_COLORS.upStrong : SLOT_COLORS.upWeak;
+  if (slot.bias === "down") return slot.confidence === "reliable" ? SLOT_COLORS.downStrong : SLOT_COLORS.downWeak;
+  return SLOT_COLORS.neutral;
+}
+
+/**
+ * Movement bar, carrying two separate facts that must not be confused.
+ *
+ * LENGTH is how far price travels in that half hour, against the busiest slot
+ * of the day. COLOUR is which way it usually finished. They are independent: a
+ * long amber bar is a half hour that moves a lot in no reliable direction,
+ * which is a real and useful thing to know before buying an option into it.
+ */
 function MovementBar({ slot, max }: { slot: SlotStat; max: number }) {
   const pct = max > 0 ? Math.max(2, Math.round((slot.avgRangePct / max) * 100)) : 0;
-  const color = slot.movementIndex >= 1.4 ? C.hot : slot.movementIndex >= 1.15 ? C.warn : C.flat;
+  const color = slotColor(slot);
   const DirIcon = slot.bias === "up" ? TrendingUp : slot.bias === "down" ? TrendingDown : Minus;
   const unproven = slot.confidence !== "reliable";
-  const dirColor = slot.confidence === "coin_flip" || slot.confidence === "insufficient" ? C.flat : slot.bias === "up" ? C.up : C.down;
+  const busy = slot.movementIndex >= 1.4;
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] font-bold text-slate-600 w-[62px] shrink-0 tabular-nums">{slot.key}</span>
+      <span className="text-[10px] font-bold text-slate-600 w-[62px] shrink-0 tabular-nums flex items-center gap-0.5">
+        {slot.key}
+        {/* The busiest half hours used to be what the bar colour said. Colour
+            now carries direction, so that signal moves here rather than
+            being dropped. */}
+        {busy && <Flame size={9} style={{ color: C.hot }} />}
+      </span>
       <div className="flex-1 h-3.5 rounded-full bg-slate-100 overflow-hidden min-w-0">
         <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
       </div>
-      <span className="text-[10px] font-bold tabular-nums w-[46px] text-right shrink-0" style={{ color }}>
+      <span className="text-[10px] font-bold tabular-nums w-[46px] text-right shrink-0 text-slate-500">
         {slot.avgRangePct.toFixed(3)}%
       </span>
       {/* A faded arrow means the lean is real but not proven -- a solid one
           always means it cleared the bar, so the two can never be confused. */}
-      <DirIcon size={12} className="shrink-0" style={{ color: dirColor, opacity: unproven ? 0.4 : 1 }} />
+      <DirIcon size={12} className="shrink-0" style={{ color, opacity: unproven ? 0.45 : 1 }} />
+    </div>
+  );
+}
+
+/** What the colours mean, next to the chart rather than buried in a note. */
+function SlotLegend() {
+  const items: { color: string; label: string }[] = [
+    { color: SLOT_COLORS.upStrong, label: "Usually UP" },
+    { color: SLOT_COLORS.upWeak, label: "Leans up" },
+    { color: SLOT_COLORS.neutral, label: "50/50" },
+    { color: SLOT_COLORS.downWeak, label: "Leans down" },
+    { color: SLOT_COLORS.downStrong, label: "Usually DOWN" },
+    { color: SLOT_COLORS.noData, label: "Too few days" },
+  ];
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pb-2.5">
+      {items.map((i) => (
+        <span key={i.label} className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
+          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: i.color }} />
+          {i.label}
+        </span>
+      ))}
+      <span className="flex items-center gap-1 text-[9px] font-bold text-slate-500">
+        <Flame size={9} style={{ color: C.hot }} />
+        Busiest half hours
+      </span>
     </div>
   );
 }
@@ -491,12 +561,18 @@ export function PriceAlerts() {
             <SectionHead
               icon={<Activity size={13} className="text-slate-400" />}
               title="Every half hour of the day"
-              note="How much the price moves in each half hour. A solid arrow means the direction is proven; a faded arrow means it leans that way but is not proven; grey means 50/50."
+              note="Colour = which way it usually went. Bar length = how far price travels in that half hour. The two are separate: a long amber bar moves a lot, in no reliable direction."
             />
             <Card>
-              <div className="px-3 py-3 space-y-1.5">
+              <SlotLegend />
+              <div className="px-3 pb-3 space-y-1.5">
                 {visibleSlots.map((s) => <MovementBar key={s.key} slot={s} max={maxRange} />)}
               </div>
+              <p className="text-[9px] text-slate-400 leading-snug px-3 pb-2">
+                Green and red are earned. A half hour is only coloured when its up/down split is strong enough to be unlikely by chance — and that bar is already widened because
+                29 half hours are being checked at once. A 55/45 split over {data.sessionsAnalyzed} days stays amber, because that is what it is. Colour describes past days; it is
+                not a buy or sell instruction for today.
+              </p>
               <button
                 type="button"
                 onClick={() => setShowAllSlots((v) => !v)}
