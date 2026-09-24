@@ -3,6 +3,7 @@ import { Globe, TrendingUp, TrendingDown, Minus, Ruler, Clock, AlertTriangle, Fu
 import { useOvernightTracker, useSessionCandles, useHistory30m, useMarketStatus } from "../api/hooks";
 import { readLiveSessionTrend, istToday, fmtPrice } from "../utils/liveSessionTrend";
 import { readSessionRoom } from "../utils/sessionRoomLeft";
+import { readAnchorFreshness } from "../utils/overnightAnchor";
 import { buildFollowThroughStudy, bandFor, BAND_LABEL } from "../utils/overnightFollowThrough";
 import type { InstrumentSymbol, OvernightMove } from "../types";
 
@@ -88,9 +89,13 @@ const TRACK_META: Record<string, { label: string; Icon: typeof Fuel; ink: string
  * down 6%, and hiding the one you are not currently looking at is how you miss
  * that. The chip says which MCX contract each row tracks.
  */
-function MoveRow({ m, hasAnchor, selected, scale }: { m: OvernightMove; hasAnchor: boolean; selected: boolean; scale: number }) {
+function MoveRow({ m, selected, scale }: { m: OvernightMove; selected: boolean; scale: number }) {
   const meta = TRACK_META[m.tracksMCX] ?? { label: m.tracksMCX, Icon: Fuel, ink: FLAT };
-  const shown = hasAnchor ? m.changePct : m.dayChangePct;
+  // Per row, not per card. One leg's snapshot can be missing while the other
+  // two are fine, and a global flag would either throw away two good figures
+  // or silently relabel a Yahoo day figure as a since-MCX-close one.
+  const anchored = m.anchorPrice !== null && m.changePct !== null;
+  const shown = anchored ? m.changePct : m.dayChangePct;
   const ink = inkFor(shown);
   const width = shown === null || scale <= 0 ? 0 : Math.max(3, Math.min(100, (Math.abs(shown) / scale) * 100));
 
@@ -121,12 +126,11 @@ function MoveRow({ m, hasAnchor, selected, scale }: { m: OvernightMove; hasAncho
       </div>
 
       <p className="text-[9px] text-slate-400 mt-1 tabular-nums">
-        {m.error
-          ? m.error
-          : hasAnchor && m.anchorPrice !== null
-            ? `${m.anchorPrice} at MCX close → ${m.price ?? "—"} now`
-            : `Now ${m.price ?? "—"}`}
+        {m.error ? m.error : anchored ? `${m.anchorPrice} at MCX close → ${m.price ?? "—"} now` : `Now ${m.price ?? "—"}`}
       </p>
+      {!anchored && !m.error && (
+        <p className="text-[8.5px] font-bold text-amber-600 mt-0.5">Yahoo day figure — no MCX-close snapshot for this one</p>
+      )}
     </div>
   );
 }
@@ -180,7 +184,13 @@ export function OvernightToNowCard({ symbol }: { symbol: InstrumentSymbol }) {
     return buildFollowThroughStudy(hist).bands.find((b) => b.band === band) ?? null;
   }, [history.data, trend]);
 
-  const hasAnchor = Boolean(tracker.data?.anchor);
+  const anchorInfo = tracker.data?.anchor ?? null;
+  const freshness = readAnchorFreshness(anchorInfo?.takenAt ?? null);
+  // "Some rows are anchored" is the useful question, not "an anchor exists":
+  // a snapshot that recorded two of three legs is genuinely useful for those
+  // two, and the third row says for itself that it is falling back.
+  const anchoredCount = (tracker.data?.moves ?? []).filter((m) => m.anchorPrice !== null && m.changePct !== null).length;
+  const hasAnchor = anchoredCount > 0;
 
   // Every benchmark, always -- with the ones tracking the selected contract
   // first. Overnight, Gas moving 11% matters even on a Crude morning.
@@ -190,9 +200,9 @@ export function OvernightToNowCard({ symbol }: { symbol: InstrumentSymbol }) {
   }, [tracker.data, symbol]);
 
   const scale = useMemo(() => {
-    const vals = moves.map((m) => Math.abs((hasAnchor ? m.changePct : m.dayChangePct) ?? 0));
+    const vals = moves.map((m) => Math.abs((m.anchorPrice !== null && m.changePct !== null ? m.changePct : m.dayChangePct) ?? 0));
     return Math.max(0.5, ...vals);
-  }, [moves, hasAnchor]);
+  }, [moves]);
 
   const sessionStarted = Boolean(trend && trend.openPrice !== null);
   const gapInk = trend?.gapPct === null || trend?.gapPct === undefined ? FLAT : inkFor(trend.gapPct);
@@ -229,7 +239,7 @@ export function OvernightToNowCard({ symbol }: { symbol: InstrumentSymbol }) {
         <Step
           n={1}
           title="Since MCX closed last night"
-          sub={hasAnchor ? `Measured from prices recorded at 11:30 PM on ${tracker.data!.anchor!.istDate}` : "No close-time snapshot recorded yet"}
+          sub={anchorInfo ? `Snapshot taken 11:30 PM on ${anchorInfo.istDate}` : "No close-time snapshot recorded yet"}
           tone="#4F46E5"
         >
           {tracker.isLoading ? (
@@ -240,10 +250,20 @@ export function OvernightToNowCard({ symbol }: { symbol: InstrumentSymbol }) {
             <>
               <div className="space-y-1.5">
                 {moves.map((m) => (
-                  <MoveRow key={m.symbol} m={m} hasAnchor={hasAnchor} selected={m.tracksMCX === symbol} scale={scale} />
+                  <MoveRow key={m.symbol} m={m} selected={m.tracksMCX === symbol} scale={scale} />
                 ))}
               </div>
               <p className="text-[8.5px] text-slate-400 mt-1.5">Bar length = size of the move, against the biggest of the three.</p>
+
+              {/* The anchor exists but is not last night's. The percentages are
+                  real; the heading above them would be wrong without this. */}
+              {hasAnchor && freshness.warning && (
+                <div className="rounded-xl px-2.5 py-2 mt-2" style={{ background: "#FFFBEB", border: "1px solid #FDE68A" }}>
+                  <Note icon={<AlertTriangle size={11} style={{ color: "#B45309" }} />} className="text-[9.5px] text-amber-800 leading-snug">
+                    {freshness.warning}
+                  </Note>
+                </div>
+              )}
 
               {!hasAnchor && (
                 <div className="rounded-xl px-2.5 py-2 mt-2" style={{ background: "#FFFBEB", border: "1px solid #FDE68A" }}>

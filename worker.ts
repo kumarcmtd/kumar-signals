@@ -1678,16 +1678,27 @@ async function captureOvernightAnchor(env: Env): Promise<void> {
   if (minutes < 23 * 60 + 30) return;
 
   const existing = await env.COMMODITY_KV.get(OVERNIGHT_ANCHOR_KEY, "json").catch(() => null) as OvernightAnchor | null;
-  if (existing?.istDate === date) return;
+  const alreadyToday = existing?.istDate === date;
+  // Done for tonight only once every leg is recorded. An all-or-nothing rule
+  // was the first version and it was too brittle: one bad Yahoo response for
+  // Brent threw away the Crude AND Gas anchors too, and the whole next morning
+  // lost its overnight figure over a leg nobody was looking at. Now whatever
+  // arrives is kept, and the remaining ticks in the 23:30-23:59 window get a
+  // chance to fill the gap.
+  if (alreadyToday && Object.keys(existing!.prices).length >= GLOBAL_INSTRUMENTS.length) return;
 
   const quotes = await computeGlobalMarkets();
-  const prices: Record<string, number> = {};
+  const prices: Record<string, number> = alreadyToday ? { ...existing!.prices } : {};
   for (const q of quotes) {
     if (typeof q.price === "number" && q.price > 0) prices[q.symbol] = q.price;
   }
-  // A partial snapshot is worse than none: a missing leg would silently read as
-  // "no overnight move" on that contract tomorrow morning.
-  if (Object.keys(prices).length < GLOBAL_INSTRUMENTS.length) return;
+  // Nothing usable came back -- leave the previous anchor alone rather than
+  // overwriting it with an empty one, which would destroy a good reference
+  // point in exchange for nothing.
+  if (Object.keys(prices).length === 0) return;
+  // Nothing new either: writing an identical record would spend a KV write to
+  // change nothing.
+  if (alreadyToday && Object.keys(prices).length === Object.keys(existing!.prices).length) return;
 
   const anchor: OvernightAnchor = { takenAt: new Date().toISOString(), istDate: date, prices };
   await env.COMMODITY_KV.put(OVERNIGHT_ANCHOR_KEY, JSON.stringify(anchor)).catch(() => undefined);
