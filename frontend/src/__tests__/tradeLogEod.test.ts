@@ -113,3 +113,43 @@ test("a local close still beats a server copy that is running", () => {
   const [merged] = mergeTradeLogEntryLists([localClosed], [trade()]);
   assert.equal(merged.status, "sl_hit");
 });
+
+// ---------------------------------------------------------------------------
+// Merge: two running copies (the cron's own lost update)
+// ---------------------------------------------------------------------------
+
+// The exact shape of the cron's write: it re-reads KV and merges with KV as
+// "local", so the un-advanced KV copy used to win whole and erase the cron's
+// T1 on the very write that recorded it.
+test("the cron's T1 hit survives its own re-read-and-merge", () => {
+  const kvCopy = trade(); // still says nothing hit
+  const cronAdvanced = trade({ targetsHit: [true, false, false], highWaterMark: 111, targetTouches: [1, 0, 0] });
+  const [merged] = mergeTradeLogEntryLists([kvCopy], [cronAdvanced]);
+  assert.deepEqual(merged.targetsHit, [true, false, false]);
+  assert.equal(merged.highWaterMark, 111);
+  assert.deepEqual(merged.targetTouches, [1, 0, 0]);
+});
+
+test("progress merges the same whichever side is local", () => {
+  const a = trade({ targetsHit: [true, false, false], highWaterMark: 112 });
+  const b = trade({ targetsHit: [false, false, false], highWaterMark: 115 });
+  const ab = mergeTradeLogEntryLists([a], [b])[0];
+  const ba = mergeTradeLogEntryLists([b], [a])[0];
+  assert.deepEqual(ab.targetsHit, ba.targetsHit);
+  assert.equal(ab.highWaterMark, 115);
+  assert.equal(ba.highWaterMark, 115);
+});
+
+test("a target once hit is never un-hit by a staler copy", () => {
+  const phone = trade({ targetsHit: [true, true, false], targetTouches: [2, 1, 0] });
+  const stale = trade({ targetsHit: [true, false, false], targetTouches: [1, 0, 0] });
+  const [merged] = mergeTradeLogEntryLists([stale], [phone]);
+  assert.deepEqual(merged.targetsHit, [true, true, false]);
+  assert.deepEqual(merged.targetTouches, [2, 1, 0]);
+});
+
+test("entries without the optional progress fields merge without inventing them", () => {
+  const [merged] = mergeTradeLogEntryLists([trade()], [trade()]);
+  assert.equal(merged.highWaterMark, undefined);
+  assert.equal(merged.targetTouches, undefined);
+});

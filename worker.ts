@@ -21,6 +21,7 @@ import { evaluatePullbackReversal, type PullbackResult, type TfKey, type Externa
 import { mcxSessionAt, lastMcxClose, expiryStillLive, mcxCloseInstant, istParts } from "./frontend/src/utils/mcxSession";
 import { resampleCandles } from "./frontend/src/utils/candleResample";
 import { analyzeCommodity, type PatternResult } from "./frontend/src/utils/chartPatterns";
+import { ACCESS_KEY_HEADER, requiresKey, keyMatches, IpRateLimiter, UPSTOX_ROUTE_LIMIT, UPSTOX_ROUTE_WINDOW_MS } from "./frontend/src/utils/apiGuard";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -32,6 +33,9 @@ export interface Env {
   NEWSAPI_KEY?: string;
   EIA_API_KEY?: string;
   FRED_API_KEY?: string;
+  // Owner key for writes and private reads. Set as a Cloudflare SECRET (never
+  // in wrangler.jsonc or the repo). Unset = nothing enforced; see apiGuard.ts.
+  APP_ACCESS_KEY?: string;
 }
 
 // The TradingView widget (frontend/src/components/TradingViewWidget.tsx) is
@@ -2782,6 +2786,8 @@ async function saveTradeLogsToKv(env: Env, logs: Record<string, unknown>): Promi
 const ORPHAN_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 const CRON_STATUS_KV_KEY = "cron:trade_log_last_run";
+/** Outside market hours the heartbeat is refreshed at most this often. */
+const HEARTBEAT_IDLE_INTERVAL_MS = 60 * 60 * 1000;
 
 interface AdvanceCounts {
   opensChecked: number;
@@ -2861,8 +2867,26 @@ async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   // Heartbeat: always record that the Cron ran (and what it did), even when
   // nothing changed and even when there's no token, so "/api/cron-status" can
   // prove the schedule is actually firing.
-  const writeHeartbeat = async (note?: string) =>
-    env.COMMODITY_KV.put(CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
+  //
+  // Every tick during market hours, when it matters that the cron is firing.
+  // Outside them, at most hourly: it was writing KV every five minutes around
+  // the clock -- 288 writes a day, over a quarter of the free 1,000/day, most
+  // of them overnight and at weekends proving nothing new. Anything that
+  // actually changed (an EOD close) still writes immediately.
+  const marketOpen = mcxSessionAt(now).isOpen;
+  const writeHeartbeat = async (note?: string) => {
+    const changedSomething = counts.advanced + counts.swept + counts.eodClosed > 0;
+    if (!marketOpen && !changedSomething) {
+      const prev = await env.COMMODITY_KV.get(CRON_STATUS_KV_KEY).catch(() => null);
+      try {
+        const at = prev ? (JSON.parse(prev) as { at?: number }).at : undefined;
+        if (typeof at === "number" && now - at < HEARTBEAT_IDLE_INTERVAL_MS) return;
+      } catch {
+        // unreadable -- rewrite it
+      }
+    }
+    await env.COMMODITY_KV.put(CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
+  };
 
   if (!token) {
     await writeHeartbeat("no access token in KV");
@@ -2872,7 +2896,7 @@ async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   let logs = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
   let anyChanged = false;
 
-  if (!mcxSessionAt(now).isOpen) {
+  if (!marketOpen) {
     // MCX is shut. The only job left is the end-of-day close, and it only
     // needs a quote fetch when something is actually still running from
     // before the last bell. The common case -- nothing open -- costs zero
@@ -3350,6 +3374,12 @@ async function computeBestCallForSymbol(env: Env, token: string, symbol: Symbol)
 // "last notified" signature in KV) -- otherwise the same still-running call
 // would re-notify every single Cron tick.
 async function runBestCallNotificationCheck(env: Env): Promise<void> {
+  // Market hours only. This computes a full best-call pick for both symbols --
+  // candles plus an option chain each -- and it ran every five minutes around
+  // the clock, weekends included. With MCX shut the inputs cannot change, so
+  // every one of those runs was wasted Upstox calls, and one landing just
+  // after a cache expired could push a stale "Best Call" at 3 AM.
+  if (!mcxSessionAt().isOpen) return;
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
@@ -3454,7 +3484,15 @@ async function computeExpiryAlerts(token: string): Promise<ExpiryAlert[]> {
 // Re-notifies once per distinct (symbol, expiry, daysLeft) combination --
 // so the user gets pinged at 2 days out, again at 1 day, again on expiry
 // day itself, but not every 5 minutes in between.
+/** Expiry warnings may go out from this IST time on trading days, ahead of the open. */
+const EXPIRY_ALERT_FROM_MIN = 7 * 60;
+
 async function runExpiryAlertCheck(env: Env): Promise<void> {
+  // Trading days from 07:00 IST until the close. Early enough that "expires
+  // TODAY" is read before 09:00; there is nothing to warn about overnight or
+  // at weekends, when this used to run anyway.
+  const s = mcxSessionAt();
+  if (!(s.weekday >= 1 && s.weekday <= 5) || s.minutes < EXPIRY_ALERT_FROM_MIN || s.minutes >= s.closeMin) return;
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
@@ -3477,7 +3515,28 @@ async function runExpiryAlertCheck(env: Env): Promise<void> {
   }
 }
 
-async function requireToken(env: Env): Promise<string | Response> {
+// Per-request facts the guard needs further down the router.
+interface RequestGuard {
+  ip: string;
+  /** Carried a valid owner key. Always false while no key is configured. */
+  owner: boolean;
+}
+
+const upstoxLimiter = new IpRateLimiter(UPSTOX_ROUTE_LIMIT, UPSTOX_ROUTE_WINDOW_MS);
+
+// Every route that spends the Upstox token comes through here, which makes it
+// the exact place to rate-limit "endpoints that hit Upstox": a new route that
+// needs the token is covered automatically, with no list to keep in sync.
+async function requireToken(env: Env, guard: RequestGuard): Promise<string | Response> {
+  if (!guard.owner) {
+    const r = upstoxLimiter.check(guard.ip);
+    if (!r.ok) {
+      return new Response(JSON.stringify({ error: `Too many requests from this address. Try again in ${r.retryAfterS}s.` }), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": String(r.retryAfterS) },
+      });
+    }
+  }
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return json({ error: "No token found in KV. Log in via the main kumarcmtd worker's /login first." }, 400);
   return token;
@@ -3487,7 +3546,27 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith("/api/")) {
+      // ---- Access guard (see frontend/src/utils/apiGuard.ts) ----
+      const expectedKey = env.APP_ACCESS_KEY?.trim() || null;
+      const owner = expectedKey ? await keyMatches(request.headers.get(ACCESS_KEY_HEADER), expectedKey) : false;
+      if (expectedKey && !owner && requiresKey(request.method, url.pathname)) {
+        return json(
+          {
+            error: "This needs your app access key. Open Settings → App access key and enter the key you set in Cloudflare.",
+            needsKey: true,
+          },
+          401
+        );
+      }
+      const guard: RequestGuard = { ip: request.headers.get("CF-Connecting-IP") ?? "unknown", owner };
+
       try {
+        // Lets the Settings card say whether protection is switched on and
+        // whether THIS device's key is accepted. Never echoes the key.
+        if (url.pathname === "/api/auth-status") {
+          return json({ keyConfigured: Boolean(expectedKey), keyAccepted: owner });
+        }
+
         if (url.pathname === "/api/market-status") {
           return json(getMarketStatus());
         }
@@ -3509,13 +3588,13 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/prices") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           return json(await computePrices(env, token));
         }
 
         if (url.pathname === "/api/signals") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           return json(await computeSignals(env, token));
         }
@@ -3524,13 +3603,13 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (signalMatch) {
           const symbol = signalMatch[1] as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           return json(await computeSignal(env, token, symbol));
         }
 
         if (url.pathname === "/api/scan") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           const tf = url.searchParams.get("tf") || "15";
@@ -3546,7 +3625,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         // same KV-cached series the gap study and Price-Alerts use -- no extra
         // Upstox call, and the phone has no CPU ceiling.
         if (url.pathname === "/api/history-30m") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
@@ -3557,7 +3636,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/pullback") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
@@ -3565,7 +3644,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/time-profile") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
@@ -3573,7 +3652,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/gap-study") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           if (!ALL_SYMBOLS.includes(symbol)) return json({ error: "invalid symbol" }, 400);
@@ -3581,7 +3660,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/candles") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           const symbol = url.searchParams.get("symbol") as Symbol;
           const tf = url.searchParams.get("tf") || "1D";
@@ -3602,7 +3681,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (optionsMatch) {
           const symbol = optionsMatch[1] as Symbol;
           if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "Unsupported symbol" }, 400);
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           // Strikes the client currently has an open trade tracked against --
           // always kept in the response even if the underlying has since
@@ -3619,7 +3698,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         if (depthMatch) {
           const symbol = depthMatch[1] as Symbol;
           if (!ALL_SYMBOLS.includes(symbol)) return json({ error: "Unsupported symbol" }, 400);
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           return json(await computeMarketDepth(token, symbol));
         }
@@ -3704,7 +3783,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
         }
 
         if (url.pathname === "/api/expiry-alerts") {
-          const token = await requireToken(env);
+          const token = await requireToken(env, guard);
           if (token instanceof Response) return token;
           return json({ alerts: await computeExpiryAlerts(token) });
         }

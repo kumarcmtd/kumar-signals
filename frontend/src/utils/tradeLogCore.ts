@@ -217,12 +217,50 @@ export function advanceTradeLog(
 // have that close survive even when a browser later pushes its own still-open
 // copy of the same id. Otherwise local wins (it's what's actually running).
 // Capped to MAX_HISTORY, keeping the newest by open time.
+/**
+ * Two running copies of the same trade, merged so progress only moves forward.
+ *
+ * The old rule let the local copy win whole, which silently discarded every
+ * target hit the cron recorded on a trade that was still open: the cron
+ * re-reads KV before writing and merges with THAT copy as "local", so its own
+ * T1 was overwritten by the un-advanced copy on the same write. Since the
+ * trailing stop is derived from targetsHit (T1 hit -> stop to breakeven), a
+ * trade that touched T1 while the app was shut and then fell back was booked
+ * as a stop-loss at the original stop instead of a breakeven exit.
+ *
+ * Every progress field is monotonic, so it merges without choosing a winner:
+ * a target once hit stays hit, touches and the high-water mark take the
+ * larger. Everything else comes from whichever copy got further.
+ */
+function mergeRunningProgress(a: TradeLogEntry, b: TradeLogEntry): TradeLogEntry {
+  const score = (e: TradeLogEntry) => e.targetsHit.filter(Boolean).length * 1e9 + (e.highWaterMark ?? 0);
+  const base = score(a) >= score(b) ? a : b;
+  const targetsHit: [boolean, boolean, boolean] = [
+    a.targetsHit[0] || b.targetsHit[0],
+    a.targetsHit[1] || b.targetsHit[1],
+    a.targetsHit[2] || b.targetsHit[2],
+  ];
+  const merged: TradeLogEntry = { ...base, targetsHit };
+  if (a.targetTouches || b.targetTouches) {
+    const ta = a.targetTouches ?? [0, 0, 0];
+    const tb = b.targetTouches ?? [0, 0, 0];
+    merged.targetTouches = [Math.max(ta[0], tb[0]), Math.max(ta[1], tb[1]), Math.max(ta[2], tb[2])];
+  }
+  if (typeof a.highWaterMark === "number" || typeof b.highWaterMark === "number") {
+    merged.highWaterMark = Math.max(a.highWaterMark ?? Number.NEGATIVE_INFINITY, b.highWaterMark ?? Number.NEGATIVE_INFINITY);
+  }
+  return merged;
+}
+
 export function mergeTradeLogEntryLists(local: TradeLogEntry[], server: TradeLogEntry[]): TradeLogEntry[] {
   const byId = new Map<string, TradeLogEntry>();
   for (const e of server) byId.set(e.id, e);
   for (const e of local) {
     const existing = byId.get(e.id);
-    if (!existing || !existing.closed) {
+    if (existing && !existing.closed && !e.closed) {
+      // Both copies still running: merge PROGRESS, never pick a side whole.
+      byId.set(e.id, mergeRunningProgress(e, existing));
+    } else if (!existing || !existing.closed) {
       byId.set(e.id, e);
     } else if (e.closed) {
       // Both sides closed the same trade. The FIRST close is the real one;

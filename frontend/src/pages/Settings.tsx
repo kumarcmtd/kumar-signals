@@ -4,6 +4,7 @@ import { LayoutGrid, Globe2, ListTree, Bell, ChevronRight, Smartphone, Send, Tra
 import { useAppStore } from "../store/appStore";
 import { notificationPermission } from "../utils/notify";
 import { BackupRestoreCard } from "../components/BackupRestoreCard";
+import { AccessKeyCard } from "../components/AccessKeyCard";
 import { useNtfyTopic, useSaveNtfyTopic, useDeleteNtfyTopic, useSendTestNotification, useCheckNotificationsNow } from "../api/hooks";
 
 export function Settings() {
@@ -58,6 +59,7 @@ export function Settings() {
       </SettingsGroup>
 
       <NtfyPushSetup />
+      <AccessKeyCard />
       <BackupRestoreCard />
 
       <SettingsGroup title="Trading (future)">

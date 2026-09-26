@@ -73,8 +73,38 @@ export interface WhyTodayResponse {
 }
 import type { TradeLogEntry } from "../store/appStore";
 
+// The owner's app access key, typed into Settings once and kept in THIS
+// device's storage only. The storage key contains "secret" on purpose: the
+// backup exporter strips any key that looks like a credential, so it can
+// never end up in a backup file that gets emailed or synced.
+export const ACCESS_KEY_STORAGE = "kumar-signals-access-secret";
+
+export function readAccessKey(): string | null {
+  try {
+    const v = localStorage.getItem(ACCESS_KEY_STORAGE);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAccessKey(key: string | null): void {
+  try {
+    if (key && key.trim()) localStorage.setItem(ACCESS_KEY_STORAGE, key.trim());
+    else localStorage.removeItem(ACCESS_KEY_STORAGE);
+  } catch {
+    // Storage blocked (private mode). The key simply is not remembered.
+  }
+}
+
+/** Sent on every request: harmless on open routes, and it exempts the owner from the rate limit. */
+function authHeaders(): Record<string, string> {
+  const key = readAccessKey();
+  return key ? { "X-App-Key": key } : {};
+}
+
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(`/api${path}`);
+  const res = await fetch(`/api${path}`, { headers: authHeaders() });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || `Request failed: ${res.status}`);
@@ -85,7 +115,7 @@ async function getJSON<T>(path: string): Promise<T> {
 async function sendJSON<T>(path: string, method: "POST" | "PATCH" | "DELETE", data?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: data !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers: data !== undefined ? { ...authHeaders(), "Content-Type": "application/json" } : authHeaders(),
     body: data !== undefined ? JSON.stringify(data) : undefined,
   });
   if (!res.ok) {
@@ -97,6 +127,7 @@ async function sendJSON<T>(path: string, method: "POST" | "PATCH" | "DELETE", da
 
 export const api = {
   marketStatus: () => getJSON<MarketStatus>("/market-status"),
+  authStatus: () => getJSON<{ keyConfigured: boolean; keyAccepted: boolean }>("/auth-status"),
   prices: () => getJSON<PriceCard[]>("/prices"),
   signals: () => getJSON<SignalCard[]>("/signals"),
   signal: (symbol: InstrumentSymbol) => getJSON<SignalCard>(`/signals/${symbol}`),

@@ -131,3 +131,10 @@ test("backup age is reported in plain words", () => {
   assert.equal(backupAge(new Date(now - 70 * 86_400_000).toISOString(), now), "2 months old");
   assert.equal(backupAge("not-a-date", now), "unknown date");
 });
+
+test("the app access key is never written into a backup file", async () => {
+  const { ACCESS_KEY_STORAGE } = await import("../api/client");
+  assert.equal(looksLikeSecret(ACCESS_KEY_STORAGE), true, "the storage key must trip the secret filter");
+  const b = buildBackup({ [ACCESS_KEY_STORAGE]: "my-owner-key", "kumar-signals-pro-store": "{}" }, { portfolio: null, tradeLogs: null, ntfyTopic: null }, "https://x");
+  assert.equal(JSON.stringify(b).includes("my-owner-key"), false);
+});
