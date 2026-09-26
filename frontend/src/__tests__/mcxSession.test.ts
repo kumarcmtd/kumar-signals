@@ -114,3 +114,67 @@ test("a past expiry is not live, a future one is", () => {
   assert.equal(expiryStillLive("2026-09-18", ist("2026-09-24", "10:00")), false);
   assert.equal(expiryStillLive("2026-10-15", ist("2026-09-24", "10:00")), true);
 });
+
+// ---------------------------------------------------------------------------
+// Fast IST day keys: must equal the Intl-based code they replaced, exactly.
+// ---------------------------------------------------------------------------
+import { istDayNumber, sessionDayNumber, dayNumberToKey, lastRunStart } from "../utils/mcxSession";
+import { sessionDayKey } from "../utils/tradeLogStats";
+
+// The implementations these replaced, kept verbatim as the reference.
+const OLD_IST_DATE = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
+const OLD_IST_FMT = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false });
+function oldSessionDayKey(ts: number): string {
+  const map: Record<string, string> = {};
+  for (const p of OLD_IST_FMT.formatToParts(ts)) map[p.type] = p.value;
+  const year = parseInt(map.year, 10), month = parseInt(map.month, 10), day = parseInt(map.day, 10);
+  let hour = parseInt(map.hour, 10);
+  if (hour === 24) hour = 0;
+  if (hour < 9) {
+    const prev = new Date(Date.UTC(year, month - 1, day));
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    return prev.toISOString().slice(0, 10);
+  }
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+test("arithmetic IST day equals the Intl formatter on 50,000 random instants", () => {
+  let seed = 3;
+  for (let i = 0; i < 50_000; i += 1) {
+    seed = (seed * 16807) % 2147483647;
+    const ms = Date.UTC(2020, 0, 1) + (seed / 2147483647) * 10 * 365 * 86_400_000;
+    assert.equal(dayNumberToKey(istDayNumber(ms)), OLD_IST_DATE.format(new Date(ms)));
+    assert.equal(sessionDayKey(ms), oldSessionDayKey(ms));
+  }
+});
+
+test("the boundaries are exact: midnight IST and the 09:00 session cut", () => {
+  const at = (s: string) => new Date(s).getTime();
+  assert.equal(sessionDayKey(at("2026-09-24T08:59:59.999+05:30")), "2026-09-23");
+  assert.equal(sessionDayKey(at("2026-09-24T09:00:00+05:30")), "2026-09-24");
+  assert.equal(dayNumberToKey(istDayNumber(at("2026-09-23T23:59:59.999+05:30"))), "2026-09-23");
+  assert.equal(dayNumberToKey(istDayNumber(at("2026-09-24T00:00:00+05:30"))), "2026-09-24");
+  assert.equal(sessionDayKey(at("2026-09-24T09:00:00+05:30")), oldSessionDayKey(at("2026-09-24T09:00:00+05:30")));
+});
+
+test("backward scan finds the same session start as the old forward Intl scan", () => {
+  // 14 days of 15-minute bars, 09:00-23:30, plus a partial last day.
+  const bars: { date: string }[] = [];
+  for (let d = 1; d <= 15; d += 1) {
+    if ([6, 7, 13, 14].includes(d)) continue; // weekends
+    const end = d === 15 ? 12 * 60 : 23 * 60 + 30;
+    for (let m = 9 * 60; m < end; m += 15) bars.push({ date: `2026-09-${String(d).padStart(2, "0")}T${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:00+05:30` });
+  }
+  const ms = (b: { date: string }) => new Date(b.date).getTime();
+  const lastDay = OLD_IST_DATE.format(new Date(bars[bars.length - 1].date));
+  const oldIdx = bars.findIndex((c) => OLD_IST_DATE.format(new Date(c.date)) === lastDay);
+  assert.equal(lastRunStart(bars, (b) => istDayNumber(ms(b))), oldIdx);
+  const lastKey = oldSessionDayKey(ms(bars[bars.length - 1]));
+  const oldSessionIdx = bars.findIndex((c) => oldSessionDayKey(ms(c)) === lastKey);
+  assert.equal(lastRunStart(bars, (b) => sessionDayNumber(ms(b))), oldSessionIdx);
+});
+
+test("lastRunStart handles empty and single-day input", () => {
+  assert.equal(lastRunStart([], () => 0), -1);
+  assert.equal(lastRunStart([1, 1, 1], (x) => x), 0);
+});

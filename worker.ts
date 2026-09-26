@@ -49,7 +49,7 @@ export default {
   // Cloudflare Cron Trigger (see wrangler.jsonc "triggers.crons") -- runs
   // independent of any browser tab being open, which is what makes push
   // notifications actually reach the user with the app fully closed.
-  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    await runScheduled(env, ctx);
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    await runScheduled(env, ctx, event.cron);
   },
 };

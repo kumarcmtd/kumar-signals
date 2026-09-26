@@ -1,7 +1,7 @@
 import type { Candle, Direction, IndicatorSnapshot } from "../types";
 import { rsi, computeIndicatorSnapshot, macd } from "./indicators";
 import { detectCandlePattern, findSwingPoints, analyzeStructure, type SwingPoint, type StructureAnalysis } from "./priceAction";
-import { sessionDayKey } from "./tradeLogStats";
+import { lastRunStart, sessionDayNumber } from "./mcxSession";
 import { findPlaybookSetup, type ConfluenceFactor } from "./kimiPlaybook";
 import { assessEntryQuality } from "./entryQuality";
 
@@ -539,10 +539,13 @@ export function scanCrudeOilSetups(candles: Candle[]): ScannedResult[] {
 
 // Candles belonging to the same MCX session day as the most recent candle --
 // used as the Opening Range Breakout's "today so far" window.
+//
+// Same session-day rule as sessionDayKey (before 09:00 IST is the previous
+// day), computed arithmetically and from the end -- the Intl-based scan over
+// every bar was a large share of Best Call's CPU in the cron.
 function todaysCandles(candles: Candle[]): Candle[] {
   if (!candles.length) return [];
-  const lastKey = sessionDayKey(new Date(candles[candles.length - 1].date).getTime());
-  const idx = candles.findIndex((c) => sessionDayKey(new Date(c.date).getTime()) === lastKey);
+  const idx = lastRunStart(candles, (c) => sessionDayNumber(new Date(c.date).getTime()));
   return idx === -1 ? candles : candles.slice(idx);
 }
 

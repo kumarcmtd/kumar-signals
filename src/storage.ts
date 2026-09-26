@@ -132,6 +132,61 @@ export async function getTradeLogsFromKv(env: Env): Promise<Record<string, unkno
   }
 }
 
+// How many trades are still running is stored as METADATA on the same KV
+// write, so the cron can learn "nothing is open" without parsing the whole
+// log. That log is the largest thing the cron touches (over 1 MB with a few
+// hundred closed calls per page) and parsing it every five minutes, all night
+// and all weekend, was a steady share of the free plan's 10 ms CPU budget.
+// Same single write as before -- metadata costs no extra KV write.
+function countOpen(logs: Record<string, unknown>): number {
+  let open = 0;
+  for (const list of Object.values(logs)) {
+    if (!Array.isArray(list) || !list.length) continue;
+    const last = list[list.length - 1] as { closed?: unknown } | null;
+    if (last && last.closed === false) open += 1;
+  }
+  return open;
+}
+
+// `rev` changes on every save, so a writer can ask "has anyone else written
+// since I read?" without re-reading the log (see tradeLogRevision).
+function newRev(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function saveTradeLogsToKv(env: Env, logs: Record<string, unknown>): Promise<void> {
-  await env.COMMODITY_KV.put(TRADE_LOGS_KV_KEY, JSON.stringify(logs));
+  await env.COMMODITY_KV.put(TRADE_LOGS_KV_KEY, JSON.stringify(logs), { metadata: { open: countOpen(logs), rev: newRev() } });
+}
+
+/** The log together with the revision it was read at. */
+export async function getTradeLogsWithRev(env: Env): Promise<{ logs: Record<string, unknown>; rev: string | null }> {
+  const { value, metadata } = await env.COMMODITY_KV.getWithMetadata<{ rev?: string }>(TRADE_LOGS_KV_KEY, "text");
+  if (!value) return { logs: {}, rev: null };
+  try {
+    const parsed = JSON.parse(value);
+    return { logs: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}, rev: typeof metadata?.rev === "string" ? metadata.rev : null };
+  } catch {
+    return { logs: {}, rev: null };
+  }
+}
+
+/** Current revision, read from metadata only -- the log is never decoded. */
+export async function tradeLogRevision(env: Env): Promise<string | null> {
+  const { value, metadata } = await env.COMMODITY_KV.getWithMetadata<{ rev?: string }>(TRADE_LOGS_KV_KEY, "stream");
+  if (value) await value.cancel().catch(() => undefined);
+  return typeof metadata?.rev === "string" ? metadata.rev : null;
+}
+
+/**
+ * Running-trade count from the log's metadata, without reading the log.
+ *
+ * Null when unknown -- a log written before this existed carries no metadata --
+ * and the caller must then fall back to a full read. The value is streamed and
+ * cancelled unread, so the megabyte body is never decoded or parsed.
+ */
+export async function openTradeCountFromKv(env: Env): Promise<number | null> {
+  const { value, metadata } = await env.COMMODITY_KV.getWithMetadata<{ open?: number }>(TRADE_LOGS_KV_KEY, "stream");
+  if (value) await value.cancel().catch(() => undefined);
+  if (!value) return 0;
+  return typeof metadata?.open === "number" ? metadata.open : null;
 }

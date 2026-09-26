@@ -159,3 +159,43 @@ export function expiryStillLive(expiry: string, now: number = Date.now()): boole
   if (!m) return Number.isFinite(+new Date(expiry)) ? +new Date(expiry) >= now : false;
   return now < mcxCloseInstant(Number(m[1]), Number(m[2]), Number(m[3]));
 }
+
+// ---- Fast IST day keys ------------------------------------------------------
+// IST is a fixed UTC+05:30 with no daylight saving, so the IST calendar day of
+// an instant is plain arithmetic. These replace per-candle calls to
+// Intl.DateTimeFormat, which the Worker profiler showed as the single largest
+// CPU cost in the cron's Best Call analysis -- each format call costs several
+// microseconds and they were being made for every bar of every previous day.
+// Tested against the Intl-based versions they replace.
+
+/** IST calendar day as an integer (days since the epoch, in IST). */
+export function istDayNumber(ms: number): number {
+  return Math.floor((ms + IST_OFFSET_MS) / DAY_MS);
+}
+
+/** MCX session day: an instant before 09:00 IST belongs to the previous day. */
+export function sessionDayNumber(ms: number): number {
+  return Math.floor((ms + IST_OFFSET_MS - MCX_OPEN_MIN * 60_000) / DAY_MS);
+}
+
+/** "YYYY-MM-DD" for a day number from istDayNumber / sessionDayNumber. */
+export function dayNumberToKey(day: number): string {
+  return new Date(day * DAY_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Index of the first bar in the final run of bars sharing the last bar's key.
+ *
+ * Scans BACKWARD from the end, so on a many-day array it touches only the
+ * last session's bars. For candles in time order (as every source here
+ * provides them) this equals findIndex-from-the-start, which is what it
+ * replaces.
+ */
+export function lastRunStart<T>(items: T[], key: (item: T) => number): number {
+  if (!items.length) return -1;
+  const last = key(items[items.length - 1]);
+  let i = items.length - 1;
+  while (i > 0 && key(items[i - 1]) === last) i -= 1;
+  return i;
+}
+

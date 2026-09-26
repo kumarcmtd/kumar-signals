@@ -2,6 +2,7 @@
 // upcoming, memory + KV) and daily / intraday / stitched-history candles.
 
 import { expiryStillLive } from "../frontend/src/utils/mcxSession";
+import { resampleCandles } from "../frontend/src/utils/candleResample";
 import { type Candle, type Env, type FutureInfo, UPSTOX_HIST_URL, UPSTOX_INTRADAY_URL, UPSTOX_SEARCH_URL, upstoxJson } from "./env";
 
 // ---- Futures contract list ----
@@ -190,48 +191,100 @@ async function fetchIntradayCandles(token: string, instrumentKey: string): Promi
 
 const HIST_INTRADAY_CACHE_TTL_SECONDS = 4 * 60 * 60;
 
-// 1-minute candles for the days BEFORE today, fetched from the historical
-// (not intraday) endpoint and cached in KV -- this data is frozen the
-// moment the trading day ends, so there is no reason to re-fetch it from
-// Upstox on every poll. Only today's slice (getIntradayCandles) needs to
-// stay live. A cache miss or an Upstox error here degrades gracefully to an
-// empty array rather than failing the whole request, so the caller falls
-// back to today-only behavior instead of breaking.
-export async function getHistoricalIntradayCandles(env: Env, token: string, instrumentKey: string, days: number): Promise<Candle[]> {
+// Prior-days history, PRE-BUCKETED.
+//
+// This used to cache the raw 1-minute candles for the last 20 days -- about
+// 12,000 bars, 1.9 MB of JSON -- and every candle request (8 per Best Call
+// tick in the cron, plus every chart poll from the app) re-read and re-parsed
+// all of it, parsed a date on every bar, and re-bucketed the lot. Measured:
+// ~20 ms of CPU per request, twice the free plan's entire 10 ms budget.
+//
+// Those past days never change. So they are fetched once, bucketed ONCE into
+// every timeframe the app uses, and kept in isolate memory with a small KV copy
+// (~230 KB) behind it; a request then only buckets today's minutes (~870 bars at
+// most) and appends them. Measured: ~1.6 ms for all four cron timeframes of one
+// symbol instead of ~80 ms, with output byte-identical to the old full
+// re-bucketing (session-anchored buckets never span two days, so bucketing the
+// days separately and joining them is exact).
+//
+// A failure degrades to null, and the caller falls back to today-only data,
+// exactly as the old code did on an empty result.
+export const PREBUCKETED_TFS = new Set([5, 15, 30, 60, 240]);
+const HIST_BARS_MEM_TTL_MS = HIST_INTRADAY_CACHE_TTL_SECONDS * 1000;
+const priorBarsMem = new Map<string, { at: number; bars: Record<string, Candle[]> }>();
+
+async function fetchPriorMinutes(token: string, instrumentKey: string, toStr: string, fromStr: string): Promise<Candle[]> {
+  const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/1minute/${toStr}/${fromStr}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const json: any = await upstoxJson(res, "prior-day price history");
+  if (json.status !== "success" || !json.data || !json.data.candles) return [];
+  const candles: Candle[] = json.data.candles.map((c: any[]) => ({
+    date: c[0],
+    open: c[1],
+    high: c[2],
+    low: c[3],
+    close: c[4],
+    volume: c[5] ?? 0,
+    oi: c[6] ?? 0,
+  }));
+  candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  return candles;
+}
+
+/**
+ * The days BEFORE today, already bucketed to `tfMinutes`. Null when the
+ * timeframe is not pre-bucketed, or when history could not be loaded.
+ */
+export async function getPriorDayBars(env: Env, token: string, instrumentKey: string, days: number, tfMinutes: number): Promise<Candle[] | null> {
+  if (!PREBUCKETED_TFS.has(tfMinutes)) return null;
   const to = new Date();
   to.setDate(to.getDate() - 1);
   const from = new Date();
   from.setDate(from.getDate() - days);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   const toStr = fmt(to);
-  const cacheKey = `hist1m:${instrumentKey}:${toStr}`;
+  const cacheKey = `hist1m-bars:v1:${instrumentKey}:${toStr}:${days}`;
+
+  const mem = priorBarsMem.get(cacheKey);
+  if (mem && Date.now() - mem.at < HIST_BARS_MEM_TTL_MS) return mem.bars[tfMinutes] ?? null;
 
   const cached = await env.COMMODITY_KV.get(cacheKey);
   if (cached) {
     try {
-      return JSON.parse(cached) as Candle[];
+      const bars = JSON.parse(cached) as Record<string, Candle[]>;
+      priorBarsMem.set(cacheKey, { at: Date.now(), bars });
+      return bars[tfMinutes] ?? null;
     } catch {
-      // fall through and refetch on a corrupt cache entry
+      // fall through and rebuild on a corrupt cache entry
     }
   }
 
   try {
-    const url = `${UPSTOX_HIST_URL}/${encodeURIComponent(instrumentKey)}/1minute/${toStr}/${fmt(from)}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-    const json: any = await upstoxJson(res, "prior-day price history");
-    if (json.status !== "success" || !json.data || !json.data.candles) return [];
-    const candles: Candle[] = json.data.candles.map((c: any[]) => ({
-      date: c[0],
-      open: c[1],
-      high: c[2],
-      low: c[3],
-      close: c[4],
-      volume: c[5] ?? 0,
-      oi: c[6] ?? 0,
-    }));
-    candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
-    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(candles), { expirationTtl: HIST_INTRADAY_CACHE_TTL_SECONDS });
-    return candles;
+    const minutes = await fetchPriorMinutes(token, instrumentKey, toStr, fmt(from));
+    if (!minutes.length) return null;
+    const bars: Record<string, Candle[]> = {};
+    for (const tf of PREBUCKETED_TFS) bars[tf] = resampleCandles(minutes, tf);
+    priorBarsMem.set(cacheKey, { at: Date.now(), bars });
+    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(bars), { expirationTtl: HIST_INTRADAY_CACHE_TTL_SECONDS });
+    return bars[tfMinutes] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Raw prior-days 1-minute candles, for a timeframe that is not pre-bucketed.
+ * Nothing in the app requests one today; kept so an unusual timeframe still
+ * works exactly as before rather than silently losing its history.
+ */
+export async function getHistoricalIntradayCandles(env: Env, token: string, instrumentKey: string, days: number): Promise<Candle[]> {
+  const to = new Date();
+  to.setDate(to.getDate() - 1);
+  const from = new Date();
+  from.setDate(from.getDate() - days);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  try {
+    return await fetchPriorMinutes(token, instrumentKey, fmt(to), fmt(from));
   } catch {
     return [];
   }

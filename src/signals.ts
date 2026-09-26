@@ -5,7 +5,7 @@ import { resampleCandles } from "../frontend/src/utils/candleResample";
 import { analyzeCommodity, type PatternResult } from "../frontend/src/utils/chartPatterns";
 import { ALL_SYMBOLS, type Candle, type Env, type FutureInfo, OPTION_SYMBOLS, r2, type Symbol } from "./env";
 import { analyzeChain, nearestStrikes, resolveOptionChainAcrossFutures } from "./optionChain";
-import { getHistoricalCandles, getHistoricalIntradayCandles, getIntradayCandles, getNearestFuture } from "./upstox";
+import { getHistoricalCandles, getHistoricalIntradayCandles, getIntradayCandles, getNearestFuture, getPriorDayBars } from "./upstox";
 
 interface TradeSignal {
   action: string;
@@ -190,11 +190,19 @@ export async function getCandlesForTF(env: Env, token: string, fut: FutureInfo, 
   // way an actual chart works, instead of restarting from zero every
   // morning. A failure here just falls back to today-only data, same as
   // the previous behavior, rather than breaking the request.
-  const priorDays = await getHistoricalIntradayCandles(env, token, fut.instrument_key, PRIOR_HISTORY_DAYS);
   const todayStart = oneMinToday.length ? +new Date(oneMinToday[0].date) : Infinity;
-  const combined = [...priorDays.filter((c) => +new Date(c.date) < todayStart), ...oneMinToday];
-
-  const candles = tfMinutes === 1 ? combined : resampleCandles(combined, tfMinutes);
+  let candles: Candle[];
+  const priorBars = await getPriorDayBars(env, token, fut.instrument_key, PRIOR_HISTORY_DAYS, tfMinutes);
+  if (priorBars) {
+    // The fast path: past days arrive already bucketed (see getPriorDayBars),
+    // so only today's minutes are bucketed here. Identical output to
+    // bucketing everything together, at a fraction of the CPU.
+    candles = [...priorBars.filter((b) => +new Date(b.date) < todayStart), ...resampleCandles(oneMinToday, tfMinutes)];
+  } else {
+    const priorDays = await getHistoricalIntradayCandles(env, token, fut.instrument_key, PRIOR_HISTORY_DAYS);
+    const combined = [...priorDays.filter((c) => +new Date(c.date) < todayStart), ...oneMinToday];
+    candles = tfMinutes === 1 ? combined : resampleCandles(combined, tfMinutes);
+  }
   if (candles.length < 15) return { error: "Not enough bars yet at this timeframe — try again later in the session" };
   return candles;
 }

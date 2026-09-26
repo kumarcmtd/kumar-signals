@@ -1,4 +1,5 @@
 import type { Candle, Direction, IndicatorSnapshot } from "../types";
+import { istDayNumber, lastRunStart } from "./mcxSession";
 
 function ema(values: number[], period: number): number[] {
   if (values.length === 0) return [];
@@ -136,17 +137,19 @@ export function vwap(candles: Candle[]): number | null {
   return cumPV / cumV;
 }
 
-const IST_DATE_FORMATTER = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
 
 // VWAP is conventionally anchored to a single trading session, resetting
 // each day -- but candle arrays can now span many days (fetched history
 // stitched onto today's live feed for the higher timeframes). Restrict to
 // just the most recent session's bars before computing it, regardless of
 // how far back the rest of the array goes.
+//
+// Found from the END with arithmetic IST days: this used to run an
+// Intl.DateTimeFormat over every bar of every earlier day on each call, which
+// profiled as the largest single CPU cost in the cron's Best Call analysis.
 function latestSessionOnly(candles: Candle[]): Candle[] {
   if (!candles.length) return candles;
-  const lastDay = IST_DATE_FORMATTER.format(new Date(candles[candles.length - 1].date));
-  const idx = candles.findIndex((c) => IST_DATE_FORMATTER.format(new Date(c.date)) === lastDay);
+  const idx = lastRunStart(candles, (c) => istDayNumber(new Date(c.date).getTime()));
   return idx === -1 ? candles : candles.slice(idx);
 }
 

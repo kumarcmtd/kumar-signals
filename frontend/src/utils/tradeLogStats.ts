@@ -1,38 +1,19 @@
 import type { TradeLogEntry } from "../store/appStore";
 import { DECISION_LABEL, type Decision6 } from "./timeframeEngine";
+import { dayNumberToKey, sessionDayNumber } from "./mcxSession";
 
 // MCX commodity sessions run roughly 09:00 to 23:30/23:55 IST -- a single
 // trading day, even though it crosses into the evening. Grouping by plain
 // calendar date (midnight cutoff) would be correct here since the session
 // never crosses midnight, but we still resolve everything through IST
 // explicitly so a viewer in any other timezone gets the same day buckets.
-const IST_FORMATTER = new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Kolkata",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  hour12: false,
-});
-
+// Arithmetic rather than Intl.formatToParts: IST is a fixed offset with no
+// daylight saving, so this is exact, and it runs per trade/per candle in hot
+// paths where the formatter was measurably expensive. Anything before 09:00
+// IST (e.g. a trade that closes a few minutes after midnight) belongs to the
+// previous session day.
 export function sessionDayKey(ts: number): string {
-  const parts = IST_FORMATTER.formatToParts(ts);
-  const map: Record<string, string> = {};
-  for (const p of parts) map[p.type] = p.value;
-  const year = parseInt(map.year, 10);
-  const month = parseInt(map.month, 10);
-  const day = parseInt(map.day, 10);
-  let hour = parseInt(map.hour, 10);
-  if (hour === 24) hour = 0;
-
-  // Anything closed before 9am IST belongs to the previous session day
-  // (e.g. a trade that technically closes a few minutes after midnight).
-  if (hour < 9) {
-    const prev = new Date(Date.UTC(year, month - 1, day));
-    prev.setUTCDate(prev.getUTCDate() - 1);
-    return prev.toISOString().slice(0, 10);
-  }
-  return `${map.year}-${map.month}-${map.day}`;
+  return dayNumberToKey(sessionDayNumber(ts));
 }
 
 function formatDayLabel(dateKey: string): string {

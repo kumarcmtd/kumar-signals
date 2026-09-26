@@ -178,16 +178,34 @@ export async function serveTimeProfile(env: Env, token: string, symbol: Symbol):
  * from the Cron, so the expensive path runs on a schedule rather than while a
  * trader waits. Cheap on a warm day: one KV read and nothing else.
  */
+// The day's profile is built once per symbol, and building one is the most
+// CPU-expensive thing the cron does (90 days of half-hour bars). So each run
+// only CHECKS whether today's profile exists -- streamed and cancelled, never
+// parsed -- and builds at most ONE missing profile. It used to call the full
+// computeTimeProfile for both symbols every tick, parsing the cached profile
+// each time just to discover it was already there.
 export async function warmTimeProfiles(env: Env): Promise<void> {
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
   for (const symbol of OPTION_SYMBOLS) {
     try {
+      const fut = await getNearestFuture(token, symbol);
+      if (!fut) continue;
+      const exists = await env.COMMODITY_KV.get(timeProfileCacheKey(fut.instrument_key), "stream");
+      if (exists) {
+        await exists.cancel().catch(() => undefined);
+        continue;
+      }
       await computeTimeProfile(env, token, symbol as Symbol);
+      return;
     } catch {
       // A warm failure is not worth surfacing anywhere -- the next tick retries.
     }
   }
+}
+
+function timeProfileCacheKey(instrumentKey: string): string {
+  return `timeprofile:v2:${instrumentKey}:${new Date().toISOString().slice(0, 10)}`;
 }
 
 async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Promise<TimeProfileResponse> {
@@ -200,7 +218,7 @@ async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Prom
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { ...empty, error: "No instrument found" };
 
-  const cacheKey = `timeprofile:v2:${fut.instrument_key}:${new Date().toISOString().slice(0, 10)}`;
+  const cacheKey = timeProfileCacheKey(fut.instrument_key);
   const cached = await env.COMMODITY_KV.get(cacheKey);
   if (cached) {
     try {

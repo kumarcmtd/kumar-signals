@@ -303,7 +303,9 @@ async function buildEnergyNews(env: Env): Promise<NewsFetchResult> {
   const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);
   const events = clusterEvents(scored);
   const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus, builtAt: new Date(now).toISOString() };
-  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
+  // builtAt also goes in METADATA so the cron can tell how old the cache is
+  // without reading or parsing it (see warmEnergyNews).
+  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS, metadata: { builtAt: now } });
   return result;
 }
 
@@ -330,11 +332,33 @@ export async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
  * most ~5 minutes old and no browser request ever pays to rebuild them.
  * Failures are swallowed: a bad tick leaves the previous cache in place.
  */
-export async function warmEnergyNews(env: Env): Promise<void> {
+/**
+ * Rebuild the cache only once it is close to expiring.
+ *
+ * This used to rebuild unconditionally on every cron tick -- every feed
+ * fetched, parsed, scored and clustered, and the result written to KV, every
+ * five minutes around the clock. That was ~35 outbound fetches of the free
+ * plan's 50-per-run allowance, a large share of its 10 ms CPU, and 288 of its
+ * 1,000 daily KV writes, to refresh a cache that is only meant to change every
+ * 30 minutes. Now the age is read from the cache's metadata (streamed and
+ * cancelled, never parsed) and it rebuilds only inside the last few minutes
+ * before expiry, so a page never finds it empty.
+ */
+const NEWS_REBUILD_BEFORE_EXPIRY_MS = 8 * 60 * 1000;
+
+/** Returns true when it actually rebuilt (that run's CPU budget is then spent). */
+export async function warmEnergyNews(env: Env): Promise<boolean> {
   try {
+    const { value, metadata } = await env.COMMODITY_KV.getWithMetadata<{ builtAt?: number }>(NEWS_CACHE_KV_KEY, "stream");
+    if (value) await value.cancel().catch(() => undefined);
+    const age = value && typeof metadata?.builtAt === "number" ? Date.now() - metadata.builtAt : Number.POSITIVE_INFINITY;
+    if (age < NEWS_CACHE_TTL_SECONDS * 1000 - NEWS_REBUILD_BEFORE_EXPIRY_MS) return false;
     await buildEnergyNews(env);
+    return true;
   } catch {
     // A failed warm is not worth failing the whole Cron run for -- the
-    // previous cached payload keeps serving until the next tick.
+    // previous cached payload keeps serving until the next tick. Treated as
+    // "rebuilt" so the same run does not start a second heavy job.
+    return true;
   }
 }

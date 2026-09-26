@@ -20,11 +20,11 @@
     "binding": "ASSETS",
     "run_worker_first": true
   },
-  // Drives the Best Call background push check (scheduled() in worker.ts) --
-  // independent of any browser tab being open. Every 5 minutes during market
-  // hours is frequent enough to catch a new pick promptly without hammering
-  // the Upstox API rate limits.
+  // Background work that runs with the app closed: the Ai20-20 push, trade
+  // tracking and the end-of-day close, and keeping news/profiles warm.
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    // Three triggers = three separate invocations, each with its own 10 ms of
+    // CPU on the free plan. What runs on which is in src/cron.ts.
+    "crons": ["*/5 * * * *", "1-59/5 * * * *", "2-59/10 * * * *"]
   }
 }
