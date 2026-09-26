@@ -21,6 +21,7 @@
 
 import type { NewsEvent, ScoredNewsArticle, AffectedMarket } from "./newsScoring";
 import { ageMinutes, formatAge, formatStamp } from "./aiFlashEngine";
+import { mcxSessionAt, MCX_OPEN_MIN } from "./mcxSession";
 
 export type GptCategory = "crude" | "gas" | "war" | "opec" | "lng" | "weather";
 export type PriorityLevel = 1 | 2 | 3 | 4 | 5;
@@ -823,16 +824,17 @@ export interface SessionInfo {
   minutesToOpen: number | null;
 }
 
-const MCX_OPEN_MIN = 9 * 60;
-const MCX_CLOSE_MIN = 23 * 60 + 30;
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 export function sessionInfo(now: number = Date.now()): SessionInfo {
-  const ist = new Date(now + 5.5 * 60 * 60 * 1000);
-  const day = ist.getUTCDay();
-  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  // Open/closed comes from the shared DST-aware session clock. This used to
+  // hard-code 23:30, so every winter night it called MCX shut 25 minutes
+  // before it actually was.
+  const s = mcxSessionAt(now);
+  const day = s.weekday;
+  const minutes = s.minutes;
   const isWeekday = day >= 1 && day <= 5;
-  const isOpen = isWeekday && minutes >= MCX_OPEN_MIN && minutes < MCX_CLOSE_MIN;
+  const isOpen = s.isOpen;
   const isWeekend = day === 0 || day === 6;
 
   // Walk forward to the next weekday 9:00 AM IST.

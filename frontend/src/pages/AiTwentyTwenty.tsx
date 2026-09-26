@@ -51,6 +51,7 @@ const STATUS_LABEL: Record<TradeLogStatus, string> = {
   stopped_after_t1: "Closed after T1 (T2 hit)",
   target3_hit: "Target 3 Hit",
   closed_manual: "Closed Manually",
+  closed_eod: "Closed at Day End",
 };
 const STATUS_COLOR: Record<TradeLogStatus, string> = {
   running: "text-sky-600",
@@ -59,6 +60,7 @@ const STATUS_COLOR: Record<TradeLogStatus, string> = {
   stopped_after_t1: "text-emerald-600",
   target3_hit: "text-emerald-600",
   closed_manual: "text-slate-500",
+  closed_eod: "text-slate-500",
 };
 
 // Trade-log keys here are "TWENTY20-<SYMBOL>-<TF>" -- symbol is always one

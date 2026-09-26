@@ -1,5 +1,7 @@
+import { mcxSessionAt } from "./mcxSession";
+
 // MCX energy is a price-taker off the global benchmarks, and those trade a
-// near-24-hour session while MCX (9am-11:55pm IST) is shut -- which is why a
+// near-24-hour session while MCX (9am-11:30/11:55pm IST) is shut -- which is why a
 // TradingView watchlist shows WTI / Brent / Henry Hub live and moving at, say,
 // 6:30am IST even though the Indian market is "CLOSED". This resolves which
 // global energy venues are open RIGHT NOW so the app can show that context.
@@ -78,12 +80,12 @@ export function cmeEnergyOpen(now: Date = new Date()): boolean {
   return !(minutes >= BREAK_START && minutes < BREAK_END); // Mon-Thu: open except the daily halt
 }
 
-// MCX energy: Mon-Fri, ~9:00am-11:55pm IST. Falls back to this clock rule when
-// the live market-status flag isn't provided.
+// MCX energy: Mon-Fri, 9:00am IST to a DST-aware close (11:30pm or 11:55pm).
+// Falls back to this clock rule when the live market-status flag isn't
+// provided. Delegates to the shared session clock -- this used to hard-code
+// 11:55pm, so all summer it reported MCX open for 25 minutes after it shut.
 export function mcxOpenByClock(now: Date = new Date()): boolean {
-  const { weekday, minutes } = partsInZone(now, "Asia/Kolkata");
-  if (weekday < 1 || weekday > 5) return false;
-  return minutes >= 9 * 60 && minutes < 23 * 60 + 55;
+  return mcxSessionAt(now.getTime()).isOpen;
 }
 
 // The venues that matter for Crude Oil & Natural Gas, with live open/closed.

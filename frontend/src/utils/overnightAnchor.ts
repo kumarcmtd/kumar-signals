@@ -16,8 +16,8 @@
 // because MCX did not close on Saturday or Sunday. One or more means a close
 // was missed and the card must say so instead of mislabelling the window.
 
-/** MCX shuts at 23:30 IST, which is 18:00 UTC on the same calendar date. */
-const CLOSE_HOUR_UTC = 18;
+import { mcxCloseInstant } from "./mcxSession";
+
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 interface IstDate {
@@ -32,9 +32,14 @@ function istDateOf(ms: number): IstDate {
   return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
 }
 
-/** The instant MCX closes on a given IST date. */
+/**
+ * The instant MCX closes on a given IST date -- from the shared DST-aware
+ * clock, so this can never disagree with the Worker about when a close
+ * happened. A fixed 23:30 here would count a winter close 25 minutes early,
+ * flagging a perfectly current snapshot as stale mid-session.
+ */
 function closeInstant(x: IstDate): number {
-  return Date.UTC(x.y, x.m - 1, x.d, CLOSE_HOUR_UTC, 0, 0, 0);
+  return mcxCloseInstant(x.y, x.m, x.d);
 }
 
 function isWeekday(x: IstDate): boolean {

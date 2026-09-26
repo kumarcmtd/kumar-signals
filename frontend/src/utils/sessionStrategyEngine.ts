@@ -1,5 +1,6 @@
 import type { TimeframeAnalysis } from "./timeframeEngine";
 import type { PriceSpeedReading } from "./priceSpeed";
+import { mcxSessionAt, closeLabel, MCX_OPEN_MIN } from "./mcxSession";
 
 // "AI Own" -- a session-timing strategy for MCX Crude Oil & Natural Gas.
 //
@@ -58,9 +59,9 @@ export interface SessionState {
   closedReason: string | null;
 }
 
-// MCX energy trades Mon-Fri, ~9:00am-11:55pm IST.
-const MCX_OPEN_MIN = 9 * 60;
-const MCX_CLOSE_MIN = 23 * 60 + 55;
+// MCX energy trades Mon-Fri, 9:00am IST to a DST-aware close. The close used to
+// be hard-coded to 11:55pm, which is only right in winter; it now comes from
+// the shared session clock.
 export function isTradingDay(weekday: number): boolean {
   return weekday >= 1 && weekday <= 5;
 }
@@ -74,14 +75,18 @@ function effectiveImpact(w: SessionWindow, weekday: number): Impact {
 // market-status flag, resolve the session state. marketOpen is authoritative
 // when provided (so it also catches MCX holidays the calendar rules can't);
 // when it's undefined, the weekend + trading-hours rules stand in.
-export function sessionStateFor(istMinutes: number, istWeekday: number, marketOpen?: boolean): SessionState {
+//
+// `closeMin` defaults to today's DST-aware close. It is a parameter rather than
+// read inside so the function stays pure over its inputs and a test can pin
+// either season without touching the clock.
+export function sessionStateFor(istMinutes: number, istWeekday: number, marketOpen?: boolean, closeMin: number = mcxSessionAt().closeMin): SessionState {
   const eiaTodayFor = isTradingDay(istWeekday) ? POWER_WINDOWS.find((w) => w.eiaWeekday === istWeekday)?.eiaSymbol ?? null : null;
 
   let closedReason: string | null = null;
   if (marketOpen === false) closedReason = "Market is closed right now — no live windows.";
   else if (marketOpen === undefined) {
     if (!isTradingDay(istWeekday)) closedReason = "Weekend — MCX is closed. Windows resume Monday morning.";
-    else if (istMinutes < MCX_OPEN_MIN || istMinutes >= MCX_CLOSE_MIN) closedReason = "Outside MCX trading hours (9:00 AM–11:55 PM IST).";
+    else if (istMinutes < MCX_OPEN_MIN || istMinutes >= closeMin) closedReason = `Outside MCX trading hours (9:00 AM–${closeLabel(closeMin)} IST).`;
   }
   if (closedReason) {
     return { istMinutes, istWeekday, active: null, next: null, minutesToNext: null, activeImpact: null, eiaTodayFor, closedReason };

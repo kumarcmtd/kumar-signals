@@ -12,12 +12,15 @@ import { evaluateDirectionalGate } from "./frontend/src/utils/directionalGateEng
 import { scanAllSetups } from "./frontend/src/utils/kimiScanner";
 import { eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall, type BestCallPick } from "./frontend/src/utils/bestCallSelector";
 import { scoreArticles, scoreEiaChange, clusterEvents, stripPublisherSuffix, type RawNewsArticle, type ScoredNewsArticle, type EiaScoreResult, type NewsEvent, type AffectedMarket } from "./frontend/src/utils/newsScoring";
-import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
+import { advanceOpenEntry, mergeTradeLogs, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, runningBeforeClose, closeRunningAtSessionEnd, type TradeLogEntry } from "./frontend/src/utils/tradeLogCore";
 import { resolvePrevClose } from "./frontend/src/utils/globalMarketHours";
 import { analyzeImmediate, scanForAiTwenty, projectPremium20, LOT_SIZE as TWENTY_LOT_SIZE } from "./frontend/src/utils/aiTwentyTwentyEngine";
 import { classifyNewsDuration, leanFromScore, type WhyDriver, type WhyCommodity } from "./frontend/src/utils/whyTodaySummary";
 import { buildSlotSessions, buildTimeProfile, testClaims, scheduledEvents, eventProfile, type ClaimResult, type ScheduledEvent, type EventProfile } from "./frontend/src/utils/timeProfileEngine";
 import { evaluatePullbackReversal, type PullbackResult, type TfKey, type ExternalSignal } from "./frontend/src/utils/pullbackReversalEngine";
+import { mcxSessionAt, lastMcxClose, expiryStillLive, mcxCloseInstant, istParts } from "./frontend/src/utils/mcxSession";
+import { resampleCandles } from "./frontend/src/utils/candleResample";
+import { analyzeCommodity, type PatternResult } from "./frontend/src/utils/chartPatterns";
 
 export interface Env {
   COMMODITY_KV: KVNamespace;
@@ -107,365 +110,35 @@ interface Candle {
   oi: number;
 }
 
-// MCX commodity trading session, approximated (actual close varies 23:30-23:55
-// IST depending on day/DST-linked international session). Good enough for a
-// LIVE/CLOSED indicator, not a precise exchange calendar (doesn't know holidays).
+// MCX commodity trading session. The close is DST-aware (23:30 IST while the US
+// is on daylight time, 23:55 while it is on standard time) and comes from the
+// same mcxSession helper the EOD force-close and the overnight anchor use, so
+// "is MCX open" can never have two answers. Holidays are not known.
 function getMarketStatus() {
-  const ist = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
-  const day = ist.getUTCDay();
-  const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  const isWeekday = day >= 1 && day <= 5;
-  const isOpen = isWeekday && minutes >= 9 * 60 && minutes < 23 * 60 + 30;
-  const isPreOpen = isWeekday && minutes >= 8 * 60 + 30 && minutes < 9 * 60;
+  const s = mcxSessionAt();
+  const { isOpen, isPreOpen } = s;
   const session: "OPEN" | "CLOSED" | "PRE_OPEN" = isOpen ? "OPEN" : isPreOpen ? "PRE_OPEN" : "CLOSED";
-  const hh = String(ist.getUTCHours()).padStart(2, "0");
-  const mm = String(ist.getUTCMinutes()).padStart(2, "0");
+  const hh = String(Math.floor(s.minutes / 60)).padStart(2, "0");
+  const mm = String(s.minutes % 60).padStart(2, "0");
   return {
     isOpen,
     session,
     timeLabel: `${hh}:${mm} IST`,
+    closeLabel: s.closeLabel,
     mcxStatus: isOpen
-      ? "MCX session is live."
+      ? `MCX session is live until ${s.closeLabel} IST.`
       : isPreOpen
         ? "MCX pre-open session -- trading resumes shortly."
         : "MCX session resumes ~9:00 AM IST on the next trading day. News monitoring remains active.",
   };
 }
 
-// Approximate historical success rates commonly cited in technical-analysis
-// literature (e.g. Bulkowski-style pattern studies). Educational reference
-// figures only -- NOT a backtest of this instrument, NOT a guarantee.
-const PATTERN_RELIABILITY: Record<string, number> = {
-  "Double Top": 65,
-  "Double Bottom": 66,
-  "Head and Shoulders": 83,
-  "Inverse Head and Shoulders": 84,
-  "Ascending Triangle": 72,
-  "Descending Triangle": 71,
-  "Symmetrical Triangle": 60,
-  "Rising Wedge": 62,
-  "Falling Wedge": 68,
-  "Bullish Flag / Pennant": 68,
-  "Bearish Flag / Pennant": 67,
-  "Bullish Rectangle": 60,
-  "Bearish Rectangle": 60,
-};
+// Chart-pattern detection lives in frontend/src/utils/chartPatterns.ts, which
+// adds recency, already-broke/target/stop checks and best-match ranking on top
+// of the original detectors. See that file.
 
-function pct(a: number, b: number) {
-  return Math.abs(a - b) / ((a + b) / 2);
-}
 function r2(x: number) {
   return Math.round(x * 100) / 100;
-}
-
-interface Swing {
-  i: number;
-  price: number;
-  date: string;
-}
-
-function findSwings(candles: Candle[], look = 2) {
-  const highs: Swing[] = [];
-  const lows: Swing[] = [];
-  for (let i = look; i < candles.length - look; i++) {
-    let isH = true;
-    let isL = true;
-    for (let j = i - look; j <= i + look; j++) {
-      if (j === i) continue;
-      if (candles[j].high >= candles[i].high) isH = false;
-      if (candles[j].low <= candles[i].low) isL = false;
-    }
-    if (isH) highs.push({ i, price: candles[i].high, date: candles[i].date });
-    if (isL) lows.push({ i, price: candles[i].low, date: candles[i].date });
-  }
-  return { highs, lows };
-}
-
-interface PatternResult {
-  pattern: string;
-  direction: Direction;
-  entry: number | string;
-  stop: number | string;
-  target: number | string;
-  note: string;
-  reliability?: number | null;
-}
-
-function detectDoubleTop(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 2) return null;
-  const h1 = highs[highs.length - 2];
-  const h2 = highs[highs.length - 1];
-  if (pct(h1.price, h2.price) > 0.025) return null;
-  const between = lows.filter((l) => l.i > h1.i && l.i < h2.i);
-  if (!between.length) return null;
-  const neckline = Math.min(...between.map((l) => l.price));
-  const height = (h1.price + h2.price) / 2 - neckline;
-  if (height <= 0) return null;
-  return {
-    pattern: "Double Top",
-    direction: "bearish",
-    entry: r2(neckline * 0.998),
-    stop: r2(Math.max(h1.price, h2.price) * 1.01),
-    target: r2(neckline - height),
-    note: `Twin peaks near ${r2(h1.price)} & ${r2(h2.price)}, neckline support around ${r2(neckline)}.`,
-  };
-}
-
-function detectDoubleBottom(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (lows.length < 2) return null;
-  const l1 = lows[lows.length - 2];
-  const l2 = lows[lows.length - 1];
-  if (pct(l1.price, l2.price) > 0.025) return null;
-  const between = highs.filter((h) => h.i > l1.i && h.i < l2.i);
-  if (!between.length) return null;
-  const neckline = Math.max(...between.map((h) => h.price));
-  const height = neckline - (l1.price + l2.price) / 2;
-  if (height <= 0) return null;
-  return {
-    pattern: "Double Bottom",
-    direction: "bullish",
-    entry: r2(neckline * 1.002),
-    stop: r2(Math.min(l1.price, l2.price) * 0.99),
-    target: r2(neckline + height),
-    note: `Twin troughs near ${r2(l1.price)} & ${r2(l2.price)}, neckline resistance around ${r2(neckline)}.`,
-  };
-}
-
-function detectHeadShoulders(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3) return null;
-  const [L, H, R] = highs.slice(-3);
-  if (!(H.price > L.price * 1.008 && H.price > R.price * 1.008)) return null;
-  if (pct(L.price, R.price) > 0.035) return null;
-  const leftT = lows.filter((l) => l.i > L.i && l.i < H.i);
-  const rightT = lows.filter((l) => l.i > H.i && l.i < R.i);
-  if (!leftT.length || !rightT.length) return null;
-  const neckline = (leftT[leftT.length - 1].price + rightT[0].price) / 2;
-  const height = H.price - neckline;
-  if (height <= 0) return null;
-  return {
-    pattern: "Head and Shoulders",
-    direction: "bearish",
-    entry: r2(neckline * 0.997),
-    stop: r2(R.price * 1.012),
-    target: r2(neckline - height),
-    note: `Left shoulder ${r2(L.price)}, head ${r2(H.price)}, right shoulder ${r2(R.price)}, neckline ${r2(neckline)}.`,
-  };
-}
-
-function detectInverseHeadShoulders(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (lows.length < 3) return null;
-  const [L, H, R] = lows.slice(-3);
-  if (!(H.price < L.price * 0.992 && H.price < R.price * 0.992)) return null;
-  if (pct(L.price, R.price) > 0.035) return null;
-  const leftP = highs.filter((h) => h.i > L.i && h.i < H.i);
-  const rightP = highs.filter((h) => h.i > H.i && h.i < R.i);
-  if (!leftP.length || !rightP.length) return null;
-  const neckline = (leftP[leftP.length - 1].price + rightP[0].price) / 2;
-  const height = neckline - H.price;
-  if (height <= 0) return null;
-  return {
-    pattern: "Inverse Head and Shoulders",
-    direction: "bullish",
-    entry: r2(neckline * 1.003),
-    stop: r2(R.price * 0.988),
-    target: r2(neckline + height),
-    note: `Left shoulder ${r2(L.price)}, head ${r2(H.price)}, right shoulder ${r2(R.price)}, neckline ${r2(neckline)}.`,
-  };
-}
-
-function detectAscendingTriangle(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3 || lows.length < 3) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  const flatRes = pct(h[0].price, h[1].price) < 0.015 && pct(h[1].price, h[2].price) < 0.015;
-  const risingLows = l[0].price < l[1].price * 0.999 && l[1].price < l[2].price * 0.999;
-  if (!flatRes || !risingLows) return null;
-  const resistance = (h[0].price + h[1].price + h[2].price) / 3;
-  const height = resistance - l[0].price;
-  if (height <= 0) return null;
-  return {
-    pattern: "Ascending Triangle",
-    direction: "bullish",
-    entry: r2(resistance * 1.003),
-    stop: r2(l[2].price * 0.99),
-    target: r2(resistance + height),
-    note: `Flat resistance near ${r2(resistance)} with rising swing lows — bullish breakout setup.`,
-  };
-}
-
-function detectDescendingTriangle(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3 || lows.length < 3) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  const flatSup = pct(l[0].price, l[1].price) < 0.015 && pct(l[1].price, l[2].price) < 0.015;
-  const fallingHighs = h[0].price > h[1].price * 1.001 && h[1].price > h[2].price * 1.001;
-  if (!flatSup || !fallingHighs) return null;
-  const support = (l[0].price + l[1].price + l[2].price) / 3;
-  const height = h[0].price - support;
-  if (height <= 0) return null;
-  return {
-    pattern: "Descending Triangle",
-    direction: "bearish",
-    entry: r2(support * 0.997),
-    stop: r2(h[2].price * 1.01),
-    target: r2(support - height),
-    note: `Flat support near ${r2(support)} with falling swing highs — bearish breakdown setup.`,
-  };
-}
-
-function detectRisingWedge(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3 || lows.length < 3) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  if (!(h[0].price < h[1].price && h[1].price < h[2].price)) return null;
-  if (!(l[0].price < l[1].price && l[1].price < l[2].price)) return null;
-  const widthStart = h[0].price - l[0].price;
-  const widthEnd = h[2].price - l[2].price;
-  if (!(widthEnd < widthStart * 0.75)) return null;
-  return {
-    pattern: "Rising Wedge",
-    direction: "bearish",
-    entry: r2(l[2].price * 0.995),
-    stop: r2(h[2].price * 1.01),
-    target: r2(l[2].price - widthStart),
-    note: `Converging rising channel (width shrank from ${r2(widthStart)} to ${r2(widthEnd)}) — bearish reversal risk.`,
-  };
-}
-
-function detectFallingWedge(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3 || lows.length < 3) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  if (!(h[0].price > h[1].price && h[1].price > h[2].price)) return null;
-  if (!(l[0].price > l[1].price && l[1].price > l[2].price)) return null;
-  const widthStart = h[0].price - l[0].price;
-  const widthEnd = h[2].price - l[2].price;
-  if (!(widthEnd < widthStart * 0.75)) return null;
-  return {
-    pattern: "Falling Wedge",
-    direction: "bullish",
-    entry: r2(h[2].price * 1.005),
-    stop: r2(l[2].price * 0.99),
-    target: r2(h[2].price + widthStart),
-    note: `Converging falling channel (width shrank from ${r2(widthStart)} to ${r2(widthEnd)}) — bullish reversal setup.`,
-  };
-}
-
-function detectFlagPennant(candles: Candle[]): PatternResult | null {
-  const n = candles.length;
-  if (n < 25) return null;
-  const poleStart = candles[n - 20];
-  const poleEnd = candles[n - 8];
-  const poleMove = poleEnd.close - poleStart.close;
-  const poleRange = Math.abs(poleMove);
-  if (poleRange / poleStart.close < 0.03) return null;
-  const recent = candles.slice(n - 7);
-  const recentHigh = Math.max(...recent.map((c) => c.high));
-  const recentLow = Math.min(...recent.map((c) => c.low));
-  if (recentHigh - recentLow > poleRange * 0.5) return null;
-  if (poleMove > 0) {
-    return {
-      pattern: "Bullish Flag / Pennant",
-      direction: "bullish",
-      entry: r2(recentHigh * 1.003),
-      stop: r2(recentLow * 0.99),
-      target: r2(recentHigh + poleRange),
-      note: `Sharp rally of ~${r2(poleRange)} then tight consolidation between ${r2(recentLow)}-${r2(recentHigh)} — continuation setup.`,
-    };
-  }
-  return {
-    pattern: "Bearish Flag / Pennant",
-    direction: "bearish",
-    entry: r2(recentLow * 0.997),
-    stop: r2(recentHigh * 1.01),
-    target: r2(recentLow - poleRange),
-    note: `Sharp decline of ~${r2(poleRange)} then tight consolidation between ${r2(recentLow)}-${r2(recentHigh)} — continuation setup.`,
-  };
-}
-
-function detectRectangle(highs: Swing[], lows: Swing[], candles: Candle[]): PatternResult | null {
-  if (highs.length < 2 || lows.length < 2) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  if (h.length < 2 || l.length < 2) return null;
-  const flatRes = h.every((x, idx) => idx === 0 || pct(x.price, h[0].price) < 0.015);
-  const flatSup = l.every((x, idx) => idx === 0 || pct(x.price, l[0].price) < 0.015);
-  if (!flatRes || !flatSup) return null;
-  const resistance = h.reduce((s, x) => s + x.price, 0) / h.length;
-  const support = l.reduce((s, x) => s + x.price, 0) / l.length;
-  const height = resistance - support;
-  if (height <= 0 || height / support > 0.15) return null;
-  const startIdx = Math.min(h[0].i, l[0].i);
-  const prior = candles.slice(Math.max(0, startIdx - 15), startIdx);
-  const priorUp = prior.length > 2 ? prior[prior.length - 1].close > prior[0].close : true;
-  if (priorUp) {
-    return {
-      pattern: "Bullish Rectangle",
-      direction: "bullish",
-      entry: r2(resistance * 1.003),
-      stop: r2(support * 0.99),
-      target: r2(resistance + height),
-      note: `Range-bound between ${r2(support)} and ${r2(resistance)} after an uptrend — continuation setup on an upside break.`,
-    };
-  }
-  return {
-    pattern: "Bearish Rectangle",
-    direction: "bearish",
-    entry: r2(support * 0.997),
-    stop: r2(resistance * 1.01),
-    target: r2(support - height),
-    note: `Range-bound between ${r2(support)} and ${r2(resistance)} after a downtrend — continuation setup on a downside break.`,
-  };
-}
-
-function detectSymmetricalTriangle(highs: Swing[], lows: Swing[]): PatternResult | null {
-  if (highs.length < 3 || lows.length < 3) return null;
-  const h = highs.slice(-3);
-  const l = lows.slice(-3);
-  if (!(h[0].price > h[1].price && h[1].price > h[2].price)) return null;
-  if (!(l[0].price < l[1].price && l[1].price < l[2].price)) return null;
-  const height = h[0].price - l[0].price;
-  return {
-    pattern: "Symmetrical Triangle",
-    direction: "neutral",
-    entry: `${r2(h[2].price * 1.003)} (bullish break) / ${r2(l[2].price * 0.997)} (bearish break)`,
-    stop: "Opposite side of whichever breakout triggers",
-    target: `± ${r2(height)} projected from the breakout price`,
-    note: `Converging highs & lows — wait for confirmation above ${r2(h[2].price)} or below ${r2(l[2].price)}.`,
-  };
-}
-
-function analyzeCommodity(candles: Candle[]): PatternResult {
-  const { highs, lows } = findSwings(candles, 2);
-  const detectors = [
-    () => detectHeadShoulders(highs, lows),
-    () => detectInverseHeadShoulders(highs, lows),
-    () => detectDoubleTop(highs, lows),
-    () => detectDoubleBottom(highs, lows),
-    () => detectAscendingTriangle(highs, lows),
-    () => detectDescendingTriangle(highs, lows),
-    () => detectRisingWedge(highs, lows),
-    () => detectFallingWedge(highs, lows),
-    () => detectFlagPennant(candles),
-    () => detectRectangle(highs, lows, candles),
-    () => detectSymmetricalTriangle(highs, lows),
-  ];
-  for (const d of detectors) {
-    const res = d();
-    if (res) {
-      res.reliability = PATTERN_RELIABILITY[res.pattern] ?? null;
-      return res;
-    }
-  }
-  return {
-    pattern: "No Clear Pattern",
-    direction: "neutral",
-    entry: "-",
-    stop: "-",
-    target: "-",
-    reliability: null,
-    note: "Price action doesn't currently match a well-defined chart pattern. Best to wait for clearer structure.",
-  };
 }
 
 interface FutureInfo {
@@ -685,28 +358,8 @@ async function getHistoricalIntradayCandles(env: Env, token: string, instrumentK
 
 // Upstox's intraday endpoint only serves 1-minute (or 30-minute) candles, so
 // 5m/15m/30m scans are built by bucketing 1-minute candles ourselves.
-function resampleCandles(candles: Candle[], minutesPerBucket: number): Candle[] {
-  if (!candles.length) return [];
-  const bucketMs = minutesPerBucket * 60 * 1000;
-  const out: Candle[] = [];
-  let bucketStart: number | null = null;
-  let cur: Candle | null = null;
-  for (const c of candles) {
-    const t = Math.floor(new Date(c.date).getTime() / bucketMs) * bucketMs;
-    if (t !== bucketStart) {
-      if (cur) out.push(cur);
-      bucketStart = t;
-      cur = { date: new Date(t).toISOString(), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume, oi: c.oi };
-    } else if (cur) {
-      cur.high = Math.max(cur.high, c.high);
-      cur.low = Math.min(cur.low, c.low);
-      cur.close = c.close;
-      cur.volume += c.volume;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
+// resampleCandles lives in frontend/src/utils/candleResample.ts: session-
+// anchored at 09:00 IST, last-OI, and +05:30 stamps. See that file.
 
 // MCX commodity options commonly expire a few trading days *before* the
 // underlying futures contract they're written on, so the futures contract's
@@ -751,8 +404,11 @@ async function getOptionExpiries(token: string, instrumentKey: string): Promise<
 async function resolveOptionExpiryCandidates(token: string, fut: FutureInfo): Promise<string[]> {
   const expiries = await getOptionExpiries(token, fut.instrument_key);
   if (!expiries) return [fut.expiry];
+  // Live until MCX closes on the expiry date. `+new Date("YYYY-MM-DD") >= now`
+  // parsed the date as UTC midnight (05:30 IST) and dropped the contract from
+  // breakfast time on the very day it was still trading.
   const now = Date.now();
-  const upcoming = expiries.filter((e) => +new Date(e) >= now);
+  const upcoming = expiries.filter((e) => expiryStillLive(e, now));
   return upcoming.length ? upcoming : [expiries[expiries.length - 1]];
 }
 
@@ -1054,8 +710,15 @@ function impliedVolatility(marketPrice: number, F: number, K: number, T: number,
   return r2(((lo + hi) / 2) * 100);
 }
 
+// Measured to MCX's close on the expiry date, not to "YYYY-MM-DD" parsed as UTC
+// midnight. The old form hit zero at 05:30 IST on expiry day -- a whole
+// trading session early -- and Black-Scholes with T = 0 has no IV to solve
+// for and Greeks that divide by zero, so the final day's numbers were junk.
+// It also understated T by roughly 18 hours on every other day.
 function yearsToExpiry(expiry: string): number {
-  const ms = new Date(expiry).getTime() - Date.now();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(expiry);
+  const endMs = m ? mcxCloseInstant(Number(m[1]), Number(m[2]), Number(m[3])) : new Date(expiry).getTime();
+  const ms = endMs - Date.now();
   return Math.max(ms / (365 * 24 * 60 * 60 * 1000), 0);
 }
 
@@ -1644,9 +1307,9 @@ async function computeGlobalMarkets(): Promise<GlobalQuote[]> {
 // snapshot just after MCX closes, and "since MCX closed" is then measured
 // against a real observed price rather than estimated from a US chart.
 //
-// Cost: exactly one KV write per trading day. The 23:30-23:59 IST window is six
-// cron ticks; the first one writes and the rest see today's date already stored
-// and do nothing.
+// Cost: normally one KV write per trading day. The capture window is the hour
+// after the (DST-aware) close -- twelve cron ticks; the first writes and the
+// rest see that session's date already stored and do nothing.
 const OVERNIGHT_ANCHOR_KEY = "overnight:anchor:v1";
 
 interface OvernightAnchor {
@@ -1658,24 +1321,26 @@ interface OvernightAnchor {
   prices: Record<string, number>;
 }
 
-function istPartsNow(now = new Date()): { day: number; minutes: number; date: string } {
-  const ist = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return {
-    day: ist.getUTCDay(),
-    minutes: ist.getUTCHours() * 60 + ist.getUTCMinutes(),
-    date: `${ist.getUTCFullYear()}-${p(ist.getUTCMonth() + 1)}-${p(ist.getUTCDate())}`,
-  };
-}
+/** How long after the close a snapshot still counts as "at the close". */
+const ANCHOR_CAPTURE_WINDOW_MS = 60 * 60 * 1000;
 
 async function captureOvernightAnchor(env: Env): Promise<void> {
-  const { day, minutes, date } = istPartsNow();
-  // Weekdays only. MCX is shut all weekend, so Monday's gap is measured against
-  // FRIDAY's close -- and Friday's anchor is the one that says where the world
-  // was at that moment. Overwriting it on Saturday would be wrong twice over:
-  // it would move the reference point, and NYMEX is shut then anyway.
-  if (day < 1 || day > 5) return;
-  if (minutes < 23 * 60 + 30) return;
+  const now = Date.now();
+  if (mcxSessionAt(now).isOpen) return;
+  // Keyed by the session that CLOSED, from the shared DST-aware clock. The
+  // first version hard-coded a 23:30-23:59 window, which in winter (23:55
+  // close) would have snapshotted while MCX was still trading and left a
+  // single tick after the real bell. The window now starts at the actual
+  // close and runs an hour -- twelve ticks -- and may cross midnight, which is
+  // why the date comes from the close rather than from the clock.
+  //
+  // Weekends need no special case: on Saturday the last close is Friday's, so
+  // the Friday anchor stands until Monday's close, which is exactly the
+  // reference Monday's gap should be measured from.
+  const { date, closeAt } = lastMcxClose(now);
+  // Hours after the bell, the global price has moved on; a snapshot then would
+  // make "since MCX closed" read as nearly flat and understate the real move.
+  if (now - closeAt > ANCHOR_CAPTURE_WINDOW_MS) return;
 
   const existing = await env.COMMODITY_KV.get(OVERNIGHT_ANCHOR_KEY, "json").catch(() => null) as OvernightAnchor | null;
   const alreadyToday = existing?.istDate === date;
@@ -1683,7 +1348,7 @@ async function captureOvernightAnchor(env: Env): Promise<void> {
   // was the first version and it was too brittle: one bad Yahoo response for
   // Brent threw away the Crude AND Gas anchors too, and the whole next morning
   // lost its overnight figure over a leg nobody was looking at. Now whatever
-  // arrives is kept, and the remaining ticks in the 23:30-23:59 window get a
+  // arrives is kept, and the remaining ticks in the post-close window get a
   // chance to fill the gap.
   if (alreadyToday && Object.keys(existing!.prices).length >= GLOBAL_INSTRUMENTS.length) return;
 
@@ -3015,6 +2680,7 @@ interface AdvanceCounts {
   opensChecked: number;
   advanced: number; // ticked or closed against a live premium
   swept: number; // orphaned (expired-contract) trades closed as manual/breakeven
+  eodClosed: number; // still running at the bell, closed at the last premium
 }
 
 async function advanceOpenTradesForSymbol(
@@ -3083,7 +2749,7 @@ async function advanceOpenTradesForSymbol(
 async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   const token = await env.COMMODITY_KV.get("access_token");
   const now = Date.now();
-  const counts: AdvanceCounts = { opensChecked: 0, advanced: 0, swept: 0 };
+  const counts: AdvanceCounts = { opensChecked: 0, advanced: 0, swept: 0, eodClosed: 0 };
 
   // Heartbeat: always record that the Cron ran (and what it did), even when
   // nothing changed and even when there's no token, so "/api/cron-status" can
@@ -3096,14 +2762,47 @@ async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
     return;
   }
 
-  const logs = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
+  let logs = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
   let anyChanged = false;
-  for (const symbol of TRADE_LOG_SYMBOLS) {
-    try {
-      const changed = await advanceOpenTradesForSymbol(env, token, symbol as Symbol, logs, now, counts);
-      anyChanged = anyChanged || changed;
-    } catch {
-      // best-effort -- one symbol failing must not block the other
+
+  if (!mcxSessionAt(now).isOpen) {
+    // MCX is shut. The only job left is the end-of-day close, and it only
+    // needs a quote fetch when something is actually still running from
+    // before the last bell. The common case -- nothing open -- costs zero
+    // Upstox calls, where this used to fetch the chain every five minutes
+    // all night and all weekend for as long as any trade was open.
+    const { closeAt } = lastMcxClose(now);
+    for (const symbol of TRADE_LOG_SYMBOLS) {
+      const running = runningBeforeClose(logs, symbol, closeAt);
+      if (running.length === 0) continue;
+      try {
+        const analytics = await computeOptionsAnalytics(env, token, symbol as Symbol, running.map((r) => r.entry.strike));
+        // A failed fetch closes nothing -- the next tick retries. Closing at
+        // breakeven because Upstox blinked would invent an outcome.
+        if ("error" in analytics) continue;
+        const ltp = new Map<string, number>();
+        for (const row of analytics.rows) {
+          if (row.call?.ltp != null) ltp.set(`${row.strike}-CE`, row.call.ltp);
+          if (row.put?.ltp != null) ltp.set(`${row.strike}-PE`, row.put.ltp);
+        }
+        const result = closeRunningAtSessionEnd(logs, symbol, closeAt, (strike, side) => ltp.get(`${strike}-${side}`) ?? null);
+        if (result.closed > 0) {
+          logs = result.logs;
+          counts.eodClosed += result.closed;
+          anyChanged = true;
+        }
+      } catch {
+        // best-effort -- one symbol failing must not block the other
+      }
+    }
+  } else {
+    for (const symbol of TRADE_LOG_SYMBOLS) {
+      try {
+        const changed = await advanceOpenTradesForSymbol(env, token, symbol as Symbol, logs, now, counts);
+        anyChanged = anyChanged || changed;
+      } catch {
+        // best-effort -- one symbol failing must not block the other
+      }
     }
   }
 
@@ -3122,13 +2821,14 @@ async function getCronStatus(env: Env): Promise<Record<string, unknown>> {
   const raw = await env.COMMODITY_KV.get(CRON_STATUS_KV_KEY);
   if (!raw) return { lastRunAt: null, note: "the trade-log Cron has not recorded a run yet" };
   try {
-    const p = JSON.parse(raw) as { at?: number; opensChecked?: number; advanced?: number; swept?: number; note?: string };
+    const p = JSON.parse(raw) as { at?: number; opensChecked?: number; advanced?: number; swept?: number; eodClosed?: number; note?: string };
     return {
       lastRunAt: p.at ? new Date(p.at).toISOString() : null,
       ageSeconds: p.at ? Math.round((Date.now() - p.at) / 1000) : null,
       opensChecked: p.opensChecked ?? null,
       advanced: p.advanced ?? null,
       swept: p.swept ?? null,
+      eodClosed: p.eodClosed ?? null,
       note: p.note ?? null,
     };
   } catch {
@@ -3593,11 +3293,14 @@ const EXPIRY_ALERT_DISPLAY_NAME: Record<string, string> = { CRUDEOIL: "Crude Oil
 // millisecond division -- that would round differently depending on what
 // time of day "now" happens to be, flipping the reported daysLeft back and
 // forth across a boundary within the same calendar day.
+// "Today" is the IST calendar date. Using the UTC date meant that between
+// midnight and 05:30 IST -- when UTC is still on yesterday -- expiry day read
+// as "expires tomorrow".
 function daysUntil(expiry: string): number {
   const e = new Date(expiry);
   const expiryMidnight = Date.UTC(e.getUTCFullYear(), e.getUTCMonth(), e.getUTCDate());
-  const now = new Date();
-  const todayMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const t = istParts();
+  const todayMidnight = Date.UTC(t.y, t.m - 1, t.d);
   return Math.round((expiryMidnight - todayMidnight) / 86_400_000);
 }
 

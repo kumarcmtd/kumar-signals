@@ -17,7 +17,13 @@ import { dedupeOverlappingEntries } from "./dedupeTradeLog";
 // (permanently, even if price later retraces), and once closed the line is
 // done -- the next actionable signal for that key starts a brand-new entry
 // rather than mutating this one.
-export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit" | "closed_manual";
+//
+// closed_eod: still running when MCX shut, closed by the server at the bell
+// at the last observed premium. Its own status rather than closed_manual for
+// two reasons: P&L deliberately books closed_manual at breakeven, which would
+// erase the real result of every trade the session ended on; and the label
+// "Closed Manually" would claim a person did something nobody did.
+export type TradeLogStatus = "running" | "sl_hit" | "stopped_breakeven" | "stopped_after_t1" | "target3_hit" | "closed_manual" | "closed_eod";
 
 export interface TradeLogEntry {
   id: string;
@@ -216,7 +222,21 @@ export function mergeTradeLogEntryLists(local: TradeLogEntry[], server: TradeLog
   for (const e of server) byId.set(e.id, e);
   for (const e of local) {
     const existing = byId.get(e.id);
-    if (!existing || !existing.closed || e.closed) byId.set(e.id, e);
+    if (!existing || !existing.closed) {
+      byId.set(e.id, e);
+    } else if (e.closed) {
+      // Both sides closed the same trade. The FIRST close is the real one;
+      // anything later is a second opinion on a trade that had already
+      // finished. Letting the local copy win unconditionally lost real
+      // results: the server closes a trade at the bell with the observed
+      // premium, and next morning a phone still holding a stale "running"
+      // copy runs its own stale-close as breakeven and pushes -- overwriting
+      // a real loss or gain with zero.
+      const localAt = e.closedAt ?? Number.POSITIVE_INFINITY;
+      const serverAt = existing.closedAt ?? Number.POSITIVE_INFINITY;
+      if (localAt < serverAt) byId.set(e.id, e);
+    }
+    // else: server closed, local still running -- a stale copy never reopens it.
   }
   const merged = Array.from(byId.values()).sort((a, b) => a.openedAt - b.openedAt);
   const deduped = dedupeOverlappingEntries(merged);
@@ -246,4 +266,57 @@ export type TradeLogSymbol = (typeof TRADE_LOG_SYMBOLS)[number];
 export function symbolOfTradeLogKey(key: string): TradeLogSymbol | null {
   for (const s of TRADE_LOG_SYMBOLS) if (key.includes(s)) return s;
   return null;
+}
+
+/** Every open trade for a symbol that was opened before a given close. */
+export function runningBeforeClose(logs: Record<string, TradeLogEntry[]>, symbol: TradeLogSymbol, closeAt: number): { key: string; entry: TradeLogEntry }[] {
+  const out: { key: string; entry: TradeLogEntry }[] = [];
+  for (const [key, entries] of Object.entries(logs)) {
+    if (symbolOfTradeLogKey(key) !== symbol) continue;
+    const last = entries[entries.length - 1];
+    if (last && !last.closed && last.openedAt < closeAt) out.push({ key, entry: last });
+  }
+  return out;
+}
+
+/**
+ * End-of-day force-close: every trade still running when MCX shut is closed
+ * at the bell.
+ *
+ * Without this the app had no end of day at all. A call still open at 23:30
+ * stayed "running" all night, and was only closed the next morning when a
+ * phone happened to open the app -- as closed_manual, at breakeven, erasing
+ * whatever it had actually made or lost.
+ *
+ * Closed at the LAST observed premium, which is where the position genuinely
+ * stood when trading stopped: MCX's quote does not move while it is shut, so
+ * a reading taken an hour after the close is the closing price, not a
+ * guess. `closedAt` is the close itself, not the moment the cron got round
+ * to it, because that is when the trade actually ended.
+ *
+ * A trade whose strike has no quote at all is still closed -- it cannot
+ * resolve on live prices again -- but with no exitPrice, so P&L books it at
+ * breakeven rather than inventing an outcome. The caller must only invoke
+ * this after a SUCCESSFUL quote fetch; a failed fetch closes nothing.
+ */
+export function closeRunningAtSessionEnd(
+  logs: Record<string, TradeLogEntry[]>,
+  symbol: TradeLogSymbol,
+  closeAt: number,
+  ltpFor: (strike: number, optSide: "CE" | "PE") => number | null
+): { logs: Record<string, TradeLogEntry[]>; closed: number; withoutPrice: number } {
+  let closed = 0;
+  let withoutPrice = 0;
+  const next = { ...logs };
+  for (const { key, entry } of runningBeforeClose(logs, symbol, closeAt)) {
+    const ltp = ltpFor(entry.strike, entry.optSide);
+    const hasPrice = typeof ltp === "number" && Number.isFinite(ltp) && ltp > 0;
+    const done: TradeLogEntry = { ...entry, closed: true, closedAt: closeAt, status: "closed_eod" };
+    if (hasPrice) done.exitPrice = ltp;
+    else withoutPrice += 1;
+    const entries = next[key];
+    next[key] = [...entries.slice(0, -1), done];
+    closed += 1;
+  }
+  return { logs: next, closed, withoutPrice };
 }

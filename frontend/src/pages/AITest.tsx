@@ -53,6 +53,7 @@ const STATUS_LABEL: Record<TradeLogStatus, string> = {
   stopped_after_t1: "Closed after T1 (T2 hit)",
   target3_hit: "Target 3 Hit",
   closed_manual: "Closed Manually",
+  closed_eod: "Closed at Day End",
 };
 const STATUS_COLOR: Record<TradeLogStatus, string> = {
   running: "text-white/60",
@@ -61,6 +62,7 @@ const STATUS_COLOR: Record<TradeLogStatus, string> = {
   stopped_after_t1: "text-[#22c55e]",
   target3_hit: "text-[#22c55e]",
   closed_manual: "text-white/50",
+  closed_eod: "text-white/50",
 };
 
 interface PremiumProjection {

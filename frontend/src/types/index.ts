@@ -54,6 +54,10 @@ export interface PatternSignal {
   target: number | string;
   reliability: number | null;
   note: string;
+  /** Bars since the pattern's final swing. Absent on "No Clear Pattern". */
+  barsSinceFormed?: number;
+  /** Other patterns that also qualified, best first. */
+  alternatives?: PatternSignal[];
 }
 
 export interface SignalCard {
