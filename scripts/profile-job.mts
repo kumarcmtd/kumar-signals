@@ -10,7 +10,8 @@ const env = await setup();
 const notify = await import("../src/notify.ts");
 const news = await import("../src/news.ts");
 const kv = (env as any).COMMODITY_KV;
-const job = process.argv[2] === "news" ? async () => { kv.meta?.delete?.("news:combined:v6"); await news.warmEnergyNews(env); } : process.argv[2] === "twenty" ? () => notify.runTwentyTwentyNotificationCheck(env) : () => notify.runBestCallNotificationCheck(env);
+const profiles = await import("../src/profiles.ts");
+const job = process.argv[2] === "profile" ? async () => { for (const k of [...(kv as any).store?.keys?.() ?? []]) if (String(k).startsWith("timeprofile:")) (kv as any).store.delete(k); await profiles.warmTimeProfiles(env); } : process.argv[2] === "news" ? async () => { kv.meta?.delete?.("news:combined:v6"); await news.warmEnergyNews(env); } : process.argv[2] === "twenty" ? () => notify.runTwentyTwentyNotificationCheck(env) : () => notify.runBestCallNotificationCheck(env);
 
 await job(); // warm caches
 await job();

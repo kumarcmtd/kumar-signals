@@ -685,11 +685,26 @@ export function testClaims(profile: TimeProfile, sessions: SlotSession[], gapSes
 // the year, so the offset is resolved from the actual calendar.
 
 /** UTC offset of a timezone at a given instant, in minutes (e.g. -240 for EDT). */
+// One formatter per timezone, reused. Constructing an Intl.DateTimeFormat is
+// expensive, and this used to build a fresh one on every call -- twice per
+// US-Eastern conversion -- which made it one of the largest costs in building
+// the daily Price-Alerts profile inside the Worker's 10 ms budget. The
+// formatter is immutable, so sharing it changes nothing about the result.
+const TZ_FORMATTERS = new Map<string, Intl.DateTimeFormat>();
+function tzFormatter(timeZone: string): Intl.DateTimeFormat {
+  let dtf = TZ_FORMATTERS.get(timeZone);
+  if (!dtf) {
+    dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone, hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+    TZ_FORMATTERS.set(timeZone, dtf);
+  }
+  return dtf;
+}
+
 export function tzOffsetMinutes(timeZone: string, at: number): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone, hour12: false,
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
-  });
+  const dtf = tzFormatter(timeZone);
   const parts = dtf.formatToParts(new Date(at));
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
   const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
@@ -720,12 +735,18 @@ export interface ScheduledEvent {
   source: string;
 }
 
+// Built once, like tzFormatter above: constructing a formatter per loop step
+// and per label cost more than the rest of scheduledEvents put together.
+let etWeekdayFormatter: Intl.DateTimeFormat | null = null;
+let istTimeFormatter: Intl.DateTimeFormat | null = null;
+
 /** Next occurrence of a weekday at 10:30 AM US Eastern, strictly in the future. */
 function nextEasternRelease(now: number, weekday: number): number {
+  etWeekdayFormatter ??= new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" });
   for (let i = 0; i <= 8; i++) {
     const probe = new Date(now + i * 86_400_000);
     const instant = easternToInstant(probe.getUTCFullYear(), probe.getUTCMonth(), probe.getUTCDate(), 10, 30);
-    const etWeekday = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short" })
+    const etWeekday = Number(etWeekdayFormatter
       .format(new Date(instant))
       .replace(/Sun|Mon|Tue|Wed|Thu|Fri|Sat/, (d) => String(["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(d))));
     if (etWeekday === weekday && instant > now) return instant;
@@ -734,7 +755,10 @@ function nextEasternRelease(now: number, weekday: number): number {
 }
 
 export function istLabelOf(instant: number): string {
-  return `${new Date(instant).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" })} IST`;
+  // Same output as toLocaleTimeString with these options, which builds a new
+  // formatter on every call.
+  istTimeFormatter ??= new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  return `${istTimeFormatter.format(new Date(instant))} IST`;
 }
 
 export function istSlotOf(instant: number): number {

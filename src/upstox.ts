@@ -30,6 +30,29 @@ const futuresListCache = new Map<string, { at: number; list: FutureInfo[] }>();
 // scheduled). An isolate only ever has one binding, so this is the same object
 // for every request it serves -- it exists so thirteen call sites of
 // getNearestFuture do not each need env threaded through them.
+/**
+ * Oldest first. Each stamp is parsed once, not once per comparison: the old
+ * comparator parsed two dates per compare, ~40,000 parses for 90 days of bars,
+ * which alone was several ms of the free plan's 10. Upstox sends newest first,
+ * so the usual case is a plain reverse.
+ */
+export function sortByTime(candles: Candle[]): void {
+  const t = candles.map((c) => +new Date(c.date));
+  let descending = true;
+  let ascending = true;
+  for (let i = 1; i < t.length && (descending || ascending); i++) {
+    if (!(t[i] < t[i - 1])) descending = false;
+    if (!(t[i] >= t[i - 1])) ascending = false;
+  }
+  if (ascending) return;
+  if (descending) {
+    candles.reverse();
+    return;
+  }
+  const order = candles.map((c, i) => [c, t[i]] as const).sort((x, y) => x[1] - y[1]);
+  for (let i = 0; i < order.length; i++) candles[i] = order[i][0];
+}
+
 export let sharedKv: KVNamespace | null = null;
 export function bindSharedCache(env: Env): void {
   sharedKv = env.COMMODITY_KV;
@@ -136,7 +159,7 @@ async function fetchHistoricalCandles(token: string, instrumentKey: string): Pro
     volume: c[5] ?? 0,
     oi: c[6] ?? 0,
   }));
-  candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  sortByTime(candles);
   return candles;
 }
 
@@ -185,7 +208,7 @@ async function fetchIntradayCandles(token: string, instrumentKey: string): Promi
     volume: c[5] ?? 0,
     oi: c[6] ?? 0,
   }));
-  candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  sortByTime(candles);
   return candles;
 }
 
@@ -227,7 +250,7 @@ async function fetchPriorMinutes(token: string, instrumentKey: string, toStr: st
     volume: c[5] ?? 0,
     oi: c[6] ?? 0,
   }));
-  candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  sortByTime(candles);
   return candles;
 }
 

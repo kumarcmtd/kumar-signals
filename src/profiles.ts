@@ -4,7 +4,7 @@ import { evaluatePullbackReversal, type ExternalSignal, type PullbackResult, typ
 import { buildSlotSessions, buildTimeProfile, type ClaimResult, eventProfile, type EventProfile, type ScheduledEvent, scheduledEvents, testClaims } from "../frontend/src/utils/timeProfileEngine";
 import { type EiaFetchResult, fetchEiaData } from "./eiaCalendar";
 import { type Candle, type Env, OPTION_SYMBOLS, type Symbol } from "./env";
-import { buildMorningSessions, GAP_STUDY_DAYS, getHistorical30mCandles } from "./gapStudy";
+import { buildMorningSessions, GAP_STUDY_DAYS, getHistorical30mCandles, hist30mCacheKey } from "./gapStudy";
 import { fetchEnergyNews, type NewsFetchResult } from "./news";
 import { getCandlesForTF } from "./signals";
 import { getNearestFuture } from "./upstox";
@@ -181,9 +181,13 @@ export async function serveTimeProfile(env: Env, token: string, symbol: Symbol):
 // The day's profile is built once per symbol, and building one is the most
 // CPU-expensive thing the cron does (90 days of half-hour bars). So each run
 // only CHECKS whether today's profile exists -- streamed and cancelled, never
-// parsed -- and builds at most ONE missing profile. It used to call the full
-// computeTimeProfile for both symbols every tick, parsing the cached profile
-// each time just to discover it was already there.
+// parsed -- and does at most ONE step towards one missing profile. It used to
+// call the full computeTimeProfile for both symbols every tick, parsing the
+// cached profile each time just to discover it was already there.
+//
+// A missing profile takes two runs: the first fetches and caches the 90 days
+// of half-hour bars, the next builds the profile from that cache. Done in one
+// run the two measured ~17 ms together, over the free plan's 10 ms.
 export async function warmTimeProfiles(env: Env): Promise<void> {
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
@@ -196,7 +200,13 @@ export async function warmTimeProfiles(env: Env): Promise<void> {
         await exists.cancel().catch(() => undefined);
         continue;
       }
-      await computeTimeProfile(env, token, symbol as Symbol);
+      const history = await env.COMMODITY_KV.get(hist30mCacheKey(fut.instrument_key), "stream");
+      if (history) {
+        await history.cancel().catch(() => undefined);
+        await computeTimeProfile(env, token, symbol as Symbol);
+      } else {
+        await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
+      }
       return;
     } catch {
       // A warm failure is not worth surfacing anywhere -- the next tick retries.

@@ -92,27 +92,56 @@ test("every save gets a new revision, and it can be read without the body", asyn
 });
 
 // ---------------------------------------------------------------------------
-// News: rebuilt only when close to stale
+// News: one rotating third of the feeds per run
 // ---------------------------------------------------------------------------
 
-test("fresh news is not rebuilt -- no feed fetched, nothing parsed", async () => {
-  const { warmEnergyNews } = await import("../../src/news");
+const feedXml = (u: string) =>
+  `<rss><channel><item><title>Oil story from ${u}</title><link>${u}#1</link><pubDate>${new Date().toUTCString()}</pubDate><description>crude oil</description></item></channel></rss>`;
+
+const countFeeds = async () => (await import("../../src/news")).TRUSTED_FEED_COUNT;
+
+test("from an empty cache, three runs fetch every feed exactly once and fill the cache", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-23T14:00:00+05:30"), toFake: ["Date"] });
+  globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
+  const { warmEnergyNews, fetchEnergyNews } = await import("../../src/news");
+  const feeds = await countFeeds();
   const kv = makeKv();
-  kv.store.set("news:combined:v6", "{}");
-  kv.meta.set("news:combined:v6", { builtAt: Date.now() - 5 * 60_000 });
-  expect(await warmEnergyNews(envWith(kv))).toBe(false);
-  expect(fetchCalls).toHaveLength(0);
-  expect(bodyReads(kv, "news:combined:v6")).toHaveLength(0);
+  const perRun: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const before = fetchCalls.length;
+    await warmEnergyNews(envWith(kv));
+    perRun.push(fetchCalls.length - before);
+    vi.setSystemTime(Date.now() + 10 * 60_000);
+  }
+  for (const n of perRun) expect(n).toBeLessThanOrEqual(Math.ceil(feeds / 3));
+  expect(new Set(fetchCalls).size).toBe(feeds);
+  expect(fetchCalls).toHaveLength(feeds);
+  const cached = await fetchEnergyNews(envWith(kv));
+  expect(new Set(cached.articles.map((a) => a.source)).size).toBe(feeds);
+  expect(cached.sourceStatus).toHaveLength(feeds);
 });
 
-test("stale or missing news IS rebuilt, and says so", async () => {
-  const { warmEnergyNews } = await import("../../src/news");
+test("once full, a run refreshes a third and carries every other source forward", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-23T14:00:00+05:30"), toFake: ["Date"] });
+  globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
+  const { warmEnergyNews, fetchEnergyNews } = await import("../../src/news");
   const kv = makeKv();
-  kv.store.set("news:combined:v6", "{}");
-  kv.meta.set("news:combined:v6", { builtAt: Date.now() - 25 * 60_000 });
-  expect(await warmEnergyNews(envWith(kv))).toBe(true);
+  for (let i = 0; i < 3; i++) { await warmEnergyNews(envWith(kv)); vi.setSystemTime(Date.now() + 10 * 60_000); }
+  const full = await fetchEnergyNews(envWith(kv));
+  fetchCalls.length = 0;
+  await warmEnergyNews(envWith(kv));
+  expect(fetchCalls.length).toBeLessThanOrEqual(Math.ceil((await countFeeds()) / 3));
+  const after = await fetchEnergyNews(envWith(kv));
+  expect(new Set(after.articles.map((a) => a.source))).toEqual(new Set(full.articles.map((a) => a.source)));
+  expect(after.sourceStatus.map((s) => s.source)).toEqual(full.sourceStatus.map((s) => s.source));
+});
+
+test("a page request on an empty cache fetches one batch, not every feed", async () => {
+  const { fetchEnergyNews } = await import("../../src/news");
+  globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
+  await fetchEnergyNews(envWith(makeKv()));
+  expect(fetchCalls.length).toBeLessThanOrEqual(Math.ceil((await countFeeds()) / 3));
   expect(fetchCalls.length).toBeGreaterThan(0);
-  expect(await warmEnergyNews(envWith(makeKv()))).toBe(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -158,8 +187,9 @@ test("each trigger runs only its own jobs, and Best Call is not scheduled at all
   }));
   vi.doMock("../../src/expiryAlerts", () => ({ runExpiryAlertCheck: async () => { calls.push("expiry"); } }));
   vi.doMock("../../src/globalMarkets", () => ({ captureOvernightAnchor: async () => { calls.push("anchor"); } }));
-  vi.doMock("../../src/tradeLogCron", () => ({ runTradeLogAdvanceCheck: async () => { calls.push("trades"); } }));
-  vi.doMock("../../src/news", () => ({ warmEnergyNews: async () => { calls.push("news"); return true; } }));
+  let tradesOpen = true;
+  vi.doMock("../../src/tradeLogCron", () => ({ runTradeLogAdvanceCheck: async () => { calls.push("trades"); return tradesOpen; } }));
+  vi.doMock("../../src/news", () => ({ warmEnergyNews: async () => { calls.push("news"); } }));
   vi.doMock("../../src/profiles", () => ({ warmTimeProfiles: async () => { calls.push("profile"); } }));
   const cron = await import("../../src/cron");
   const waits: Promise<unknown>[] = [];
@@ -167,8 +197,10 @@ test("each trigger runs only its own jobs, and Best Call is not scheduled at all
   const run = async (c: string) => { calls.length = 0; waits.length = 0; await cron.runScheduled(envWith(makeKv()), ctx, c); await Promise.all(waits); return [...calls].sort(); };
 
   expect(await run(cron.CRON_FAST)).toEqual(["anchor", "expiry", "twenty"]);
+  // Trades open -> the run's CPU goes to them, and the profile waits.
   expect(await run(cron.CRON_TRADES)).toEqual(["trades"]);
-  // News rebuilt this run -> the profile waits for the next one.
+  tradesOpen = false;
+  expect(await run(cron.CRON_TRADES)).toEqual(["profile", "trades"]);
   expect(await run(cron.CRON_WARM)).toEqual(["news"]);
   vi.doUnmock("../../src/notify"); vi.doUnmock("../../src/expiryAlerts"); vi.doUnmock("../../src/globalMarkets");
   vi.doUnmock("../../src/tradeLogCron"); vi.doUnmock("../../src/news"); vi.doUnmock("../../src/profiles");

@@ -13,7 +13,8 @@
 // Run from the repo root:   npx tsx scripts/bench-cron.ts
 
 // ---- Clock: Wednesday 23 Sep 2026, 14:00 IST (MCX open) -------------------
-const FAKE_NOW = Date.UTC(2026, 8, 23, 8, 30);
+let FAKE_NOW = Date.UTC(2026, 8, 23, 8, 30);
+const advanceClock = (ms: number) => { FAKE_NOW += ms; };
 const RealDate = Date;
 class FakeDate extends RealDate {
   constructor(...args: unknown[]) {
@@ -87,8 +88,10 @@ function quotes(url: string) {
   return JSON.stringify({ status: "success", data });
 }
 
-const RSS = `<?xml version="1.0"?><rss><channel>${Array.from({ length: 25 }, (_, i) =>
-  `<item><title>Crude oil prices ${i % 2 ? "rise" : "fall"} as OPEC weighs output cut ${i}</title><link>https://example.com/a${i}</link><pubDate>Wed, 23 Sep 2026 0${i % 9}:00:00 GMT</pubDate><description>Oil futures moved on inventory data and supply concerns across the Middle East, traders said.</description></item>`).join("")}</channel></rss>`;
+// Realistic feed size: Google News / Yahoo feeds carry 60-100 items with HTML
+// descriptions, not the 25 short ones the app keeps.
+const RSS = `<?xml version="1.0"?><rss><channel>${Array.from({ length: 70 }, (_, i) =>
+  `<item><title><![CDATA[Crude oil prices ${i % 2 ? "rise" : "fall"} as OPEC weighs output cut &amp; US stocks ${i}]]></title><link>https://news.example.com/articles/oil-${i}?utm=rss&amp;x=1</link><pubDate>Wed, 23 Sep 2026 0${i % 9}:${String(i % 60).padStart(2, "0")}:00 GMT</pubDate><description>&lt;ol&gt;&lt;li&gt;&lt;a href="https://e.com/${i}"&gt;Oil futures moved on inventory data and supply concerns across the Middle East, traders said&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color="#6f6f6f"&gt;Reuters&lt;/font&gt;&lt;/li&gt;&lt;li&gt;&lt;a href="https://e.com/b${i}"&gt;Natural gas slips as storage build beats forecasts; LNG exports steady&lt;/a&gt;&lt;/li&gt;&lt;/ol&gt; ${"Analysts expect volatility into the weekly EIA report. ".repeat(4)}</description></item>`).join("")}</channel></rss>`;
 
 function yahoo() {
   return JSON.stringify({ chart: { result: [{ meta: { regularMarketPrice: 90, previousClose: 89, chartPreviousClose: 88, currency: "USD", marketState: "REGULAR", regularMarketTime: 1_790_000_000 }, indicators: { quote: [{ close: Array.from({ length: 22 }, (_, i) => 85 + i * 0.2) }] } }] } });
@@ -139,6 +142,7 @@ const asType = (v: string | null, type?: string) =>
   v === null ? null : type === "json" ? JSON.parse(v) : type === "stream" ? new Response(v).body : v;
 const KV = {
   meta,
+  store,
   async get(key: string, type?: string) {
     return asType(store.get(key) ?? null, type);
   },
@@ -156,11 +160,15 @@ const KV = {
 const env = { COMMODITY_KV: KV, AI: { run: async () => ({ response: "{}" }) }, ASSETS: { fetch: async () => new Response("") } } as never;
 
 // ---- Measure ----------------------------------------------------------------
+// Main-thread time. Every fake here resolves at once with no I/O wait, so
+// wall time on this thread IS the CPU a Worker is billed for.
+// process.cpuUsage() was used before, but it counts the whole process --
+// V8's background compiler and GC threads too -- so the same run read 5 ms one
+// time and 9 the next. process.threadCpuUsage() only ticks in 4 ms steps.
 async function cpu(fn: () => Promise<unknown>): Promise<number> {
-  const t = process.cpuUsage();
+  const t = performance.now();
   await fn();
-  const u = process.cpuUsage(t);
-  return (u.user + u.system) / 1000;
+  return performance.now() - t;
 }
 
 /** Seeds KV and binds the shared cache; returns the fake env. */
@@ -218,22 +226,37 @@ async function main() {
   // path so the open-trade metadata is set, and hold premiums inside the range.
   FIXED_PREMIUM = 100;
   await (await import("../src/storage")).saveTradeLogsToKv(env as never, tradeLogs());
-  for (const [label, c] of [["FAST    */5      (Ai20-20, expiry, anchor)", cron.CRON_FAST], ["TRADES  1-59/5   (3 trades open)", cron.CRON_TRADES], ["WARM    2-59/10  (news fresh, profile built)", cron.CRON_WARM]] as const) {
-    await trigger(c);
-    const w = await cpu(() => trigger(c));
-    console.log(`${label.padEnd(50)}${w.toFixed(1).padStart(8)}${w > 10 ? "   OVER" : ""}`);
-  }
-  // No trades open: the common case outside market hours.
   const storage = await import("../src/storage");
+  const row = (label: string, w: number) => console.log(`${label.padEnd(50)}${w.toFixed(1).padStart(8)}${w > 10 ? "   OVER" : ""}`);
+  await trigger(cron.CRON_FAST);
+  row("FAST    */5      (Ai20-20, expiry, anchor)", await cpu(() => trigger(cron.CRON_FAST)));
+  // Measured on the FIRST run over freshly open trades, then checked they
+  // really were open -- a warm-up run could otherwise close them.
+  const openBefore = await storage.openTradeCountFromKv(env as never);
+  row(`TRADES  1-59/5   (${openBefore} trades open)`, await cpu(() => trigger(cron.CRON_TRADES)));
+  await storage.saveTradeLogsToKv(env as never, tradeLogs());
+  row(`TRADES  1-59/5   (${await storage.openTradeCountFromKv(env as never)} open, 2nd run)`, await cpu(() => trigger(cron.CRON_TRADES)));
+  // No trades open: the common case outside market hours. The run then builds
+  // one missing time profile -- measured with none cached, the worst case.
   const logs = JSON.parse(store.get("trade_logs_v1")!);
   for (const list of Object.values(logs) as { closed: boolean }[][]) list[list.length - 1].closed = true;
   await storage.saveTradeLogsToKv(env as never, logs);
-  const stillOpen = (await storage.openTradeCountFromKv(env as never)) ?? -1;
-  console.log(`  (open trades before the "nothing open" run: ${stillOpen})`);
-  console.log(`${"TRADES  1-59/5   (nothing open)".padEnd(50)}${(await cpu(() => trigger(cron.CRON_TRADES))).toFixed(1).padStart(8)}`);
-  // News stale -> WARM rebuilds news, and nothing else in that run.
-  meta.set("news:combined:v6", { builtAt: Date.now() - 60 * 60 * 1000 });
-  console.log(`${"WARM    2-59/10  (news stale -> rebuild)".padEnd(50)}${(await cpu(() => trigger(cron.CRON_WARM))).toFixed(1).padStart(8)}`);
+  console.log(`  (open trades before the "nothing open" runs: ${(await storage.openTradeCountFromKv(env as never)) ?? -1})`);
+  for (const k of [...store.keys()]) if (k.startsWith("timeprofile:") || k.startsWith("hist30m:")) store.delete(k);
+  row("TRADES  1-59/5   (nothing open, fetch 30m history)", await cpu(() => trigger(cron.CRON_TRADES)));
+  row("TRADES  1-59/5   (nothing open, build profile)", await cpu(() => trigger(cron.CRON_TRADES)));
+  row("TRADES  1-59/5   (nothing open, profiles cached)", await cpu(() => trigger(cron.CRON_TRADES)));
+  // The same build again with the code already compiled -- what a reused
+  // isolate pays. The first figure above includes compiling the engine.
+  for (const k of [...store.keys()]) if (k.startsWith("timeprofile:")) store.delete(k);
+  row("TRADES  1-59/5   (build profile, warm isolate)", await cpu(() => trigger(cron.CRON_TRADES)));
+  // WARM: one batch per run, three runs make a rotation.
+  for (let i = 0; i < 3; i++) {
+    row(`WARM    2-59/10  (news batch ${Math.floor(Date.now() / 600_000) % 3})`, await cpu(() => trigger(cron.CRON_WARM)));
+    advanceClock(10 * 60 * 1000);
+  }
+  store.delete("news:combined:v6");
+  row("WARM    2-59/10  (no cache -> one batch)", await cpu(() => trigger(cron.CRON_WARM)));
 
   console.log(`\n${"ONE TICK, all jobs (warm)".padEnd(26)}${"".padStart(8)}${totalWarm.toFixed(1).padStart(10)}   budget: 10 ms`);
   // ---- The endpoints the live pages poll (each request is its own 10 ms) ----

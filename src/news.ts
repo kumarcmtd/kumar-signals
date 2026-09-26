@@ -162,10 +162,17 @@ const MAX_ITEMS_PER_FEED = 25;
 // slowest single feed sets the floor on how fast a flash can surface.
 const RSS_FETCH_TIMEOUT_MS = 6000;
 
-function xmlUnescape(s: string): string {
+// One pass over the entities instead of five. Equivalent to the chained
+// replaces it replaced -- including "&amp;lt;", which both leave as the literal
+// text "&lt;" -- because a single scan never revisits text it has already
+// produced, exactly as &amp; being replaced LAST guaranteed before. Order is
+// kept: CDATA, then entities, then tags (so an encoded "&lt;b&gt;" is still
+// stripped as a tag). Parsing RSS was ~40% of the news rebuild's CPU.
+const XML_ENTITIES: Record<string, string> = { "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'", "&amp;": "&" };
+export function xmlUnescape(s: string): string {
   return s
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/&(?:lt|gt|quot|#39|apos|amp);/g, (m) => XML_ENTITIES[m])
     .replace(/<[^>]+>/g, "")
     .trim();
 }
@@ -175,10 +182,15 @@ function xmlUnescape(s: string): string {
 // Regex-based on purpose: malformed/partial XML just yields fewer or zero
 // matched items rather than throwing, which is exactly the "never crash
 // the whole dashboard on a bad feed" behavior this needs.
-function parseRssFeed(xml: string, sourceName: string, stripSuffix = false): RawNewsArticle[] {
+// `limit` stops once that many articles are KEPT. The caller only ever used
+// the first MAX_ITEMS_PER_FEED in document order, so parsing the rest of a
+// 60- or 100-item feed was pure waste; the output is identical.
+export function parseRssFeed(xml: string, sourceName: string, stripSuffix = false, limit = Number.POSITIVE_INFINITY): RawNewsArticle[] {
   const items: RawNewsArticle[] = [];
-  const itemBlocks = xml.match(/<item\b[\s\S]*?<\/item>/gi) ?? xml.match(/<entry\b[\s\S]*?<\/entry>/gi) ?? [];
-  for (const block of itemBlocks) {
+  const hasItems = /<item\b[\s\S]*?<\/item>/i.test(xml);
+  const blockRe = hasItems ? /<item\b[\s\S]*?<\/item>/gi : /<entry\b[\s\S]*?<\/entry>/gi;
+  for (let m = blockRe.exec(xml); m && items.length < limit; m = blockRe.exec(xml)) {
+    const block = m[0];
     const title = block.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1];
     if (!title) continue;
     const desc = block.match(/<description\b[^>]*>([\s\S]*?)<\/description>/i)?.[1] ?? block.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i)?.[1] ?? "";
@@ -218,7 +230,7 @@ async function fetchOneRssFeed(feed: RssFeedConfig): Promise<{ source: string; o
     clearTimeout(timer);
     if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
     const xml = await res.text();
-    const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true).slice(0, MAX_ITEMS_PER_FEED);
+    const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true, MAX_ITEMS_PER_FEED);
     return { source: feed.source, ok: true, count: articles.length, articles };
   } catch (e: any) {
     return { source: feed.source, ok: false, count: 0, error: e?.name === "AbortError" ? "Timed out" : (e?.message ?? "Fetch failed"), articles: [] };
@@ -253,9 +265,6 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // which is what AI Flash wants. The key is versioned because the feed list
 // above changed: a v2 payload cached from the old five-source list would
 // otherwise keep serving until it aged out.
-// The Cron fires every 5 minutes and refreshes this, so a 30-minute TTL keeps
-// the key warm with a wide safety margin while a request-path rebuild becomes
-// the rare exception rather than the norm.
 //
 // WHY THIS IS NOT 60 SECONDS ANY MORE. A 60s TTL meant a browser polling the
 // news was, most minutes, the thing that paid for rebuilding it: ~35 parallel
@@ -263,24 +272,79 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // request that gets 10ms of CPU on this plan. That is how a news page ends up
 // showing nothing -- not because the feeds are dead, but because the request
 // rebuilding them runs out of CPU and fails. It also wrote KV ~1,440 times a
-// day against a 1,000/day free limit. Cron-warming at 5 minutes costs ~288
-// writes a day and moves the expensive part somewhere it has room to run.
-const NEWS_CACHE_TTL_SECONDS = 30 * 60;
+// day against a 1,000/day free limit. Cron-warming moves the expensive part
+// somewhere it has room to run, at 144 writes a day.
+//
+// The cron refreshes the feeds in NEWS_BATCHES rotating batches, one per WARM
+// run (every 10 minutes), so every feed is re-fetched every 30 minutes -- the
+// same freshness the single 30-minute rebuild gave -- but no single run has to
+// parse all ~35 feeds. That full rebuild measured ~55 ms of CPU with realistic
+// feeds (before the parser fixes, ~15 after): over the free plan's 10 ms per
+// run however it was scheduled. The cache TTL covers a full rotation plus
+// missed runs, so a page never finds it empty while the cron is alive.
+const NEWS_BATCHES = 3;
+const NEWS_BATCH_SLOT_MS = 10 * 60 * 1000;
+const NEWS_CACHE_TTL_SECONDS = 60 * 60;
 const NEWS_CACHE_KV_KEY = "news:combined:v6";
 
-/**
- * Rebuilds the news cache from every feed. Expensive by nature -- call it
- * from scheduled(), not from a request, unless the cache is genuinely empty.
- */
-async function buildEnergyNews(env: Env): Promise<NewsFetchResult> {
-  const rssResults = await Promise.all(TRUSTED_RSS_FEEDS.map(fetchOneRssFeed));
-  const sourceStatus = rssResults.map(({ articles, ...status }) => status);
-  const rawArticles: RawNewsArticle[] = rssResults.flatMap((r) => r.articles);
+/** For tests: how many RSS feeds a full rotation covers. */
+export const TRUSTED_FEED_COUNT = TRUSTED_RSS_FEEDS.length;
 
-  if (env.NEWSAPI_KEY) {
+const RSS_SOURCE_ORDER = new Map(TRUSTED_RSS_FEEDS.map((f, i) => [f.source, i] as const));
+
+/**
+ * Rebuilds the news cache. With `batch`, only that share of the feeds is
+ * re-fetched; every other feed's articles are carried forward from the
+ * current cache and everything is re-scored, because recency weighting moves
+ * with the clock. With no cache to merge into, the batch alone is cached and
+ * the next runs fill in the rest: a full rebuild measured ~16 ms, over the
+ * free plan's 10, so it never runs in one go. Without `batch` it is a full
+ * rebuild (kept for tools and tests).
+ */
+async function buildEnergyNews(env: Env, batch?: { index: number; count: number }): Promise<NewsFetchResult> {
+  let previous: NewsFetchResult | null = null;
+  if (batch) {
+    const raw = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
+    if (raw) {
+      try {
+        previous = JSON.parse(raw) as NewsFetchResult;
+      } catch {
+        previous = null;
+      }
+    }
+  }
+
+  const feeds = batch ? TRUSTED_RSS_FEEDS.filter((_, i) => i % batch!.count === batch!.index) : TRUSTED_RSS_FEEDS;
+  // NewsAPI rides with batch 0, so it too refreshes once per rotation.
+  const includeNewsApi = !batch || batch.index === 0;
+
+  const rssResults = await Promise.all(feeds.map(fetchOneRssFeed));
+  let sourceStatus = rssResults.map(({ articles, ...status }) => status);
+  let rawArticles: RawNewsArticle[] = rssResults.flatMap((r) => r.articles);
+
+  if (env.NEWSAPI_KEY && includeNewsApi) {
     const napi = await fetchNewsApiArticles(env.NEWSAPI_KEY);
     sourceStatus.push({ source: napi.source, ok: napi.ok, count: napi.count, error: napi.error });
     rawArticles.push(...napi.articles);
+  }
+
+  if (batch && previous?.available) {
+    const refreshed = new Set(feeds.map((f) => f.source));
+    // RSS articles carry their feed's name; NewsAPI articles carry the
+    // publisher's, which is never one of the feed names.
+    const keep = (a: RawNewsArticle) => (RSS_SOURCE_ORDER.has(a.source) ? !refreshed.has(a.source) : !includeNewsApi);
+    const carried: RawNewsArticle[] = previous.articles
+      .filter(keep)
+      .map(({ headline, summary, source, publishedAt, url }) => ({ headline, summary, source, publishedAt, url }));
+    // Fresh first, so a story present in both keeps its fresh copy on de-dupe;
+    // then back into feed order (NewsAPI last) exactly as a full build has it.
+    const rank = (a: RawNewsArticle) => RSS_SOURCE_ORDER.get(a.source) ?? Number.MAX_SAFE_INTEGER;
+    rawArticles = [...rawArticles, ...carried].map((a, i) => [a, i] as const).sort((x, y) => rank(x[0]) - rank(y[0]) || x[1] - y[1]).map(([a]) => a);
+
+    const freshNames = new Set(sourceStatus.map((s) => s.source));
+    const carriedStatus = previous.sourceStatus.filter((s) => !freshNames.has(s.source) && !(includeNewsApi && !RSS_SOURCE_ORDER.has(s.source)));
+    const statusRank = (s: { source: string }) => RSS_SOURCE_ORDER.get(s.source) ?? Number.MAX_SAFE_INTEGER;
+    sourceStatus = [...sourceStatus, ...carriedStatus].sort((a, b) => statusRank(a) - statusRank(b));
   }
 
   const anySourceOk = sourceStatus.some((s) => s.ok);
@@ -303,17 +367,16 @@ async function buildEnergyNews(env: Env): Promise<NewsFetchResult> {
   const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);
   const events = clusterEvents(scored);
   const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus, builtAt: new Date(now).toISOString() };
-  // builtAt also goes in METADATA so the cron can tell how old the cache is
-  // without reading or parsing it (see warmEnergyNews).
-  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS, metadata: { builtAt: now } });
+  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
   return result;
 }
 
 /**
- * What every request path calls. Reads the cache the Cron keeps warm and only
- * rebuilds inline when there is genuinely nothing cached (first request after
- * a deploy, or after a 30-minute gap in Cron delivery) -- so the 10ms-CPU
- * request path almost never does the expensive work.
+ * What every request path calls. Reads the cache the Cron keeps warm. When
+ * there is genuinely nothing cached (first request after a deploy, or after
+ * an hour's gap in Cron delivery) it fetches the current batch only -- a third
+ * of the feeds, which fits a request's 10 ms -- and the Cron fills in the
+ * rest over the next 20 minutes.
  */
 export async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
   const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
@@ -324,41 +387,28 @@ export async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
       // fall through and rebuild on a corrupt cache entry
     }
   }
-  return buildEnergyNews(env);
+  return buildEnergyNews(env, currentBatch());
+}
+
+function currentBatch(): { index: number; count: number } {
+  return { index: Math.floor(Date.now() / NEWS_BATCH_SLOT_MS) % NEWS_BATCHES, count: NEWS_BATCHES };
 }
 
 /**
- * Cron entry point. Refreshes the news cache every tick so the feeds are at
- * most ~5 minutes old and no browser request ever pays to rebuild them.
- * Failures are swallowed: a bad tick leaves the previous cache in place.
- */
-/**
- * Rebuild the cache only once it is close to expiring.
+ * Refreshes ONE batch of feeds -- the next in rotation -- per call.
  *
- * This used to rebuild unconditionally on every cron tick -- every feed
- * fetched, parsed, scored and clustered, and the result written to KV, every
- * five minutes around the clock. That was ~35 outbound fetches of the free
- * plan's 50-per-run allowance, a large share of its 10 ms CPU, and 288 of its
- * 1,000 daily KV writes, to refresh a cache that is only meant to change every
- * 30 minutes. Now the age is read from the cache's metadata (streamed and
- * cancelled, never parsed) and it rebuilds only inside the last few minutes
- * before expiry, so a page never finds it empty.
+ * A full rebuild of every feed costs ~15 ms of CPU, over the free plan's
+ * 10 ms per invocation, so each WARM run (every 10 minutes) refreshes one
+ * third of the sources and carries the rest forward from the cache. Every
+ * source is therefore at most ~30 minutes old. The daily time profile is
+ * built from the TRADES trigger's idle runs instead (see src/cron.ts), never
+ * in the same invocation as news.
  */
-const NEWS_REBUILD_BEFORE_EXPIRY_MS = 8 * 60 * 1000;
-
-/** Returns true when it actually rebuilt (that run's CPU budget is then spent). */
-export async function warmEnergyNews(env: Env): Promise<boolean> {
+export async function warmEnergyNews(env: Env): Promise<void> {
   try {
-    const { value, metadata } = await env.COMMODITY_KV.getWithMetadata<{ builtAt?: number }>(NEWS_CACHE_KV_KEY, "stream");
-    if (value) await value.cancel().catch(() => undefined);
-    const age = value && typeof metadata?.builtAt === "number" ? Date.now() - metadata.builtAt : Number.POSITIVE_INFINITY;
-    if (age < NEWS_CACHE_TTL_SECONDS * 1000 - NEWS_REBUILD_BEFORE_EXPIRY_MS) return false;
-    await buildEnergyNews(env);
-    return true;
+    await buildEnergyNews(env, currentBatch());
   } catch {
     // A failed warm is not worth failing the whole Cron run for -- the
-    // previous cached payload keeps serving until the next tick. Treated as
-    // "rebuilt" so the same run does not start a second heavy job.
-    return true;
+    // previous cached payload keeps serving until the next tick.
   }
 }

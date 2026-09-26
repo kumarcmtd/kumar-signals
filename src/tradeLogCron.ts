@@ -23,7 +23,8 @@ import { getTradeLogsFromKv, getTradeLogsWithRev, openTradeCountFromKv, saveTrad
 const ORPHAN_SWEEP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 const CRON_STATUS_KV_KEY = "cron:trade_log_last_run";
-/** Outside market hours the heartbeat is refreshed at most this often. */
+/** The heartbeat is refreshed at most this often when nothing changed. */
+const HEARTBEAT_OPEN_INTERVAL_MS = 30 * 60 * 1000;
 const HEARTBEAT_IDLE_INTERVAL_MS = 60 * 60 * 1000;
 
 interface AdvanceCounts {
@@ -96,7 +97,11 @@ async function advanceOpenTradesForSymbol(
   return changed;
 }
 
-export async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
+/**
+ * Returns true when there were open trades to work on, so the TRADES trigger
+ * knows whether this run still has CPU to spare for other work.
+ */
+export async function runTradeLogAdvanceCheck(env: Env): Promise<boolean> {
   const token = await env.COMMODITY_KV.get("access_token");
   const now = Date.now();
   const counts: AdvanceCounts = { opensChecked: 0, advanced: 0, swept: 0, eodClosed: 0 };
@@ -105,19 +110,20 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   // nothing changed and even when there's no token, so "/api/cron-status" can
   // prove the schedule is actually firing.
   //
-  // Every tick during market hours, when it matters that the cron is firing.
-  // Outside them, at most hourly: it was writing KV every five minutes around
-  // the clock -- 288 writes a day, over a quarter of the free 1,000/day, most
-  // of them overnight and at weekends proving nothing new. Anything that
-  // actually changed (an EOD close) still writes immediately.
+  // At most every 30 minutes during market hours and hourly outside them. It
+  // was writing KV every five minutes around the clock -- 288 writes a day,
+  // over a quarter of the free 1,000/day -- to prove nothing new; the news
+  // refresh needs those writes now. Anything that actually changed (a trade
+  // advanced or closed) still writes immediately.
   const marketOpen = mcxSessionAt(now).isOpen;
   const writeHeartbeat = async (note?: string) => {
     const changedSomething = counts.advanced + counts.swept + counts.eodClosed > 0;
-    if (!marketOpen && !changedSomething) {
+    if (!changedSomething) {
+      const interval = marketOpen ? HEARTBEAT_OPEN_INTERVAL_MS : HEARTBEAT_IDLE_INTERVAL_MS;
       const prev = await env.COMMODITY_KV.get(CRON_STATUS_KV_KEY).catch(() => null);
       try {
         const at = prev ? (JSON.parse(prev) as { at?: number }).at : undefined;
-        if (typeof at === "number" && now - at < HEARTBEAT_IDLE_INTERVAL_MS) return;
+        if (typeof at === "number" && now - at < interval) return;
       } catch {
         // unreadable -- rewrite it
       }
@@ -127,7 +133,7 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
 
   if (!token) {
     await writeHeartbeat("no access token in KV");
-    return;
+    return false;
   }
 
   // Nothing running -> nothing to advance and nothing to close at the bell.
@@ -135,7 +141,7 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
   // which is almost every tick outside market hours.
   if ((await openTradeCountFromKv(env)) === 0) {
     await writeHeartbeat("no open trades");
-    return;
+    return false;
   }
 
   const read = await getTradeLogsWithRev(env);
@@ -206,6 +212,7 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
     }
   }
   await writeHeartbeat();
+  return true;
 }
 
 export async function getCronStatus(env: Env): Promise<Record<string, unknown>> {

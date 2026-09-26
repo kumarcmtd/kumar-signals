@@ -9,8 +9,9 @@
 // triggers are separate invocations, each with its own 10 ms:
 //
 //   */5        FAST     Ai20-20 push, expiry alerts, overnight anchor
-//   1-59/5     TRADES   trade-log advance and the end-of-day close
-//   2-59/10    WARM     news, else one missing time profile -- never both
+//   1-59/5     TRADES   trade-log advance and the end-of-day close; when no
+//                       trade is open, one missing time profile instead
+//   2-59/10    WARM     one third of the news feeds (rotating)
 //
 // Each job still decides for itself whether it has anything to do: most exit
 // immediately outside MCX hours, and none makes an Upstox call while the
@@ -41,20 +42,22 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   bindSharedCache(env);
 
   if (cron === CRON_TRADES) {
-    ctx.waitUntil(runTradeLogAdvanceCheck(env));
+    // A run with no open trade costs well under 1 ms, so it has room to
+    // build at most one missing Price-Alerts profile (~10 ms is too much to
+    // share with a run that is advancing trades). Never both in one run.
+    ctx.waitUntil(
+      (async () => {
+        const busy = await runTradeLogAdvanceCheck(env);
+        if (!busy) await warmTimeProfiles(env);
+      })()
+    );
     return;
   }
 
   if (cron === CRON_WARM) {
     // Keeps the news feeds warm so no browser request ever has to rebuild
-    // ~35 RSS sources inside a 10 ms CPU budget; when news is fresh, builds
-    // at most one missing Price-Alerts profile instead. Never both in one run.
-    ctx.waitUntil(
-      (async () => {
-        const rebuiltNews = await warmEnergyNews(env);
-        if (!rebuiltNews) await warmTimeProfiles(env);
-      })()
-    );
+    // ~35 RSS sources inside a 10 ms CPU budget.
+    ctx.waitUntil(warmEnergyNews(env));
     return;
   }
 

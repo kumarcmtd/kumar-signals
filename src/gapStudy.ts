@@ -3,7 +3,7 @@
 import { type Candle, type Env, type Symbol, UPSTOX_HIST_URL, upstoxJson } from "./env";
 import { getYahooQuote, GLOBAL_INSTRUMENTS } from "./globalMarkets";
 import { getCandlesForTF } from "./signals";
-import { getIntradayCandles, getNearestFuture } from "./upstox";
+import { getIntradayCandles, getNearestFuture, sortByTime } from "./upstox";
 
 // ---- Morning-window gap study (9:00-11:00 AM IST) ----
 // The overnight-impact card originally scored a gap by where the session
@@ -49,10 +49,27 @@ interface GapStudyResponse {
 // Exchange-local hour straight off Upstox's own +05:30 stamp -- the Worker
 // runs in UTC, so parsing to a Date and reading getHours() would silently
 // shift every bar by 5.5 hours and put the whole morning in the wrong window.
-function istHourOfStamp(date: string): number | null {
+// Fast path reads "YYYY-MM-DDTHH:MM" by position, as Upstox always sends it;
+// anything shaped differently falls through to the original regex, so the
+// result is the same for every input. Called once per half-hour bar.
+const isDigit = (c: number) => c >= 48 && c <= 57;
+export function istHourOfStamp(date: string): number | null {
+  // With "-" at 4, "T" at 10 and ":" at 13, no earlier "T\d\d:\d\d" can
+  // exist in the string, so this is exactly the regex's first match.
+  if (
+    date.length >= 16 && date.charCodeAt(4) === 45 /* - */ && date.charCodeAt(10) === 84 /* T */ && date.charCodeAt(13) === 58 /* : */ &&
+    isDigit(date.charCodeAt(11)) && isDigit(date.charCodeAt(12)) && isDigit(date.charCodeAt(14)) && isDigit(date.charCodeAt(15))
+  ) {
+    return (date.charCodeAt(11) - 48) * 10 + (date.charCodeAt(12) - 48) + ((date.charCodeAt(14) - 48) * 10 + (date.charCodeAt(15) - 48)) / 60;
+  }
   const m = /T(\d{2}):(\d{2})/.exec(date);
   if (!m) return null;
   return Number(m[1]) + Number(m[2]) / 60;
+}
+
+/** Today's cache key for the 30-minute history (UTC date, as it always was). */
+export function hist30mCacheKey(instrumentKey: string): string {
+  return `hist30m:${instrumentKey}:${new Date().toISOString().slice(0, 10)}`;
 }
 
 export async function getHistorical30mCandles(env: Env, token: string, instrumentKey: string, days: number): Promise<Candle[]> {
@@ -61,7 +78,7 @@ export async function getHistorical30mCandles(env: Env, token: string, instrumen
   from.setDate(from.getDate() - days);
   const fmt = (d: Date) => d.toISOString().slice(0, 10);
   const toStr = fmt(to);
-  const cacheKey = `hist30m:${instrumentKey}:${toStr}`;
+  const cacheKey = hist30mCacheKey(instrumentKey);
 
   const cached = await env.COMMODITY_KV.get(cacheKey);
   if (cached) {
@@ -80,7 +97,7 @@ export async function getHistorical30mCandles(env: Env, token: string, instrumen
     const candles: Candle[] = json.data.candles.map((c: any[]) => ({
       date: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] ?? 0, oi: c[6] ?? 0,
     }));
-    candles.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+    sortByTime(candles);
     await env.COMMODITY_KV.put(cacheKey, JSON.stringify(candles), { expirationTtl: GAP_STUDY_CACHE_TTL_SECONDS });
     return candles;
   } catch {
