@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { sessionStateFor, evaluateSessionSetup, POWER_WINDOWS } from "../utils/sessionStrategyEngine";
 import type { TimeframeAnalysis } from "../utils/timeframeEngine";

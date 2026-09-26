@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { detectSignalConflicts, pageLabelForKey } from "../utils/signalConflict";
 import type { TradeLogEntry } from "../store/appStore";

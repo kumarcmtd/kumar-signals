@@ -1,0 +1,54 @@
+name: Tests
+
+# Every push to every branch, and every pull request -- not just main. The
+# deploy workflow also gates on the tests, but only once code reaches main;
+# this catches a break on a feature branch before it gets that far.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      # Same stall-proof install as deploy.yml: npm's registry occasionally
+      # hangs a socket without erroring, so each install is time-boxed and
+      # retried rather than left to hang the job.
+      - name: Install dependencies
+        run: |
+          for dir in frontend .; do
+            for i in 1 2 3; do
+              (cd "$dir" && timeout 240 npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000) && break
+              echo "::warning::npm ci in $dir attempt $i stalled/failed — retrying"
+              sleep 5
+            done
+          done
+
+      - name: Worker typecheck
+        run: npm run typecheck
+
+      - name: Frontend typecheck
+        run: cd frontend && npx tsc -b
+
+      - name: Worker tests (Vitest)
+        run: npx vitest run
+
+      - name: Frontend tests (Vitest)
+        run: cd frontend && npx vitest run
+
+      - name: Lint
+        run: cd frontend && npx oxlint

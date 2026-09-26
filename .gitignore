@@ -3,3 +3,7 @@ node_modules
 *.log
 .DS_Store
 tsconfig.tsbuildinfo
+
+# Local-only Worker secrets (e.g. APP_ACCESS_KEY for `wrangler dev`). Never commit.
+.dev.vars
+.dev.vars.*

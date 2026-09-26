@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { reviewCall, medianWinnerMinutes, formatMinutes, MIN_WINNERS_FOR_MEDIAN, TOO_EARLY_MIN, type ReviewInput } from "../utils/callReviewEngine";
 import type { Candle } from "../types";

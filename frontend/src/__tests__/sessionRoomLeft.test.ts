@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readSessionRoom, MIN_SESSIONS_FOR_RANGE } from "../utils/sessionRoomLeft";
 import type { Candle } from "../types";

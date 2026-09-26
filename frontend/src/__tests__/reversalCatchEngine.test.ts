@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { detectReversal } from "../utils/reversalCatchEngine";
 import type { Candle } from "../types";

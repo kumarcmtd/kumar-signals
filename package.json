@@ -7,7 +7,7 @@
     "build": "cd frontend && npm ci && npm run build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "deploy": "npm run build && wrangler deploy",
-    "test": "cd frontend && npm run test"
+    "test": "vitest run && cd frontend && npm run test"
   },
   "repository": {
     "type": "git",
@@ -19,6 +19,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260721.1",
     "typescript": "^7.0.2",
+    "vitest": "^5.0.2",
     "wrangler": "^4.112.0"
   }
 }

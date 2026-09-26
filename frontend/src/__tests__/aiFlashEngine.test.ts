@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { ageMinutes, flashRecencyPct, heatFor, formatAge, formatStamp, directionOf, biasForScore, buildFlashItems, scoreFlash, analyzeFlash, FLASH_HALF_LIFE_MIN } from "../utils/aiFlashEngine";
 import type { ScoredNewsArticle } from "../utils/newsScoring";

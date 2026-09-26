@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { paceEtaMin, historicalHold, formatDuration } from "../utils/holdTime";
 import type { TradeLogEntry } from "../store/appStore";

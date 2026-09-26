@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { findEliteSignal } from "../utils/eliteSignal";
 import { computeHitScore } from "../utils/hitScoreEngine";

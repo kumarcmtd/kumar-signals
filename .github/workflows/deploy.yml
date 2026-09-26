@@ -48,7 +48,7 @@ jobs:
       # failure in either fails the job, so a bug like the original impossible
       # reward:risk gate (which shipped silently and blocked every call since
       # launch) can never reach production undetected again.
-      - name: Worker typecheck
+      - name: Worker typecheck + tests
         run: |
           for i in 1 2 3; do
             timeout 240 npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-maxtimeout=120000 && break
@@ -56,6 +56,7 @@ jobs:
             sleep 5
           done
           npm run typecheck
+          npx vitest run
       - name: Frontend tests + build
         run: |
           cd frontend

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { buildPlainSummary, BREAK_EVEN_PCT } from "../utils/backtestPlainSummary";
 import type { Summary, CalibrationBand, Breakdown } from "../utils/backtestEngine";

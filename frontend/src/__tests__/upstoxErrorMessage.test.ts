@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 
 // Mirrors worker.ts's upstoxJson error mapping. The worker imports Cloudflare

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { advanceOpenEntry, mergeTradeLogs, openNewEntry, symbolOfTradeLogKey, type TradeLogEntry } from "../utils/tradeLogCore";
 import { exitPriceFor, flattenClosedTrades } from "../utils/tradeLogPnl";

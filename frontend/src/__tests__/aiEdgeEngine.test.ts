@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { engineForKey, symbolForKey, rupeesFor, flattenEdgeTrades, computeEngineEdges, computeEdgeTotals, ENGINES, MIN_SAMPLE, LOT_SIZE } from "../utils/aiEdgeEngine";
 import type { TradeLogEntry } from "../utils/tradeLogCore";

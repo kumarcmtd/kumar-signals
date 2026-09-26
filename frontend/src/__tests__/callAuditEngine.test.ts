@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { auditCall, gradeFor, medianOf, MIN_TRACK_SAMPLE, type AuditInput } from "../utils/callAuditEngine";
 

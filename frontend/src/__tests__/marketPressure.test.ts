@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readPricePressure, readMarketPressure, depthLeanOf } from "../utils/marketPressure";
 import { computeDepthPressure } from "../utils/depthPressure";

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { readLiveSessionTrend, timeLabelOf, fmtPrice, MIN_BARS } from "../utils/liveSessionTrend";
 import type { Candle } from "../types";

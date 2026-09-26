@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { LIVE_PAGE_PATHS, isAlwaysLivePage, refetchIntervalFor, queryFailed, PAUSED_RETRY_MS } from "../config/livePages";
 

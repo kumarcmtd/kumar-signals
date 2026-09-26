@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
 import { sma, roc, williamsR, stochastic, mfi, keltnerChannels, donchianChannels } from "../utils/indicators";
 import { buildTechnicalTable } from "../utils/technicalTable";
