@@ -154,6 +154,18 @@ interface FutureInfo {
 // not valid JSON") was then surfaced to the trader verbatim, dressed up as a
 // market-data gap. The rate limit was real; the message was gibberish.
 // Parsing through here names the actual cause instead.
+// A Cloudflare 1015 from Upstox, as its own type so callers can tell "you are
+// being rate limited, STOP calling" apart from "this request failed, try the
+// next candidate". Treating the two the same is what made every fallback loop
+// fire more doomed calls into an active rate limit and prolong it.
+class UpstoxRateLimitError extends Error {
+  readonly rateLimited = true;
+}
+
+function isRateLimit(e: unknown): boolean {
+  return e instanceof UpstoxRateLimitError;
+}
+
 async function upstoxJson(res: Response, what: string): Promise<any> {
   const text = await res.text();
   try {
@@ -161,43 +173,95 @@ async function upstoxJson(res: Response, what: string): Promise<any> {
   } catch {
     const code = /error code:\s*(\d+)/i.exec(text)?.[1];
     if (code === "1015") {
-      throw new Error(`Upstox is rate-limiting this app right now (Cloudflare 1015) while loading ${what}. Nothing is broken -- it clears on its own and the data refills on the next refresh.`);
+      throw new UpstoxRateLimitError(`Upstox is rate-limiting this app right now (Cloudflare 1015) while loading ${what}. Nothing is broken -- it clears on its own and the data refills on the next refresh.`);
     }
     if (code) throw new Error(`Upstox returned Cloudflare error ${code} while loading ${what}.`);
     throw new Error(`Upstox sent a non-JSON reply (HTTP ${res.status}) while loading ${what}.`);
   }
 }
 
-// The nearest futures contract was being looked up from Upstox on EVERY
-// request -- candles, options, depth, prices, the gap study -- to resolve a
-// contract that only changes when one expires. At a 5-second depth poll and a
-// 15-second candle poll across two symbols that is by far the largest source
-// of upstream calls, and the most likely reason the 1015 limit was being hit
-// at all. Cached per isolate; the TTL is deliberately short so a contract
-// roll is picked up quickly while still collapsing ~99% of the lookups.
-const FUTURE_CACHE_TTL_MS = 15 * 60 * 1000;
-const futureCache = new Map<string, { at: number; value: FutureInfo | null }>();
+// ---- Futures contract list ----
+// The nearest future was being looked up on EVERY request -- candles, options,
+// depth, prices, the gap study -- to resolve a contract that only changes when
+// one expires. And getUpcomingFutures ran the IDENTICAL search a second time,
+// uncached, whenever the option-chain fallback needed the next contracts.
+//
+// Now there is one list per symbol, fetched once and read two ways, cached in
+// two layers:
+//   * isolate memory, 15 minutes -- free, and absorbs the per-poll traffic;
+//   * KV, 6 hours -- shared across every isolate AND the cron, so a cold
+//     isolate or the 5-minute cron does not each go back to Upstox.
+// The Cache API would be the obvious shared layer, but it is a no-op on
+// *.workers.dev deployments, which is where this app runs.
+//
+// A long TTL is safe because contracts that have EXPIRED are dropped when the
+// list is read (expiryStillLive), so on expiry evening the cached list's first
+// entry simply becomes next month -- no refetch needed to roll.
+const FUTURES_MEM_TTL_MS = 15 * 60 * 1000;
+const FUTURES_KV_TTL_S = 6 * 60 * 60;
+const futuresListCache = new Map<string, { at: number; list: FutureInfo[] }>();
 
-async function getNearestFuture(token: string, query: string): Promise<FutureInfo | null> {
-  const cached = futureCache.get(query);
-  if (cached && Date.now() - cached.at < FUTURE_CACHE_TTL_MS) return cached.value;
-  const value = await fetchNearestFuture(token, query);
-  // A failed lookup is not cached: caching null would keep the whole app dark
-  // for the full TTL after a single blip.
-  if (value) futureCache.set(query, { at: Date.now(), value });
-  return value;
+// The KV namespace for the shared caches, bound at each entry point (fetch and
+// scheduled). An isolate only ever has one binding, so this is the same object
+// for every request it serves -- it exists so thirteen call sites of
+// getNearestFuture do not each need env threaded through them.
+let sharedKv: KVNamespace | null = null;
+function bindSharedCache(env: Env): void {
+  sharedKv = env.COMMODITY_KV;
 }
 
-async function fetchNearestFuture(token: string, query: string): Promise<FutureInfo | null> {
+function liveFutures(list: FutureInfo[]): FutureInfo[] {
+  const now = Date.now();
+  return list.filter((f) => expiryStillLive(f.expiry, now));
+}
+
+async function fetchFuturesList(token: string, query: string): Promise<FutureInfo[]> {
   const usp = new URLSearchParams({ query, exchanges: "MCX", instrument_types: "FUT", records: "10" });
   const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   const json: any = await upstoxJson(res, "the futures contract list");
-  if (json.status !== "success" || !json.data || !json.data.length) return null;
-  const contracts = [...json.data].sort((a, b) => +new Date(a.expiry) - +new Date(b.expiry));
-  const nearest = contracts[0];
-  return { instrument_key: nearest.instrument_key, expiry: nearest.expiry, trading_symbol: nearest.trading_symbol };
+  if (json.status !== "success" || !json.data || !json.data.length) return [];
+  return [...json.data]
+    .sort((a: any, b: any) => +new Date(a.expiry) - +new Date(b.expiry))
+    .map((c: any) => ({ instrument_key: c.instrument_key, expiry: c.expiry, trading_symbol: c.trading_symbol }));
+}
+
+async function getFuturesList(token: string, query: string): Promise<FutureInfo[]> {
+  const mem = futuresListCache.get(query);
+  if (mem && Date.now() - mem.at < FUTURES_MEM_TTL_MS) {
+    const live = liveFutures(mem.list);
+    if (live.length) return live;
+  }
+
+  const kvKey = `futures:list:v1:${query}`;
+  if (sharedKv) {
+    const raw = await sharedKv.get(kvKey).catch(() => null);
+    if (raw) {
+      try {
+        const live = liveFutures(JSON.parse(raw) as FutureInfo[]);
+        if (live.length) {
+          futuresListCache.set(query, { at: Date.now(), list: live });
+          return live;
+        }
+      } catch {
+        // corrupt entry -- fall through and refetch
+      }
+    }
+  }
+
+  const list = liveFutures(await fetchFuturesList(token, query));
+  // An empty result is never cached: caching nothing would keep the whole app
+  // dark for the full TTL after a single blip.
+  if (list.length) {
+    futuresListCache.set(query, { at: Date.now(), list });
+    if (sharedKv) await sharedKv.put(kvKey, JSON.stringify(list), { expirationTtl: FUTURES_KV_TTL_S }).catch(() => undefined);
+  }
+  return list;
+}
+
+async function getNearestFuture(token: string, query: string): Promise<FutureInfo | null> {
+  return (await getFuturesList(token, query))[0] ?? null;
 }
 
 // The next few upcoming futures contracts (nearest first), for when the
@@ -205,16 +269,9 @@ async function fetchNearestFuture(token: string, query: string): Promise<FutureI
 // Natural Gas returning zero contracts AND zero discoverable expiries for
 // its nearest future the day before that future's own expiry -- its options
 // had already stopped listing even though the future itself hadn't expired
-// yet). Reuses the same search query as getNearestFuture.
+// yet). Same cached list as getNearestFuture, so this costs no extra call.
 async function getUpcomingFutures(token: string, query: string, count: number): Promise<FutureInfo[]> {
-  const usp = new URLSearchParams({ query, exchanges: "MCX", instrument_types: "FUT", records: "10" });
-  const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  const json: any = await upstoxJson(res, "the futures contract list");
-  if (json.status !== "success" || !json.data || !json.data.length) return [];
-  const contracts = [...json.data].sort((a: any, b: any) => +new Date(a.expiry) - +new Date(b.expiry));
-  return contracts.slice(0, count).map((c: any) => ({ instrument_key: c.instrument_key, expiry: c.expiry, trading_symbol: c.trading_symbol }));
+  return (await getFuturesList(token, query)).slice(0, count);
 }
 
 const DAILY_CANDLE_CACHE_TTL_SECONDS = 30 * 60;
@@ -373,17 +430,45 @@ async function getHistoricalIntradayCandles(env: Env, token: string, instrumentK
 const OPTION_EXPIRY_CACHE_TTL_MS = 30 * 60 * 1000;
 const optionExpiryCache = new Map<string, { at: number; expiries: string[] }>();
 
+// Two cache layers, like the futures list: isolate memory for the per-poll
+// traffic, KV so every isolate and the cron share one result. Expired dates
+// are filtered by the caller (resolveOptionExpiryCandidates), so a long KV TTL
+// cannot hand out a dead expiry.
+const OPTION_EXPIRY_KV_TTL_S = 6 * 60 * 60;
+
 async function getOptionExpiries(token: string, instrumentKey: string): Promise<string[] | null> {
   const cached = optionExpiryCache.get(instrumentKey);
   if (cached && Date.now() - cached.at < OPTION_EXPIRY_CACHE_TTL_MS) return cached.expiries;
+
+  const kvKey = `options:expiries:v1:${instrumentKey}`;
+  if (sharedKv) {
+    const raw = await sharedKv.get(kvKey).catch(() => null);
+    if (raw) {
+      try {
+        const expiries = JSON.parse(raw) as string[];
+        if (Array.isArray(expiries) && expiries.length) {
+          optionExpiryCache.set(instrumentKey, { at: Date.now(), expiries });
+          return expiries;
+        }
+      } catch {
+        // corrupt entry -- fall through and refetch
+      }
+    }
+  }
+
   const usp = new URLSearchParams({ instrument_key: instrumentKey });
   const res = await fetch(`https://api.upstox.com/v2/option/contract?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   let json: any;
   try {
-    json = await res.json();
-  } catch {
+    // Through upstoxJson, not res.json(). A 1015 arrives as an HTML page, so
+    // res.json() threw, this returned null, and the caller fell back to the
+    // future's own expiry -- which lists zero strikes. A rate limit therefore
+    // showed up as "no option contracts", pointing at the wrong problem.
+    json = await upstoxJson(res, "the option expiry list");
+  } catch (e) {
+    if (isRateLimit(e)) throw e;
     return null;
   }
   if (json.status !== "success" || !Array.isArray(json.data) || !json.data.length) return null;
@@ -394,6 +479,7 @@ async function getOptionExpiries(token: string, instrumentKey: string): Promise<
   // Only a real result is cached -- a null would keep the chain dark for the
   // whole TTL after one bad response.
   optionExpiryCache.set(instrumentKey, { at: Date.now(), expiries });
+  if (sharedKv) await sharedKv.put(kvKey, JSON.stringify(expiries), { expirationTtl: OPTION_EXPIRY_KV_TTL_S }).catch(() => undefined);
   return expiries;
 }
 
@@ -430,7 +516,9 @@ async function resolveOptionExpiryCandidates(token: string, fut: FutureInfo): Pr
 const OPTION_CONTRACT_CACHE_TTL_MS = 30 * 60 * 1000;
 const optionContractCache = new Map<string, { at: number; contracts: any[] }>();
 
-async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null, pinnedStrikes: number[] = []): Promise<{ chain?: any[]; error?: string }> {
+type ChainResult = { chain?: any[]; error?: string; rateLimited?: boolean };
+
+async function getOptionChain(token: string, instrumentKey: string, expiryDate: string, spot: number | null, pinnedStrikes: number[] = []): Promise<ChainResult> {
   const contractCacheKey = `${instrumentKey}|${expiryDate}`;
   const cachedContracts = optionContractCache.get(contractCacheKey);
   if (cachedContracts && Date.now() - cachedContracts.at < OPTION_CONTRACT_CACHE_TTL_MS) {
@@ -449,7 +537,7 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
     // upstoxJson already names a Cloudflare rate limit (1015) explicitly --
     // pass that through rather than flattening it back to "not valid JSON",
     // which is what hid the real cause the first time.
-    return { error: e?.message ?? `Option contract request failed (HTTP ${contractRes.status} ${contractRes.statusText})` };
+    return { error: e?.message ?? `Option contract request failed (HTTP ${contractRes.status} ${contractRes.statusText})`, rateLimited: isRateLimit(e) };
   }
   if (contractJson.errors && contractJson.errors.length) {
     const msg = contractJson.errors.map((e: any) => e.message || e.errorCode || JSON.stringify(e)).join("; ");
@@ -465,7 +553,7 @@ async function getOptionChain(token: string, instrumentKey: string, expiryDate: 
 }
 
 // Quote-fetching half, split out so a cached contract list can reuse it.
-async function buildChainFromContracts(token: string, allContracts: any[], spot: number | null, pinnedStrikes: number[]): Promise<{ chain?: any[]; error?: string }> {
+async function buildChainFromContracts(token: string, allContracts: any[], spot: number | null, pinnedStrikes: number[]): Promise<ChainResult> {
   const allStrikes = Array.from(new Set<number>(allContracts.map((c) => c.strike_price))).sort((a, b) => a - b);
 
   // Narrow to strikes near spot before fetching quotes -- MCX chains can
@@ -501,7 +589,7 @@ async function buildChainFromContracts(token: string, allContracts: any[], spot:
       // A rate limit here means EVERY strike would come back priceless, which
       // renders as a chain full of blanks. Surface it instead of silently
       // returning an empty chain that looks like a dead market.
-      if (typeof e?.message === "string" && e.message.includes("1015")) return { error: e.message };
+      if (isRateLimit(e)) return { error: e.message, rateLimited: true };
       continue; // any other blip is best-effort -- those contracts just get no market_data
     }
     if (quoteJson.status === "success" && quoteJson.data) {
@@ -536,12 +624,21 @@ async function buildChainFromContracts(token: string, allContracts: any[], spot:
 // (nearest first) until one actually has contracts, and reports whichever
 // expiry it actually used -- not just the first guess -- so downstream
 // Greeks/expiry display stay consistent with the chain that was returned.
-async function resolveOptionChain(token: string, fut: FutureInfo, spot: number | null, pinnedStrikes: number[] = []): Promise<{ expiry: string; chain?: any[]; error?: string }> {
-  const candidates = await resolveOptionExpiryCandidates(token, fut);
+async function resolveOptionChain(token: string, fut: FutureInfo, spot: number | null, pinnedStrikes: number[] = []): Promise<{ expiry: string } & ChainResult> {
+  let candidates: string[];
+  try {
+    candidates = await resolveOptionExpiryCandidates(token, fut);
+  } catch (e) {
+    if (isRateLimit(e)) return { expiry: fut.expiry, error: (e as Error).message, rateLimited: true };
+    throw e;
+  }
   let lastError: string | undefined;
   for (const expiry of candidates) {
     const res = await getOptionChain(token, fut.instrument_key, expiry, spot, pinnedStrikes);
     if (res.chain) return { expiry, chain: res.chain };
+    // A rate limit fails every remaining candidate identically, and each
+    // extra call extends the limit. Stop at the first one.
+    if (res.rateLimited) return { expiry, error: res.error, rateLimited: true };
     lastError = res.error;
   }
   return { expiry: candidates[0], error: lastError };
@@ -563,15 +660,25 @@ async function resolveOptionChainAcrossFutures(
   primaryFut: FutureInfo,
   spot: number | null,
   pinnedStrikes: number[] = []
-): Promise<{ fut: FutureInfo; expiry: string; chain?: any[]; error?: string }> {
+): Promise<{ fut: FutureInfo; expiry: string } & ChainResult> {
   const primary = await resolveOptionChain(token, primaryFut, spot, pinnedStrikes);
-  if (primary.chain) return { fut: primaryFut, ...primary };
+  // Rate limited: do NOT widen the search. Every alternative future would cost
+  // an expiry lookup plus a chain attempt per expiry, all guaranteed to fail
+  // -- roughly ten more calls fired straight into the limit, extending it.
+  if (primary.chain || primary.rateLimited) return { fut: primaryFut, ...primary };
 
-  const upcoming = await getUpcomingFutures(token, query, 3);
+  let upcoming: FutureInfo[];
+  try {
+    upcoming = await getUpcomingFutures(token, query, 3);
+  } catch (e) {
+    if (isRateLimit(e)) return { fut: primaryFut, ...primary, error: (e as Error).message, rateLimited: true };
+    throw e;
+  }
   for (const altFut of upcoming) {
     if (altFut.instrument_key === primaryFut.instrument_key) continue;
     const alt = await resolveOptionChain(token, altFut, spot, pinnedStrikes);
     if (alt.chain) return { fut: altFut, ...alt };
+    if (alt.rateLimited) return { fut: primaryFut, ...primary, error: alt.error, rateLimited: true };
   }
   return { fut: primaryFut, ...primary };
 }
@@ -2445,9 +2552,9 @@ interface OptionsAnalytics {
 // poll already made it, and a failure is evicted immediately so the next
 // attempt retries rather than being stuck with a cached error.
 const OPTIONS_CACHE_TTL_MS = 8_000;
-const optionsCache = new Map<string, { at: number; promise: Promise<OptionsAnalytics | { error: string }> }>();
+const optionsCache = new Map<string, { at: number; promise: Promise<OptionsAnalytics | { error: string; rateLimited?: boolean }> }>();
 
-async function computeOptionsAnalytics(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
+async function computeOptionsAnalytics(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string; rateLimited?: boolean }> {
   const key = `${symbol}|${[...pinnedStrikes].sort((a, b) => a - b).join(",")}`;
   const hit = optionsCache.get(key);
   if (hit && Date.now() - hit.at < OPTIONS_CACHE_TTL_MS) return hit.promise;
@@ -2461,16 +2568,16 @@ async function computeOptionsAnalytics(env: Env, token: string, symbol: Symbol, 
   return promise;
 }
 
-async function computeOptionsAnalyticsUncached(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string }> {
+async function computeOptionsAnalyticsUncached(env: Env, token: string, symbol: Symbol, pinnedStrikes: number[] = []): Promise<OptionsAnalytics | { error: string; rateLimited?: boolean }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };
 
   const candles = await getHistoricalCandles(env, token, fut.instrument_key);
   const spot = candles && candles.length ? candles[candles.length - 1].close : null;
 
-  const { fut: optionFut, expiry: optionExpiry, chain, error } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot, pinnedStrikes);
+  const { fut: optionFut, expiry: optionExpiry, chain, error, rateLimited } = await resolveOptionChainAcrossFutures(token, symbol, fut, spot, pinnedStrikes);
   const chainRes = { chain, error };
-  if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable" };
+  if (chainRes.error || !chainRes.chain) return { error: chainRes.error ?? "Option chain unavailable", rateLimited };
 
   const refSpot = spot ?? chainRes.chain[0]?.underlying_spot_price ?? 0;
   const { rows, atmStrike } = nearestStrikes(chainRes.chain, refSpot, 8, pinnedStrikes);
@@ -2779,7 +2886,11 @@ async function runTradeLogAdvanceCheck(env: Env): Promise<void> {
         const analytics = await computeOptionsAnalytics(env, token, symbol as Symbol, running.map((r) => r.entry.strike));
         // A failed fetch closes nothing -- the next tick retries. Closing at
         // breakeven because Upstox blinked would invent an outcome.
-        if ("error" in analytics) continue;
+        if ("error" in analytics) {
+          // Same token, same limit: the other symbol would fail identically.
+          if (analytics.rateLimited) break;
+          continue;
+        }
         const ltp = new Map<string, number>();
         for (const row of analytics.rows) {
           if (row.call?.ltp != null) ltp.set(`${row.strike}-CE`, row.call.ltp);
@@ -3330,8 +3441,11 @@ async function computeExpiryAlerts(token: string): Promise<ExpiryAlert[]> {
       if (daysLeft < 0 || daysLeft > 2) continue;
       const displayName = EXPIRY_ALERT_DISPLAY_NAME[symbol] ?? symbol;
       out.push({ symbol: symbol as ExpiryAlert["symbol"], displayName, expiry, daysLeft, message: expiryAlertMessage(displayName, daysLeft) });
-    } catch {
-      // best-effort -- one symbol failing shouldn't block the other
+    } catch (e) {
+      // best-effort -- one symbol failing shouldn't block the other. Except a
+      // rate limit: both symbols share one Upstox token and one limit, so the
+      // next symbol is guaranteed to fail too and only extends it.
+      if (isRateLimit(e)) break;
     }
   }
   return out;
@@ -3668,6 +3782,7 @@ export default {
   // so no individual route can accidentally ship without the app's security
   // headers by forgetting to set them itself.
   async fetch(request: Request, env: Env): Promise<Response> {
+    bindSharedCache(env);
     return withSecurityHeaders(await handleRequest(request, env));
   },
 
@@ -3675,6 +3790,7 @@ export default {
   // independent of any browser tab being open, which is what makes push
   // notifications actually reach the user with the app fully closed.
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    bindSharedCache(env);
     ctx.waitUntil(runBestCallNotificationCheck(env));
     // Ai20-20 -- the page actually traded, pushed with the app closed.
     ctx.waitUntil(runTwentyTwentyNotificationCheck(env));
