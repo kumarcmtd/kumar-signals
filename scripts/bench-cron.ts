@@ -272,7 +272,7 @@ async function main() {
     "/api/market-status", "/api/prices", "/api/candles?symbol=CRUDEOIL&tf=15", "/api/candles?symbol=CRUDEOIL&tf=60",
     "/api/candles?symbol=CRUDEOIL&tf=240", "/api/candles?symbol=CRUDEOIL&tf=1D", "/api/options/CRUDEOIL", "/api/depth/CRUDEOIL",
     "/api/pullback?symbol=CRUDEOIL", "/api/signals", "/api/scan?symbol=CRUDEOIL&tf=15", "/api/time-profile?symbol=CRUDEOIL",
-    "/api/history-30m?symbol=CRUDEOIL", "/api/gap-study?symbol=CRUDEOIL", "/api/overnight-tracker", "/api/news", "/api/news-trade", "/api/why-today",
+    "/api/history-30m?symbol=CRUDEOIL", "/api/gap-study?symbol=CRUDEOIL", "/api/overnight-tracker", "/api/news", "/api/news-trade", "/api/why-today", "/api/oi-buildup?symbol=CRUDEOIL",
   ];
   console.log("\nHTTP route                                  cold ms   warm ms");
   for (const r of routes) {

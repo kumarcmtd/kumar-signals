@@ -3,6 +3,7 @@
 import { ACCESS_KEY_HEADER, keyMatches, requiresKey } from "../frontend/src/utils/apiGuard";
 import type { AffectedMarket } from "../frontend/src/utils/newsScoring";
 import { computeMarketDepth } from "./depth";
+import { computeOiBuildup } from "./oiBuildup";
 import { fetchEconCalendar, fetchEiaData } from "./eiaCalendar";
 import { ALL_SYMBOLS, type Env, getMarketStatus, json, OPTION_SYMBOLS, type Symbol } from "./env";
 import { computeExpiryAlerts } from "./expiryAlerts";
@@ -171,6 +172,15 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
             .map((s) => Number(s))
             .filter((n) => Number.isFinite(n));
           return json(await computeOptionsAnalytics(env, token, symbol, pinnedStrikes));
+        }
+
+        // Futures price + OI (this month and next) for the build-up read.
+        if (url.pathname === "/api/oi-buildup") {
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
+          const token = await requireToken(env, guard);
+          if (token instanceof Response) return token;
+          return json(await computeOiBuildup(env, token, symbol));
         }
 
         const depthMatch = url.pathname.match(/^\/api\/depth\/([A-Z]+)$/);

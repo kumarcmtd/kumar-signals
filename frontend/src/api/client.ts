@@ -1,4 +1,5 @@
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, OvernightTrackerResponse, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
+import type { OiBuildupResponse } from "../utils/oiBuildup";
 import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
 import type { MorningGapRecord } from "../utils/overnightGapEngine";
@@ -138,6 +139,7 @@ export const api = {
   optionsAnalytics: (symbol: InstrumentSymbol, pinnedStrikes: number[] = []) =>
     getJSON<OptionsAnalytics>(`/options/${symbol}${pinnedStrikes.length ? `?strikes=${pinnedStrikes.join(",")}` : ""}`),
   depth: (symbol: InstrumentSymbol) => getJSON<MarketDepthSnapshot>(`/depth/${symbol}`),
+  oiBuildup: (symbol: InstrumentSymbol) => getJSON<OiBuildupResponse>(`/oi-buildup?symbol=${symbol}`),
   newsTrade: () => getJSON<NewsTradeApiResponse>("/news-trade"),
   // AI Flash's feed. Deliberately the lighter /news route rather than
   // /news-trade -- the flash page needs only headlines, not the EIA and

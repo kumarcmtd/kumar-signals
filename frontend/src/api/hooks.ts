@@ -127,6 +127,16 @@ function useOpenStrikesFor(symbol: InstrumentSymbol): number[] {
 // passes false unless the trader explicitly turns live premium tracking on --
 // the option chain is the single heaviest upstream call in the app, and a new
 // page must not add to it by default.
+// Futures price + OI for the build-up read. Upstox candles are one per
+// minute, so polling faster than this shows nothing new.
+export function useOiBuildup(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["oi-buildup", symbol],
+    queryFn: () => api.oiBuildup(symbol),
+    refetchInterval: usePollInterval(60_000),
+  });
+}
+
 export function useOptionsAnalytics(symbol: InstrumentSymbol, enabled = true) {
   const pinnedStrikes = useOpenStrikesFor(symbol);
   const pinnedKey = pinnedStrikes.join(",");

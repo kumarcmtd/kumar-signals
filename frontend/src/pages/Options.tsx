@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useOptionsAnalytics, useMarketStatus } from "../api/hooks";
 import type { InstrumentSymbol, OptionRowAnalytics } from "../types";
+import { OiBuildupCard } from "../components/OiBuildupCard";
 
 function fmt(n: number | null | undefined, digits = 2) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -35,6 +36,8 @@ export function Options() {
           </button>
         ))}
       </div>
+
+      <OiBuildupCard symbol={symbol} />
 
       {isLoading && <div className="card p-4 text-sm text-[var(--color-muted)]">Loading option chain…</div>}
       {error && <div className="card p-4 text-sm text-[var(--color-sell)]">{(error as Error).message}</div>}
