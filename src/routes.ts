@@ -2,7 +2,6 @@
 
 import { ACCESS_KEY_HEADER, keyMatches, requiresKey } from "../frontend/src/utils/apiGuard";
 import type { AffectedMarket } from "../frontend/src/utils/newsScoring";
-import { mergeTradeLogs, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
 import { computeMarketDepth } from "./depth";
 import { fetchEconCalendar, fetchEiaData } from "./eiaCalendar";
 import { ALL_SYMBOLS, type Env, getMarketStatus, json, OPTION_SYMBOLS, type Symbol } from "./env";
@@ -16,7 +15,8 @@ import { NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification }
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
 import { computeCandles, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
-import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, getTradeLogsFromKv, type PortfolioTrade, saveTradeLogsToKv, updatePortfolioTrade } from "./storage";
+import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, type PortfolioTrade, updatePortfolioTrade } from "./storage";
+import { pushTradeLogs, readAllTradeLogsJson } from "./tradeLogStore";
 import { getCronStatus } from "./tradeLogCron";
 import { getNearestFuture } from "./upstox";
 import { computeMacroMarkets, computeWhyToday } from "./whyToday";
@@ -295,19 +295,17 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         }
 
         if (url.pathname === "/api/trade-logs") {
-          if (request.method === "GET") return json(await getTradeLogsFromKv(env));
+          if (request.method === "GET") {
+            return new Response(await readAllTradeLogsJson(env), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+          }
           if (request.method === "POST") {
             const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
             if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "Body must be an object keyed by trade-log id" }, 400);
-            // Merge the incoming client push OVER what's already in KV rather
-            // than overwriting -- the Cron may have closed a trade server-side
-            // that the client still shows as open, and the merge's "closed
-            // version always wins" rule keeps that close instead of letting a
-            // stale-open client copy resurrect it. (incoming = "local",
-            // existing KV = "server".)
-            const existing = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
-            const merged = mergeTradeLogs(body as Record<string, TradeLogEntry[]>, existing);
-            await saveTradeLogsToKv(env, merged);
+            // Merged OVER what's stored rather than overwriting -- the Cron may
+            // have closed a trade server-side that the client still shows as
+            // open, and the merge's "closed version always wins" rule keeps
+            // that close. The body may be every key or only the changed ones.
+            await pushTradeLogs(env, body);
             return json({ ok: true });
           }
           return json({ error: "Method not allowed" }, 405);

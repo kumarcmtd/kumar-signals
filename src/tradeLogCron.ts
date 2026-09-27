@@ -2,10 +2,10 @@
 // bell (EOD), sweeps orphans, and records a throttled heartbeat.
 
 import { lastMcxClose, mcxSessionAt } from "../frontend/src/utils/mcxSession";
-import { advanceOpenEntry, closeRunningAtSessionEnd, mergeTradeLogs, runningBeforeClose, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
+import { advanceOpenEntry, closeRunningAtSessionEnd, runningBeforeClose, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
 import type { Env, Symbol } from "./env";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
-import { getTradeLogsFromKv, getTradeLogsWithRev, openTradeCountFromKv, saveTradeLogsToKv, tradeLogRevision } from "./storage";
+import { loadOpenTrades, migrateTradeLogs, saveCronResult } from "./tradeLogStore";
 
 // ---- Server-side trade-log advancement (Cron) ----
 // The browser only advances/closes trades while a tab is open (see
@@ -131,29 +131,46 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<boolean> {
     await env.COMMODITY_KV.put(CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
   };
 
+  // One-time copy of the old single-value log into shards (src/tradeLogStore).
+  // It is the whole of this run when it happens.
+  if (await migrateTradeLogs(env)) {
+    await writeHeartbeat("trade logs moved to per-key storage");
+    return true;
+  }
+
   if (!token) {
     await writeHeartbeat("no access token in KV");
     return false;
   }
 
-  // Nothing running -> nothing to advance and nothing to close at the bell.
-  // Checked from metadata so the log itself is never parsed on such a tick,
-  // which is almost every tick outside market hours.
-  if ((await openTradeCountFromKv(env)) === 0) {
+  // Only the running trades are read -- a few hundred bytes, however long the
+  // history grows. Nothing running -> nothing to advance or close at the bell.
+  const { logs: open, stale } = await loadOpenTrades(env);
+  if (Object.keys(open).length === 0) {
+    if (stale.size) await saveCronResult(env, {}, {}, stale);
     await writeHeartbeat("no open trades");
     return false;
   }
 
-  const read = await getTradeLogsWithRev(env);
-  let logs = read.logs as Record<string, TradeLogEntry[]>;
-  let anyChanged = false;
+  const result = await advanceLogs(env, token, { ...open }, marketOpen, now, counts);
+  if (result.changed || stale.size) await saveCronResult(env, open, result.logs, stale);
+  await writeHeartbeat();
+  return true;
+}
 
+async function advanceLogs(
+  env: Env,
+  token: string,
+  logs: Record<string, TradeLogEntry[]>,
+  marketOpen: boolean,
+  now: number,
+  counts: AdvanceCounts
+): Promise<{ logs: Record<string, TradeLogEntry[]>; changed: boolean }> {
+  let anyChanged = false;
   if (!marketOpen) {
     // MCX is shut. The only job left is the end-of-day close, and it only
     // needs a quote fetch when something is actually still running from
-    // before the last bell. The common case -- nothing open -- costs zero
-    // Upstox calls, where this used to fetch the chain every five minutes
-    // all night and all weekend for as long as any trade was open.
+    // before the last bell.
     const { closeAt } = lastMcxClose(now);
     for (const symbol of TRADE_LOG_SYMBOLS) {
       const running = runningBeforeClose(logs, symbol, closeAt);
@@ -192,27 +209,7 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<boolean> {
       }
     }
   }
-
-  if (anyChanged) {
-    // Re-read the freshest KV right before writing and merge our advanced
-    // result over it (advanced = "server", so its closes win), so a client
-    // push that landed mid-run -- e.g. a brand-new open trade -- is preserved
-    // rather than clobbered by our older snapshot.
-    // Only when someone else wrote since our read. Re-reading unconditionally
-    // parsed the whole log a second time on every changing tick (~5 ms of the
-    // 10 ms free-plan budget) to merge against a copy that was almost always
-    // the one we started from. A missing revision (log written before
-    // revisions existed) is treated as "changed", so it always merges.
-    const current = await tradeLogRevision(env);
-    if (read.rev !== null && current === read.rev) {
-      await saveTradeLogsToKv(env, logs);
-    } else {
-      const fresh = (await getTradeLogsFromKv(env)) as Record<string, TradeLogEntry[]>;
-      await saveTradeLogsToKv(env, mergeTradeLogs(fresh, logs));
-    }
-  }
-  await writeHeartbeat();
-  return true;
+  return { logs, changed: anyChanged };
 }
 
 export async function getCronStatus(env: Env): Promise<Record<string, unknown>> {

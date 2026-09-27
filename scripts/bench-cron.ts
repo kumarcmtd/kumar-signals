@@ -225,23 +225,30 @@ async function main() {
   // Re-seed with three genuinely open trades, written through the real save
   // path so the open-trade metadata is set, and hold premiums inside the range.
   FIXED_PREMIUM = 100;
+  // Back to the pre-migration layout, so the one-time migration is measured.
+  for (const k of [...store.keys()]) if (k.startsWith("tl2:")) store.delete(k);
   await (await import("../src/storage")).saveTradeLogsToKv(env as never, tradeLogs());
-  const storage = await import("../src/storage");
   const row = (label: string, w: number) => console.log(`${label.padEnd(50)}${w.toFixed(1).padStart(8)}${w > 10 ? "   OVER" : ""}`);
   await trigger(cron.CRON_FAST);
   row("FAST    */5      (Ai20-20, expiry, anchor)", await cpu(() => trigger(cron.CRON_FAST)));
-  // Measured on the FIRST run over freshly open trades, then checked they
-  // really were open -- a warm-up run could otherwise close them.
-  const openBefore = await storage.openTradeCountFromKv(env as never);
-  row(`TRADES  1-59/5   (${openBefore} trades open)`, await cpu(() => trigger(cron.CRON_TRADES)));
-  await storage.saveTradeLogsToKv(env as never, tradeLogs());
-  row(`TRADES  1-59/5   (${await storage.openTradeCountFromKv(env as never)} open, 2nd run)`, await cpu(() => trigger(cron.CRON_TRADES)));
-  // No trades open: the common case outside market hours. The run then builds
-  // one missing time profile -- measured with none cached, the worst case.
-  const logs = JSON.parse(store.get("trade_logs_v1")!);
-  for (const list of Object.values(logs) as { closed: boolean }[][]) list[list.length - 1].closed = true;
-  await storage.saveTradeLogsToKv(env as never, logs);
-  console.log(`  (open trades before the "nothing open" runs: ${(await storage.openTradeCountFromKv(env as never)) ?? -1})`);
+  // First TRADES run after deploy: the one-time move to per-key storage.
+  const tls = await import("../src/tradeLogStore");
+  for (let i = 1; i <= 20 && !(await tls.isSharded(env as never)); i++) row(`TRADES  1-59/5   (migration run ${i})`, await cpu(() => trigger(cron.CRON_TRADES)));
+  const openCount = async () => Object.keys((await tls.loadOpenTrades(env as never)).logs).length;
+  // Premiums cached by the jobs above are outside these trades' ranges, so
+  // this run CLOSES them -- the heavier path: each close is merged into its
+  // key's history as well as leaving hot.
+  row(`TRADES  1-59/5   (${await openCount()} open, all close)`, await cpu(() => trigger(cron.CRON_TRADES)));
+  // App saves: one changed key (the current app) and every key (older app).
+  const full = tradeLogs() as Record<string, { closed: boolean; highWaterMark?: number }[]>;
+  const oneKey = { "BEST-NATURALGAS": full["BEST-NATURALGAS"].map((e, i, a) => (i === a.length - 1 ? { ...e, highWaterMark: 104 } : e)) };
+  row("POST /api/trade-logs  (1 changed key)", await cpu(() => tls.pushTradeLogs(env as never, oneKey)));
+  row("POST /api/trade-logs  (every key, old app)", await cpu(() => tls.pushTradeLogs(env as never, full)));
+  row("GET  /api/trade-logs", await cpu(() => tls.readAllTradeLogsJson(env as never)));
+  // No trades open: the common case outside market hours.
+  for (const list of Object.values(full)) list[list.length - 1] = { ...list[list.length - 1], closed: true };
+  await tls.pushTradeLogs(env as never, full);
+  console.log(`  (open trades before the "nothing open" runs: ${await openCount()})`);
   for (const k of [...store.keys()]) if (k.startsWith("timeprofile:") || k.startsWith("hist30m:")) store.delete(k);
   row("TRADES  1-59/5   (nothing open, fetch 30m history)", await cpu(() => trigger(cron.CRON_TRADES)));
   row("TRADES  1-59/5   (nothing open, build profile)", await cpu(() => trigger(cron.CRON_TRADES)));

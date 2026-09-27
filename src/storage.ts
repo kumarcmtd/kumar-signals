@@ -119,6 +119,10 @@ export async function deletePortfolioTrade(env: Env, id: string): Promise<void> 
 // client is responsible for merging/debouncing before it pushes here -- this
 // is a deliberately simple whole-blob get/put, no per-entry validation,
 // matching the same trust level as the portfolio trades KV store above.
+//
+// This single-value layout is now only the pre-migration state and the source
+// the migration copies from: src/tradeLogStore.ts stores the log per key, and
+// once it has moved over, trade_logs_v1 is a frozen backup nothing reads.
 const TRADE_LOGS_KV_KEY = "trade_logs_v1";
 
 export async function getTradeLogsFromKv(env: Env): Promise<Record<string, unknown>> {

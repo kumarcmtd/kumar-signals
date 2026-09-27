@@ -171,5 +171,29 @@ export const api = {
   sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
   checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
   getTradeLogs: () => getJSON<Record<string, TradeLogEntry[]>>("/trade-logs"),
-  saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => sendJSON<{ ok: true }>("/trade-logs", "POST", logs),
+  saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => saveTradeLogsInChunks(logs),
 };
+
+// A save is sent in pieces of about this size, one after another. Merging a
+// whole history (over 1 MB) in one request is more CPU than the Worker's
+// free plan allows per request; each piece is merged on its own, and merging
+// the same data twice is harmless, so a retry after a partial failure is safe.
+const TRADE_LOG_CHUNK_BYTES = 120_000;
+
+async function saveTradeLogsInChunks(logs: Record<string, TradeLogEntry[]>): Promise<{ ok: true }> {
+  let chunk: Record<string, TradeLogEntry[]> = {};
+  let size = 0;
+  const send = async () => {
+    if (Object.keys(chunk).length) await sendJSON<{ ok: true }>("/trade-logs", "POST", chunk);
+    chunk = {};
+    size = 0;
+  };
+  for (const [key, list] of Object.entries(logs)) {
+    const bytes = JSON.stringify(list).length;
+    if (size > 0 && size + bytes > TRADE_LOG_CHUNK_BYTES) await send();
+    chunk[key] = list;
+    size += bytes;
+  }
+  await send();
+  return { ok: true };
+}

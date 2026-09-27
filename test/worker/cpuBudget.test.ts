@@ -66,18 +66,8 @@ test("no log at all counts as nothing open", async () => {
   expect(await openTradeCountFromKv(envWith(makeKv()))).toBe(0);
 });
 
-test("with nothing open, the trade cron never reads or parses the log", async () => {
-  vi.useFakeTimers({ now: new Date("2026-09-26T03:00:00+05:30"), toFake: ["Date"] }); // Saturday night
-  const { saveTradeLogsToKv } = await import("../../src/storage");
-  const { runTradeLogAdvanceCheck } = await import("../../src/tradeLogCron");
-  const kv = makeKv();
-  kv.store.set("access_token", "tok");
-  await saveTradeLogsToKv(envWith(kv), { A: [closedTrade("a1")], B: [closedTrade("b1")] });
-  kv.reads.length = 0;
-  await runTradeLogAdvanceCheck(envWith(kv));
-  expect(bodyReads(kv, "trade_logs_v1")).toHaveLength(0);
-  expect(fetchCalls.filter((u) => u.includes("upstox"))).toHaveLength(0);
-});
+// The cron's "nothing open" path is covered in tradeLogStore.test.ts, now
+// that it runs on the sharded store.
 
 test("every save gets a new revision, and it can be read without the body", async () => {
   const { saveTradeLogsToKv, tradeLogRevision, getTradeLogsWithRev } = await import("../../src/storage");

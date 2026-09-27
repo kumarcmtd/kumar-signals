@@ -14,25 +14,50 @@ import { mergeTradeLogs } from "./utils/tradeLogCore";
 // ever wrote to that one browser's own localStorage.
 const PUSH_DEBOUNCE_MS = 8000;
 
+// Only the keys whose history changed since the last successful push are
+// sent. Sending the whole dictionary (over 1 MB) on every change made the
+// Worker parse, merge and rewrite all of it each time -- more CPU than the
+// free plan allows per request. The Worker merges whatever subset arrives.
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let lastPushedJson = "";
+let lastPushed = new Map<string, string>();
+// The store replaces only the arrays that change, so an array seen before
+// needs no re-stringify to know it is unchanged.
+const checkedRefs = new WeakMap<TradeLogEntry[], string>();
+
+function changedKeys(logs: Record<string, TradeLogEntry[]>): Record<string, TradeLogEntry[]> {
+  const out: Record<string, TradeLogEntry[]> = {};
+  for (const [key, list] of Object.entries(logs)) {
+    let json = checkedRefs.get(list);
+    if (json === undefined) {
+      json = JSON.stringify(list);
+      checkedRefs.set(list, json);
+    }
+    if (lastPushed.get(key) !== json) out[key] = list;
+  }
+  return out;
+}
+
+function pushChanged(logs: Record<string, TradeLogEntry[]>): void {
+  const diff = changedKeys(logs);
+  if (Object.keys(diff).length === 0) return; // nothing actually changed
+  api.saveTradeLogs(diff).then(
+    () => {
+      for (const [key, list] of Object.entries(diff)) lastPushed.set(key, JSON.stringify(list));
+    },
+    () => {
+      // Best-effort: a network hiccup here must never break the rest of the
+      // app. The keys stay "changed", so the next push retries them.
+    }
+  );
+}
 
 function schedulePush(logs: Record<string, TradeLogEntry[]>) {
-  const json = JSON.stringify(logs);
-  if (json === lastPushedJson) return; // nothing actually changed since the last successful push
   if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    api.saveTradeLogs(logs).then(
-      () => {
-        lastPushedJson = json;
-      },
-      () => {
-        // Best-effort: a network hiccup here must never break the rest of
-        // the app. Leave lastPushedJson stale so the next real change (or a
-        // future retry) has another go at pushing.
-      }
-    );
-  }, PUSH_DEBOUNCE_MS);
+  pushTimer = setTimeout(() => pushChanged(logs), PUSH_DEBOUNCE_MS);
+}
+
+function remember(logs: Record<string, TradeLogEntry[]>): Map<string, string> {
+  return new Map(Object.entries(logs).map(([k, v]) => [k, JSON.stringify(v)] as const));
 }
 
 // One-time bootstrap, called once from main.tsx: pulls whatever's already on
@@ -55,18 +80,10 @@ export async function initTradeLogSync(): Promise<void> {
   const merged = mergeTradeLogs(local, server);
   useAppStore.getState().hydrateTradeLogs(merged);
 
-  const mergedJson = JSON.stringify(merged);
-  lastPushedJson = JSON.stringify(server);
-  if (mergedJson !== lastPushedJson) {
-    api.saveTradeLogs(merged).then(
-      () => {
-        lastPushedJson = mergedJson;
-      },
-      () => {
-        lastPushedJson = "";
-      }
-    );
-  }
+  // What the server already holds counts as pushed; only what the merge
+  // added on this device goes up.
+  lastPushed = remember(server);
+  pushChanged(merged);
 
   useAppStore.subscribe((state, prevState) => {
     if (state.tradeLogs !== prevState.tradeLogs) schedulePush(state.tradeLogs);
