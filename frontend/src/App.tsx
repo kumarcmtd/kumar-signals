@@ -14,6 +14,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Charts } from "./pages/Charts";
 import { Options } from "./pages/Options";
 import { Risk } from "./pages/Risk";
+import { CapitalGuard } from "./pages/CapitalGuard";
 import { Global } from "./pages/Global";
 import { Journal } from "./pages/Journal";
 import { Alerts } from "./pages/Alerts";
@@ -57,6 +58,7 @@ function App() {
           <Route path="/charts" element={<Charts />} />
           <Route path="/options" element={<Options />} />
           <Route path="/risk" element={<Risk />} />
+          <Route path="/capital-guard" element={<CapitalGuard />} />
           <Route path="/global" element={<Global />} />
           <Route path="/journal" element={<Journal />} />
           <Route path="/alerts" element={<Alerts />} />

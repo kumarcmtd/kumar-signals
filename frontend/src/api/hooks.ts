@@ -112,6 +112,9 @@ export function useDepthContextCandles(symbol: InstrumentSymbol) {
 // getting live quotes -- see nearestStrikes/getOptionChain on the worker.
 function useOpenStrikesFor(symbol: InstrumentSymbol): number[] {
   const tradeLogs = useAppStore((s) => s.tradeLogs);
+  // Positions entered in Capital Guard too, so a deep out-of-the-money
+  // holding still gets a live premium instead of "not in chain".
+  const guardPositions = useAppStore((s) => s.guardPositions);
   return useMemo(() => {
     const set = new Set<number>();
     for (const [key, entries] of Object.entries(tradeLogs)) {
@@ -119,14 +122,11 @@ function useOpenStrikesFor(symbol: InstrumentSymbol): number[] {
       const last = entries[entries.length - 1];
       if (last && !last.closed) set.add(last.strike);
     }
+    for (const p of guardPositions) if (p.symbol === symbol) set.add(p.strike);
     return Array.from(set).sort((a, b) => a - b);
-  }, [tradeLogs, symbol]);
+  }, [tradeLogs, guardPositions, symbol]);
 }
 
-// `enabled` defaults to true so every existing caller is unchanged. GPT News
-// passes false unless the trader explicitly turns live premium tracking on --
-// the option chain is the single heaviest upstream call in the app, and a new
-// page must not add to it by default.
 // Futures price + OI for the build-up read. Upstox candles are one per
 // minute, so polling faster than this shows nothing new.
 export function useOiBuildup(symbol: InstrumentSymbol) {
@@ -137,6 +137,10 @@ export function useOiBuildup(symbol: InstrumentSymbol) {
   });
 }
 
+// `enabled` defaults to true so every existing caller is unchanged. GPT News
+// passes false unless the trader explicitly turns live premium tracking on --
+// the option chain is the single heaviest upstream call in the app, and a new
+// page must not add to it by default.
 export function useOptionsAnalytics(symbol: InstrumentSymbol, enabled = true) {
   const pinnedStrikes = useOpenStrikesFor(symbol);
   const pinnedKey = pinnedStrikes.join(",");

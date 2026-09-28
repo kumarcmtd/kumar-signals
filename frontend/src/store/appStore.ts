@@ -8,12 +8,14 @@ import type { StrategyTier } from "../utils/strategyVerification";
 // `import { type TradeLogEntry } from "../store/appStore"` keeps working.
 export type { TradeLogStatus, TradeLogEntry } from "../utils/tradeLogCore";
 import type { TradeLogEntry } from "../utils/tradeLogCore";
+import type { GuardPosition } from "../utils/capitalGuard";
 
 export type Timeframe = "5" | "15" | "30" | "1D";
 
 interface RiskSettings {
   capital: number;
-  riskPercent: number;
+  riskPercent: number; // max loss per trade, % of capital
+  dailyLossPercent: number; // stop trading for the day past this, % of capital
 }
 
 // One line per fired alert, newest first. The engine that produces these
@@ -124,6 +126,13 @@ interface AppState {
 
   risk: RiskSettings;
   setRisk: (risk: Partial<RiskSettings>) => void;
+  // Capital Guard: positions the trader enters by hand (this app cannot see
+  // the broker account), and today's booked P&L. Local to this device only.
+  guardPositions: GuardPosition[];
+  addGuardPosition: (p: GuardPosition) => void;
+  removeGuardPosition: (id: string) => void;
+  guardDay: { date: string; realised: number };
+  setGuardRealised: (date: string, realised: number) => void;
 
   tradeLogs: Record<string, TradeLogEntry[]>;
   setTradeLog: (key: string, entries: TradeLogEntry[]) => void;
@@ -183,8 +192,14 @@ export const useAppStore = create<AppState>()(
       selectedTimeframe: "1D",
       setSelectedTimeframe: (tf) => set({ selectedTimeframe: tf }),
 
-      risk: { capital: 200000, riskPercent: 3 },
+      risk: { capital: 100000, riskPercent: 2, dailyLossPercent: 3 },
       setRisk: (risk) => set((s) => ({ risk: { ...s.risk, ...risk } })),
+
+      guardPositions: [],
+      addGuardPosition: (p) => set((s) => ({ guardPositions: [...s.guardPositions, p] })),
+      removeGuardPosition: (id) => set((s) => ({ guardPositions: s.guardPositions.filter((p) => p.id !== id) })),
+      guardDay: { date: "", realised: 0 },
+      setGuardRealised: (date, realised) => set({ guardDay: { date, realised } }),
 
       tradeLogs: {},
       setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
@@ -254,7 +269,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "kumar-signals-pro-store",
-      version: 2,
+      version: 3,
       // v0 -> v1: the Kimi AI Trade ledger used to open a line for ANY
       // scanner hit (a pattern match alone, no confluence/edge-score bar),
       // which produced a genuinely broken ~9% win rate. Now that a real
@@ -279,6 +294,21 @@ export const useAppStore = create<AppState>()(
         // produced 199 unread alerts from pages that were not being traded.
         if (version < 2 && state?.alertSettings?.sources) {
           state.alertSettings.sources = { timeframe: false, elite: false, kimi: false, bestCall: false, twenty20: true };
+        }
+        // v2 -> v3: capital set to the owner's ₹1,00,000, and the old 3%
+        // per-trade default lowered to 2% -- 3% a trade lets five losers in a
+        // row take 15% of the account. Only the old defaults are changed; a
+        // value the owner set by hand is kept.
+        if (version < 3) {
+          const s = state as unknown as { risk?: Partial<RiskSettings> } | undefined;
+          if (s) {
+            const r = s.risk ?? {};
+            s.risk = {
+              capital: r.capital === undefined || r.capital === 200000 ? 100000 : r.capital,
+              riskPercent: r.riskPercent === undefined || r.riskPercent === 3 ? 2 : r.riskPercent,
+              dailyLossPercent: r.dailyLossPercent ?? 3,
+            };
+          }
         }
         return state;
       },

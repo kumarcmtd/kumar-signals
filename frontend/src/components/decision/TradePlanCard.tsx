@@ -1,4 +1,7 @@
-import { Target, ShieldAlert, LogIn } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Target, ShieldAlert, LogIn, Shield } from "lucide-react";
+import { useAppStore } from "../../store/appStore";
+import { LOT_SIZE, sizePosition } from "../../utils/capitalGuard";
 import type { DecisionResult } from "../../utils/buyDecisionEngine";
 import type { OptionPick } from "../../hooks/useBuyDecision";
 
@@ -22,7 +25,24 @@ function Rung({ label, level, premium, ink, Icon, note }: { label: string; level
   );
 }
 
-export function TradePlanCard({ result, pick }: { result: DecisionResult; pick: OptionPick | null }) {
+function LotsForYou({ pick, symbol }: { pick: OptionPick; symbol: "CRUDEOIL" | "NATURALGAS" }) {
+  const risk = useAppStore((s) => s.risk);
+  if (pick.ltp === null || pick.atStop === null) return null;
+  const s = sizePosition({ capital: risk.capital, riskPct: risk.riskPercent, premium: pick.ltp, stopPremium: pick.atStop, lotSize: LOT_SIZE[symbol] });
+  if (s.verdict === "invalid") return null;
+  const ok = s.lots > 0;
+  return (
+    <Link to="/capital-guard" className="flex items-start gap-2 rounded-2xl px-3 py-2.5" style={{ background: ok ? "#EEF2FF" : "#FFF1F2" }}>
+      <Shield size={16} className="shrink-0 mt-[1px]" style={{ color: ok ? "#4338CA" : "#BE123C" }} />
+      <p className="text-[11.5px] leading-snug" style={{ color: ok ? "#3730A3" : "#9F1239" }}>
+        <b>{ok ? `Your size: ${s.lots} lot${s.lots > 1 ? "s" : ""} max` : "Your size: 0 lots — skip"}</b> (₹{risk.capital.toLocaleString("en-IN")} capital, {risk.riskPercent}% a trade). One lot risks ₹
+        {Math.round(s.riskPerLot).toLocaleString("en-IN")} to this stop. <span className="font-bold underline">Capital Guard →</span>
+      </p>
+    </Link>
+  );
+}
+
+export function TradePlanCard({ result, pick, symbol }: { result: DecisionResult; pick: OptionPick | null; symbol: "CRUDEOIL" | "NATURALGAS" }) {
   const plan = result.plan;
   if (!plan || !result.side) return null;
   const confirmed = result.verdict === "BUY_CE" || result.verdict === "BUY_PE";
@@ -50,6 +70,8 @@ export function TradePlanCard({ result, pick }: { result: DecisionResult; pick: 
         <Rung label="Entry" level={plan.entry} premium={pick?.ltp ?? null} ink="#4F46E5" Icon={LogIn} note="close of the last finished candle" />
         <Rung label="Stop loss" level={plan.stop} premium={pick?.atStop ?? null} ink="#E11D48" Icon={ShieldAlert} note={plan.stopBasis} />
       </div>
+
+      {pick && <LotsForYou pick={pick} symbol={symbol} />}
 
       <p className="text-[10px] text-slate-400 leading-snug">
         Risk is {fmt(plan.riskPts)} on the futures price.

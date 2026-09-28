@@ -6,7 +6,7 @@ import {
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
   GraduationCap, BarChart3, Settings, Sparkles, Repeat, Scale, AlarmClock, Activity as ActivityIcon,
-  Microscope, Rss,
+  Microscope, Rss, Shield,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
@@ -72,6 +72,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Tools",
     items: [
+      { to: "/capital-guard", label: "Capital Guard", icon: Shield },
       { to: "/charts", label: "Charts", icon: LineChart },
       { to: "/options", label: "Options", icon: Layers },
       { to: "/prices", label: "Live Prices", icon: Activity },

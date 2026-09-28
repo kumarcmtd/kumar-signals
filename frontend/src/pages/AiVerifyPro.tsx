@@ -92,7 +92,7 @@ function SymbolView({ symbol }: { symbol: Sym }) {
       <Cautions items={result.cautions} />
       {running && <RunningCall trade={running} result={result} />}
       <TimeframeStrip result={result} />
-      <TradePlanCard result={result} pick={pick} />
+      <TradePlanCard result={result} pick={pick} symbol={symbol} />
       <EvidenceCard result={result} />
       <DecisionTimeline result={result} />
       <button onClick={refresh} className="w-full text-[11px] font-bold text-indigo-600 flex items-center justify-center gap-1.5 py-1">
