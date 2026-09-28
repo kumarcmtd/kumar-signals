@@ -1,133 +1,141 @@
 import { useState } from "react";
-import { ChevronDown, ShieldCheck, TrendingUp, TrendingDown } from "lucide-react";
-import type { TradableSymbol } from "../hooks/useBestCall";
-import { useVerifyPro } from "../hooks/useVerifyPro";
-import { VerifyProDecisionCard } from "../components/VerifyProDecisionCard";
-import { VerifyProThinkingPanel } from "../components/VerifyProThinkingPanel";
-import { VerifyProConfidenceBreakdown } from "../components/VerifyProConfidenceBreakdown";
-import { VerifyProTrackRecordCard } from "../components/VerifyProTrackRecordCard";
-import { StrategyCard } from "../components/StrategyCard";
-import { VolatilityMeter } from "../components/VolatilityMeter";
+import { ShieldCheck, RefreshCw, AlertTriangle, BadgeCheck, GitCompare } from "lucide-react";
+import { useBuyDecision } from "../hooks/useBuyDecision";
+import { VerdictHero } from "../components/decision/VerdictHero";
+import { TimeframeStrip } from "../components/decision/TimeframeStrip";
+import { TradePlanCard } from "../components/decision/TradePlanCard";
+import { EvidenceCard } from "../components/decision/EvidenceCard";
+import { DecisionTimeline } from "../components/decision/DecisionTimeline";
+import { sessionBucketStart } from "../utils/candleResample";
+import type { DecisionResult } from "../utils/buyDecisionEngine";
+import type { TradeLogEntry } from "../store/appStore";
 
-const SYMBOLS: TradableSymbol[] = ["CRUDEOIL", "NATURALGAS"];
-const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
+type Sym = "CRUDEOIL" | "NATURALGAS";
+const SYMBOLS: Sym[] = ["CRUDEOIL", "NATURALGAS"];
+const NAME: Record<Sym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 
-function SymbolBody({ symbol }: { symbol: TradableSymbol }) {
-  const { latest, underlyingPrice, candlesLoading, candlesError, result, trackRecord } = useVerifyPro(symbol);
-  const [showChecklist, setShowChecklist] = useState(false);
+function minutesToNextClose(marketOpen: boolean): number | null {
+  if (!marketOpen) return null;
+  const now = Date.now();
+  const next = sessionBucketStart(now, 15) + 15 * 60_000;
+  return Math.max(0, Math.ceil((next - now) / 60_000));
+}
 
-  if (candlesError) {
+function Cautions({ items }: { items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="rounded-2xl p-3 space-y-1.5" style={{ background: "linear-gradient(160deg,#FFFBEB,#FEF3C7)" }}>
+      <p className="text-[10.5px] font-black uppercase tracking-wide text-amber-700 flex items-center gap-1">
+        <AlertTriangle size={13} /> Before you trade
+      </p>
+      {items.map((c) => (
+        <p key={c} className="text-[11.5px] text-amber-900 leading-snug">• {c}</p>
+      ))}
+    </div>
+  );
+}
+
+function RunningCall({ trade, result }: { trade: TradeLogEntry; result: DecisionResult }) {
+  const agrees = result.side === trade.optSide && result.bull !== result.bear;
+  const opposed = result.side !== null && result.side !== trade.optSide;
+  const ink = agrees ? "#047857" : opposed ? "#BE123C" : "#64748B";
+  return (
+    <div className="card p-3.5 flex items-start gap-2.5">
+      <span className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0" style={{ background: `${ink}14`, color: ink }}>
+        <GitCompare size={16} />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[12px] font-black text-slate-800">
+          Your running Best Call: {trade.strike} {trade.optSide} @ ₹{trade.entry.toFixed(2)}
+        </p>
+        <p className="text-[11px] leading-snug mt-0.5" style={{ color: ink }}>
+          {agrees
+            ? "This read agrees with it."
+            : opposed
+              ? `This read leans the other way (${result.side}). Protect it with its stop.`
+              : "This read has no clear view either way right now."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SymbolView({ symbol }: { symbol: Sym }) {
+  const { result, pick, entry, running, marketOpen, loading, error, refetch, updatedAt } = useBuyDecision(symbol);
+  const [spinning, setSpinning] = useState(false);
+
+  if (error && !result) {
     return (
       <div className="card p-6 text-center">
         <p className="text-sm font-bold text-[var(--color-sell)]">Live data unavailable</p>
-        <p className="text-xs text-[var(--color-muted)] mt-1">{candlesError}</p>
+        <p className="text-xs text-[var(--color-muted)] mt-1">{error}</p>
       </div>
     );
   }
-
-  if (!latest) {
-    return (
-      <div className="card p-6 text-center space-y-1.5">
-        <ShieldCheck size={28} className="mx-auto text-[var(--color-muted)]" />
-        <p className="text-sm font-bold">No active Best Call to approve right now</p>
-        <p className="text-xs text-[var(--color-muted)] px-2">
-          AI Verify Pro only ever reviews a call Best Call already generated for {DISPLAY_NAME[symbol]} -- it never creates its own signal. Nothing is running right now.
-        </p>
-      </div>
-    );
-  }
-
   if (!result) {
     return (
-      <div className="card p-6 text-center">
-        <p className="text-sm font-bold">{candlesLoading ? "Loading market data…" : "Gathering enough candles to run final approval…"}</p>
+      <div className="card p-8 text-center space-y-2">
+        <ShieldCheck size={30} className="mx-auto text-indigo-400 animate-pulse" />
+        <p className="text-sm font-bold">{loading ? "Reading the 15-min, 1-hour and 4-hour charts…" : "Not enough finished candles yet to decide."}</p>
       </div>
     );
   }
 
-  const Bias = latest.optSide === "CE" ? TrendingUp : TrendingDown;
-  const biasColor = latest.optSide === "CE" ? "var(--color-buy)" : "var(--color-sell)";
+  const refresh = async () => {
+    setSpinning(true);
+    await refetch().finally(() => setSpinning(false));
+  };
 
   return (
-    <div className="space-y-4 pb-6">
-      <div className="card p-3.5 flex items-center justify-between">
-        <p className="text-sm font-black flex items-center gap-1.5">
-          <Bias size={16} style={{ color: biasColor }} />
-          {DISPLAY_NAME[symbol]} {latest.strike} {latest.optSide}
-        </p>
-        {underlyingPrice !== null && (
-          <p className="text-xs font-bold text-[var(--color-muted)]">
-            Underlying ₹{underlyingPrice.toFixed(2)}
-          </p>
-        )}
-      </div>
-
-      <VerifyProDecisionCard result={result} label={`${DISPLAY_NAME[symbol]} ${latest.strike} ${latest.optSide}`} entry={latest.entry} />
-
-      <VerifyProThinkingPanel steps={result.thinkingSteps} />
-
-      <button onClick={() => setShowChecklist((v) => !v)} className="card p-4 w-full flex items-center justify-between">
-        <p className="text-xs font-black uppercase text-[var(--color-muted)]">View Full Analysis ({result.checks.length} checks)</p>
-        <ChevronDown size={16} className={`text-[var(--color-muted)] transition-transform ${showChecklist ? "rotate-180" : ""}`} />
+    <div className="space-y-3.5">
+      <VerdictHero result={result} name={NAME[symbol]} pick={pick} entry={entry} nextCloseIn={minutesToNextClose(marketOpen)} />
+      <Cautions items={result.cautions} />
+      {running && <RunningCall trade={running} result={result} />}
+      <TimeframeStrip result={result} />
+      <TradePlanCard result={result} pick={pick} />
+      <EvidenceCard result={result} />
+      <DecisionTimeline result={result} />
+      <button onClick={refresh} className="w-full text-[11px] font-bold text-indigo-600 flex items-center justify-center gap-1.5 py-1">
+        <RefreshCw size={12} className={spinning ? "animate-spin" : ""} />
+        Refresh data · updated {updatedAt ? new Date(updatedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"}
       </button>
-
-      {showChecklist && (
-        <div className="space-y-4">
-          <VerifyProConfidenceBreakdown categories={result.categoryScores} />
-          <div className="space-y-2.5">
-            {result.checks.map((s) => (
-              <StrategyCard key={s.key} strategy={s} />
-            ))}
-          </div>
-          <p className="text-[10px] text-[var(--color-muted)] px-1">{result.newsRiskNote}</p>
-        </div>
-      )}
-
-      <VerifyProTrackRecordCard track={trackRecord} />
     </div>
   );
 }
 
 export function AiVerifyPro() {
-  const [symbol, setSymbol] = useState<TradableSymbol>("NATURALGAS");
+  const [symbol, setSymbol] = useState<Sym>("NATURALGAS");
 
   return (
-    <div className="space-y-4">
-      <div
-        className="rounded-2xl p-4 text-white"
-        style={{ background: "linear-gradient(135deg,#7C3AED,#2563EB 55%,#0EA5E9)", boxShadow: "0 8px 24px rgba(37,99,235,.35)" }}
-      >
-        <p className="text-xl font-black flex items-center gap-2">
-          <ShieldCheck size={20} />
-          AI Verify Pro
+    <div className="space-y-4 pb-4">
+      <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: "linear-gradient(135deg,#1E1B4B,#4338CA 55%,#7C3AED)", boxShadow: "0 10px 26px rgba(67,56,202,.35)" }}>
+        <div className="absolute -right-6 -top-8 w-32 h-32 rounded-full" style={{ background: "rgba(255,255,255,.07)" }} />
+        <p className="relative text-[20px] font-black flex items-center gap-2">
+          <BadgeCheck size={21} /> AI Verify Pro
         </p>
-        <p className="text-xs text-white/80 mt-0.5">Final approval engine -- reviews every Best Call before it's tradeable. One decision, in under 5 seconds.</p>
+        <p className="relative text-[12px] text-white/85 mt-0.5 leading-snug">
+          Buy CE, buy PE, or wait — decided from finished candles on three timeframes, so it does not flip on every tick.
+        </p>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 p-1 rounded-2xl bg-slate-100">
         {SYMBOLS.map((s) => (
           <button
             key={s}
             onClick={() => setSymbol(s)}
-            className="flex-1 rounded-xl py-2.5 text-sm font-bold border transition-colors"
-            style={
-              symbol === s
-                ? { background: "linear-gradient(135deg,#7C3AED,#2563EB)", color: "#fff", borderColor: "transparent" }
-                : { background: "var(--color-surface)", borderColor: "var(--color-border)", color: "var(--color-muted)" }
-            }
+            className="flex-1 rounded-xl py-2.5 text-[13px] font-black transition-all"
+            style={symbol === s ? { background: "#fff", color: "#4338CA", boxShadow: "0 2px 8px rgba(15,23,42,.12)" } : { color: "#64748B" }}
           >
-            {DISPLAY_NAME[s]}
+            {NAME[s]}
           </button>
         ))}
       </div>
 
-      <VolatilityMeter symbol={symbol} />
+      <SymbolView key={symbol} symbol={symbol} />
 
-      <SymbolBody symbol={symbol} />
-
-      <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-4 pb-2">
-        Educational reference only, not financial advice. AI Verify Pro re-checks Best Call's own live pick against ~20 independently-weighted institutional
-        checks plus hard rejection rules -- always confirm on the live chart before acting.
+      <p className="text-[10px] text-[var(--color-muted)] leading-relaxed text-center px-3">
+        Educational reference, not financial advice. "Agree" is how much of the evidence points the same way, capped at 94 — it is not a chance of
+        profit. Always use the stop loss.
       </p>
     </div>
   );
