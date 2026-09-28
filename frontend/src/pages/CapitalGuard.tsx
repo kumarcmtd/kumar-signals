@@ -1,5 +1,6 @@
 import { Shield } from "lucide-react";
 import { GuardHero } from "../components/guard/GuardHero";
+import { TodaysCallsCard } from "../components/guard/TodaysCallsCard";
 import { SizeCalculator } from "../components/guard/SizeCalculator";
 import { PositionsCard } from "../components/guard/PositionsCard";
 import { ReviewCard } from "../components/guard/ReviewCard";
@@ -20,6 +21,7 @@ export function CapitalGuard() {
         </div>
       </div>
       <GuardHero />
+      <TodaysCallsCard />
       <SizeCalculator />
       <PositionsCard />
       <ReviewCard />

@@ -12,7 +12,14 @@ export function SizeCalculator() {
   const risk = useAppStore((s) => s.risk);
   const [symbol, setSymbol] = useState<GuardSymbol>("NATURALGAS");
   const [side, setSide] = useState<"CE" | "PE">("CE");
-  const { data: chain } = useOptionsAnalytics(symbol);
+  const { data: chain, isLoading: chainLoading, error: chainError } = useOptionsAnalytics(symbol);
+  const chainProblem = chainLoading
+    ? "Loading the live option chain…"
+    : chainError
+      ? `Live chain unavailable (${(chainError as Error).message}). Type the premium yourself.`
+      : chain?.error
+        ? `Live chain unavailable (${chain.error}). Type the premium yourself.`
+        : null;
   const rows = chain && !chain.error ? chain.rows : [];
   const [strike, setStrike] = useState<number | null>(null);
   const [premiumText, setPremiumText] = useState("");
@@ -83,6 +90,8 @@ export function SizeCalculator() {
           <input inputMode="decimal" value={premiumText} onChange={(e) => setPremiumText(e.target.value)} className="mt-0.5 w-full rounded-xl border border-slate-200 px-2 py-2 text-[13px] font-black text-slate-800" />
         </label>
       </div>
+
+      {chainProblem && <p className="text-[11px] font-semibold rounded-xl px-2.5 py-1.5 bg-slate-50 text-slate-600">{chainProblem}</p>}
 
       <div>
         <p className="text-[10px] font-bold text-slate-500 mb-1">Exit if the premium falls by</p>
