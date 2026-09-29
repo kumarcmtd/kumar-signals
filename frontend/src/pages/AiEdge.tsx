@@ -3,6 +3,8 @@ import { Scale, Info } from "lucide-react";
 import { useAppStore } from "../store/appStore";
 import { computeEngineEdges, computeEdgeTotals, MIN_SAMPLE } from "../utils/aiEdgeEngine";
 import { EdgeSummaryCard, DropTheseCard, EngineEdgeRow } from "../components/AiEdgeKit";
+import { TimeframeScorecardCard } from "../components/TimeframeScorecardCard";
+import { computeTimeframeScorecard } from "../utils/timeframeScorecard";
 
 const PERIODS = [
   { key: "30", label: "30 days", days: 30 },
@@ -22,6 +24,7 @@ export function AiEdge() {
 
   const edges = useMemo(() => computeEngineEdges(tradeLogs, sinceMs), [tradeLogs, sinceMs]);
   const totals = useMemo(() => computeEdgeTotals(edges), [edges]);
+  const tfCards = useMemo(() => computeTimeframeScorecard(tradeLogs, sinceMs), [tradeLogs, sinceMs]);
 
   const traded = edges.filter((e) => e.trades > 0);
   const untouched = edges.filter((e) => e.trades === 0);
@@ -67,6 +70,7 @@ export function AiEdge() {
         <>
           <EdgeSummaryCard totals={totals} periodLabel={active.label} />
           <DropTheseCard totals={totals} />
+          <TimeframeScorecardCard cards={tfCards} periodLabel={active.label} />
 
           <section>
             <div className="flex items-center justify-between mb-2">
