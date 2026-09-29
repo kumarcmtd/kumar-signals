@@ -8,7 +8,7 @@
 // the trade tracking and news refresh down with the heavy jobs. Separate
 // triggers are separate invocations, each with its own 10 ms:
 //
-//   */5        FAST     Ai20-20 push, expiry alerts, overnight anchor
+//   */5        FAST     Ai20-20 + Best Call pushes, expiry alerts, overnight anchor
 //   1-59/5     TRADES   trade-log advance and the end-of-day close; when no
 //                       trade is open, one missing time profile instead
 //   2-59/10    WARM     one third of the news feeds (rotating)
@@ -17,19 +17,16 @@
 // immediately outside MCX hours, and none makes an Upstox call while the
 // market is shut unless something genuinely needs it.
 //
-// NOT SCHEDULED: the Best Call push (runBestCallNotificationCheck). It
-// computes three engines on four timeframes for both symbols -- 25-45 ms of
-// pure indicator maths after every optimisation, so it cannot fit the free
-// plan by itself -- and it pushed Best Call alerts to the same ntfy topic even
-// after alerts were narrowed to Ai20-20 only. The Best Call page itself runs
-// in the browser and is unaffected. To bring the push back (e.g. on the paid
-// plan), add it to the FAST group.
+// The Best Call push (runBestCallNotificationCheck) runs in FAST again since
+// the move to the Workers paid plan (29 Sep 2026), at the owner's request.
+// It computes three engines on four timeframes for both symbols -- 25-45 ms
+// of CPU, which the free plan's 10 ms could not hold.
 
 import type { Env } from "./env";
 import { runExpiryAlertCheck } from "./expiryAlerts";
 import { captureOvernightAnchor } from "./globalMarkets";
 import { warmEnergyNews } from "./news";
-import { runTwentyTwentyNotificationCheck } from "./notify";
+import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "./notify";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { bindSharedCache } from "./upstox";
@@ -64,6 +61,7 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   // FAST, and the fallback for any unrecognised schedule.
   // Ai20-20 -- the page actually traded, pushed with the app closed.
   ctx.waitUntil(runTwentyTwentyNotificationCheck(env));
+  ctx.waitUntil(runBestCallNotificationCheck(env));
   ctx.waitUntil(runExpiryAlertCheck(env));
   // One snapshot per trading day, just after MCX shuts, so tomorrow morning
   // "moved since MCX closed" is a measured figure rather than an estimate.

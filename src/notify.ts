@@ -37,8 +37,10 @@ const CRON_TIMEFRAMES: { tf: string; label: string }[] = [
 // Gate page's own useDirectionalGateSuite hook uses on the frontend.
 const CRON_TREND_TF: Record<string, string> = { "15": "60", "30": "60", "60": "240", "240": "1D" };
 
+// Side + engine, not strike: while one call stays live, price walking the
+// at-the-money strike from 310 to 315 is the same call, not a new alert.
 function bestCallSignature(pick: BestCallPick): string {
-  return `${pick.strike}-${pick.optSide}-${pick.source}`;
+  return `${pick.optSide}-${pick.source}`;
 }
 
 export async function sendNtfyNotification(topic: string, title: string, body: string): Promise<{ ok: boolean; error?: string }> {
@@ -266,9 +268,14 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
   for (const symbol of OPTION_SYMBOLS) {
     try {
       const pick = await computeBestCallForSymbol(env, token, symbol as Symbol);
-      if (!pick) continue;
       const lastSigKey = `notified:BEST-${symbol}`;
       const lastSig = await env.COMMODITY_KV.get(lastSigKey);
+      if (!pick) {
+        // The call has ended: forget it, so the next one (even the same side)
+        // is alerted as the new call it is.
+        if (lastSig) await env.COMMODITY_KV.delete(lastSigKey).catch(() => undefined);
+        continue;
+      }
       const sig = bestCallSignature(pick);
       if (sig === lastSig) continue;
       if (!(await cachePut(env.COMMODITY_KV, lastSigKey, sig))) continue; // no marker, no alert (see above)
@@ -282,7 +289,10 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
         `Targets: ${pick.targets.join(" / ")}`,
         `Stop: Rs ${pick.stop}`,
         "",
-        `Source: ${pick.source} (${Math.round(pick.confidence)}% confidence)`,
+        // Never above 94%: no call is ever that certain (the app-wide rule).
+        `Source: ${pick.source} (${Math.min(94, Math.round(pick.confidence))}% of checks agree)`,
+        "",
+        "Open Capital Guard for your lot size before entering -- price may have moved.",
       ].join("\n");
       await sendNtfyNotification(topic, title, body);
     } catch {
