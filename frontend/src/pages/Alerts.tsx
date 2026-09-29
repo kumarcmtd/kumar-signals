@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair, Target } from "lucide-react";
 import { useAppStore, type AlertEntry, type AlertSource } from "../store/appStore";
-import { notificationPermission, requestNotificationPermission } from "../utils/notify";
+import { DEFAULT_ALERT_VOLUME, notificationPermission, playAlertSound, requestNotificationPermission } from "../utils/notify";
 
 const SOURCE_STYLE: Record<AlertSource, { label: string; icon: typeof FlaskConical; bg: string; text: string }> = {
   Timeframe: { label: "AI-Test V2 / Pro", icon: FlaskConical, bg: "#DBEAFE", text: "#1D4ED8" },
@@ -81,6 +81,39 @@ export function Alerts() {
           checked={alertSettings.soundEnabled}
           onChange={(v) => setAlertSettings({ soundEnabled: v })}
         />
+
+        {alertSettings.soundEnabled && (
+          <div className="py-1.5 pl-1">
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-[var(--color-muted)]">Volume</p>
+              <p className="text-xs font-bold">{alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME}%</p>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <VolumeX size={15} className="text-[var(--color-muted)] shrink-0" />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME}
+                onChange={(e) => setAlertSettings({ soundVolume: Number(e.target.value) })}
+                className="flex-1 accent-[var(--color-primary)]"
+                aria-label="Alert volume"
+              />
+              <Volume2 size={15} className="text-[var(--color-muted)] shrink-0" />
+            </div>
+            <button
+              onClick={() => playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME)}
+              className="mt-2 w-full flex items-center justify-center gap-1.5 text-xs font-bold py-2 rounded-lg bg-blue-50 text-[var(--color-primary)]"
+            >
+              <BellRing size={13} /> Test sound
+            </button>
+            <p className="text-[10.5px] text-[var(--color-muted)] mt-1.5 leading-snug">
+              Your phone's media volume also applies. This sound only plays while the app is open — for alerts with the app closed, use the ntfy app
+              and set its notification sound there.
+            </p>
+          </div>
+        )}
 
         <div className="py-1.5">
           <p className="text-sm mb-1.5">Sensitivity</p>

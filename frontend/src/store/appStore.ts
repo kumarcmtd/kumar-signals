@@ -44,6 +44,8 @@ export interface AlertSettings {
   enabled: boolean;
   browserNotifications: boolean;
   soundEnabled: boolean;
+  /** 0-100; missing on settings saved before the slider existed (read as 80). */
+  soundVolume?: number;
   // "strong" only fires on STRONG BUY/STRONG SELL (Timeframe/Elite) or a
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.

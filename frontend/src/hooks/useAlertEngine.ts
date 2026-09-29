@@ -7,7 +7,7 @@ import { findPlaybookSetup, calculateHitProbability } from "../utils/kimiPlayboo
 import { findEliteSignal } from "../utils/eliteSignal";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import { useAppStore, type AlertEntry } from "../store/appStore";
-import { fireBrowserNotification, playAlertSound } from "../utils/notify";
+import { DEFAULT_ALERT_VOLUME, fireBrowserNotification, playAlertSound } from "../utils/notify";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -220,7 +220,7 @@ export function useAlertEngine(): void {
     if (alertSettings.browserNotifications) {
       for (const a of fresh) fireBrowserNotification(a.title, a.detail);
     }
-    if (alertSettings.soundEnabled) playAlertSound();
+    if (alertSettings.soundEnabled) playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     alertSettings.enabled,
@@ -233,10 +233,10 @@ export function useAlertEngine(): void {
     tradeLogs,
     alertSettings.browserNotifications,
     alertSettings.soundEnabled,
+    alertSettings.soundVolume,
     crudeOil.analyses,
     naturalGas.analyses,
     ngKimi,
     clKimi,
-    tradeLogs,
   ]);
 }
