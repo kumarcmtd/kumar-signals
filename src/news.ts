@@ -284,6 +284,7 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // run however it was scheduled. The cache TTL covers a full rotation plus
 // missed runs, so a page never finds it empty while the cron is alive.
 const NEWS_BATCHES = 3;
+const NEWS_ALWAYS_ON = true;
 const NEWS_BATCH_SLOT_MS = 10 * 60 * 1000;
 // Three hours: long enough to survive the hourly off-hours refresh, so the
 // batches keep merging instead of the cache expiring between them.
@@ -411,9 +412,12 @@ export async function warmEnergyNews(env: Env): Promise<void> {
   // Every 10 minutes only while MCX is trading (from 8:30 AM pre-open to
   // midnight, weekdays); once an hour otherwise. News all night and all
   // weekend cost ~60 KV writes a day for pages nobody was reading.
+  // On the Workers paid plan (from 29 Sep 2026) writes are no longer scarce,
+  // so news refreshes around the clock: the US session overnight is what
+  // moves the next morning's MCX open. Set NEWS_ALWAYS_ON false to go back.
   const now = Date.now();
   const s = mcxSessionAt(now);
-  const active = s.weekday >= 1 && s.weekday <= 5 && s.minutes >= 8 * 60 + 30;
+  const active = NEWS_ALWAYS_ON || (s.weekday >= 1 && s.weekday <= 5 && s.minutes >= 8 * 60 + 30);
   const slot = Math.floor(now / NEWS_BATCH_SLOT_MS);
   if (!active && slot % 6 !== 0) return;
   // Off-hours runs are an hour apart, so rotate by the hour or they would

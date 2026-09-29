@@ -264,12 +264,14 @@ export const useAppStore = create<AppState>()(
       recordVerifyProSnapshot: (id, snapshot) =>
         set((s) => (s.verifyProSnapshots[id] ? s : { verifyProSnapshots: { ...s.verifyProSnapshots, [id]: snapshot } })),
 
-      liveOnOtherPages: false,
+      // On the Workers paid plan every page can stay live; the switch is
+      // still there to hold a page still by hand.
+      liveOnOtherPages: true,
       setLiveOnOtherPages: (on) => set({ liveOnOtherPages: on }),
     }),
     {
       name: "kumar-signals-pro-store",
-      version: 3,
+      version: 4,
       // v0 -> v1: the Kimi AI Trade ledger used to open a line for ANY
       // scanner hit (a pattern match alone, no confluence/edge-score bar),
       // which produced a genuinely broken ~9% win rate. Now that a real
@@ -310,6 +312,8 @@ export const useAppStore = create<AppState>()(
             };
           }
         }
+        // v3 -> v4: moved to the Workers paid plan -- every page live.
+        if (version < 4 && state) (state as unknown as { liveOnOtherPages?: boolean }).liveOnOtherPages = true;
         return state;
       },
     }

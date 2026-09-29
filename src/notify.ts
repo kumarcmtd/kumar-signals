@@ -92,7 +92,9 @@ function twentySignature(symbol: string, strike: number, optSide: string, entry:
  * write against a 1,000/day free limit for no benefit.
  */
 const TWENTY_MEM_FRESH_MS = 11 * 60 * 1000; // older than two ticks -> trust KV instead
-const TWENTY_KV_BACKUP_MS = 15 * 60 * 1000;
+// Paid plan: back up every tick, so a cold isolate never loses samples.
+// (Free plan used 15 minutes to stay under 1,000 KV writes a day.)
+const TWENTY_KV_BACKUP_MS = 0;
 let twentyMem: { at: number; backedUpAt: number; buffers: TwentySampleBuffer } | null = null;
 
 export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> {

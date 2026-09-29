@@ -41,9 +41,7 @@ interface MacroQuote {
   error?: string;
 }
 
-// 10 minutes (was 2): every expiry while a page is open costs a KV write,
-// and the free plan allows 1,000 a day.
-const MACRO_CACHE_TTL_SECONDS = 10 * 60;
+const MACRO_CACHE_TTL_SECONDS = 120;
 const MACRO_CACHE_KV_KEY = "gptnews:macro:v1";
 
 async function getYahooMacroQuote(inst: (typeof MACRO_INSTRUMENTS)[number]): Promise<MacroQuote> {
@@ -107,7 +105,7 @@ export async function computeMacroMarkets(env: Env): Promise<{ quotes: MacroQuot
 // writes the prose, strictly from those headlines -- it can never introduce an
 // event, price, or number that isn't in the fetched news.
 const WHYTODAY_CACHE_KV_KEY = "whytoday:v1";
-const WHYTODAY_CACHE_TTL_SECONDS = 15 * 60; // was 5 min; see MACRO_CACHE_TTL_SECONDS
+const WHYTODAY_CACHE_TTL_SECONDS = 300;
 
 function buildWhyDrivers(articles: ScoredNewsArticle[], market: "CRUDE" | "NG"): { drivers: WhyDriver[]; leanScore: number; rules: string[] } {
   const relevant = articles

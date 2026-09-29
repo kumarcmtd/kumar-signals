@@ -1,7 +1,8 @@
 // The auto-update control for pages outside the six main tabs.
 //
-// Those pages load once when opened and then hold still, which saves Upstox
-// rate limit, Worker invocations and battery. That is only acceptable if the
+// Since the move to the Workers paid plan these pages are live by default
+// too; the switch lets a page be held still by hand (it also saves Upstox
+// rate limit and battery). That is only acceptable if the
 // user can SEE that the page is holding still and can update it in one tap --
 // a silently frozen price screen would be far worse than a slow one.
 //

@@ -28,8 +28,7 @@ async function fetchEiaSeries(apiKey: string, path: string, seriesId: string): P
   return rows.map((r: any) => ({ period: r.period, value: Number(r.value) })).filter((r: any) => Number.isFinite(r.value));
 }
 
-// The EIA figures change once a week, so most of the week a 30-minute cache is
-// plenty -- each refresh is a KV write against the free plan's 1,000 a day.
+// The EIA figures change once a week; 8 minutes most of the week.
 // Around the reports themselves (crude Wednesday, gas Thursday, 10:30 AM ET =
 // 8:00 PM IST in US summer, 9:00 PM in winter) it drops to 3 minutes so the
 // new number shows up promptly.
@@ -37,7 +36,7 @@ function eiaCacheTtlSeconds(now: number = Date.now()): number {
   const s = mcxSessionAt(now);
   const reportDay = s.weekday === 3 || s.weekday === 4;
   const nearRelease = s.minutes >= 19 * 60 + 50 && s.minutes <= 21 * 60 + 45;
-  return reportDay && nearRelease ? 3 * 60 : 30 * 60;
+  return reportDay && nearRelease ? 3 * 60 : 8 * 60;
 }
 const EIA_CACHE_KV_KEY = "news:eia:v2";
 

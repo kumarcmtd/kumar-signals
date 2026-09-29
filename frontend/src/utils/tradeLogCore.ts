@@ -367,7 +367,9 @@ export function closeRunningAtSessionEnd(
  * hit, the stop moving, a close, the above/below-target state touches are
  * counted from -- is never "minor".
  */
-export const MINOR_PROGRESS_SAVE_MS = 30 * 60 * 1000;
+// 5 minutes on the Workers paid plan (it was 30 on the free plan's 1,000
+// writes a day).
+export const MINOR_PROGRESS_SAVE_MS = 5 * 60 * 1000;
 
 export function isMinorProgress(was: TradeLogEntry | undefined, now: TradeLogEntry | undefined): boolean {
   if (!was || !now || was.id !== now.id || was.closed || now.closed) return false;
