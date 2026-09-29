@@ -46,6 +46,8 @@ export interface AlertSettings {
   soundEnabled: boolean;
   /** 0-100; missing on settings saved before the slider existed (read as 80). */
   soundVolume?: number;
+  /** Seconds the alarm sounds; missing on older settings (read as 5). */
+  soundSeconds?: number;
   // "strong" only fires on STRONG BUY/STRONG SELL (Timeframe/Elite) or a
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.

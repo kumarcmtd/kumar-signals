@@ -55,15 +55,52 @@ if (typeof window !== "undefined") {
 }
 
 export const DEFAULT_ALERT_VOLUME = 80;
+export const DEFAULT_ALERT_SECONDS = 5;
+export const ALERT_SECONDS_OPTIONS = [2, 5, 10, 20, 30] as const;
+
+let playing: { osc: OscillatorNode; gain: GainNode; timer: ReturnType<typeof setTimeout> } | null = null;
+
+function stopOnTap(): void {
+  stopAlertSound();
+}
+
+/** Stops a sounding alarm now (a tap anywhere does the same). */
+export function stopAlertSound(): void {
+  window.removeEventListener("pointerdown", stopOnTap, true);
+  try {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(0);
+  } catch {
+    // ignore
+  }
+  if (!playing) return;
+  const p = playing;
+  playing = null;
+  clearTimeout(p.timer);
+  try {
+    p.gain.gain.cancelScheduledValues(0);
+    p.gain.gain.value = 0;
+    p.osc.stop();
+  } catch {
+    // already stopped
+  }
+}
 
 /**
- * Three rising beeps (~1 s), plus a vibration where the phone supports it.
- * `volume` is 0-100. The old single soft 0.4 s tone at 15% was easy to miss.
- * The phone's own media volume still applies on top of this.
+ * An alarm-style siren -- a square wave sweeping 900-1800 Hz twice a second,
+ * the range the ear hears loudest -- through a compressor so it plays at the
+ * highest level the phone allows, for `seconds`, with vibration alongside.
+ * `volume` is 0-100; the phone's media volume still applies on top. A tap
+ * anywhere stops it early.
  */
-export function playAlertSound(volume: number = DEFAULT_ALERT_VOLUME): void {
+export function playAlertSound(volume: number = DEFAULT_ALERT_VOLUME, seconds: number = DEFAULT_ALERT_SECONDS): void {
+  stopAlertSound();
+  const dur = Math.max(1, Math.min(60, seconds));
   try {
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate([200, 100, 200, 100, 350]);
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      const pattern: number[] = [];
+      for (let t = 0; t < dur * 1000; t += 700) pattern.push(450, 250);
+      navigator.vibrate(pattern);
+    }
   } catch {
     // ignore
   }
@@ -73,24 +110,37 @@ export function playAlertSound(volume: number = DEFAULT_ALERT_VOLUME): void {
     if (ctx.state === "suspended") ctx.resume().catch(() => undefined);
     const level = Math.max(0, Math.min(100, volume)) / 100;
     if (level === 0) return;
-    // Perceived loudness is roughly logarithmic, so square the slider; 100%
-    // is a full-scale square wave, the loudest a plain tone gets.
-    const peak = Math.max(0.0002, level * level * 0.9);
-    const notes = [880, 1175, 1568];
-    notes.forEach((freq, i) => {
-      const start = ctx.currentTime + i * 0.28;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(peak, start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.24);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + 0.25);
-    });
+    // Perceived loudness is roughly logarithmic, so square the slider.
+    const peak = Math.max(0.0002, level * level);
+    const t0 = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -20;
+    comp.knee.value = 6;
+    comp.ratio.value = 12;
+    comp.attack.value = 0.003;
+    comp.release.value = 0.1;
+    osc.type = "square";
+    osc.frequency.setValueAtTime(900, t0);
+    for (let t = 0; t < dur; t += 0.5) {
+      osc.frequency.linearRampToValueAtTime(1800, t0 + t + 0.25);
+      osc.frequency.linearRampToValueAtTime(900, t0 + t + 0.5);
+    }
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.03);
+    gain.gain.setValueAtTime(peak, t0 + dur - 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(gain);
+    gain.connect(comp);
+    comp.connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
+    playing = { osc, gain, timer: setTimeout(() => stopAlertSound(), dur * 1000 + 100) };
+    // Let the tap that started a test finish first, then any tap stops it.
+    setTimeout(() => {
+      if (playing) window.addEventListener("pointerdown", stopOnTap, { capture: true, once: true });
+    }, 300);
   } catch {
     // ignore -- audio can be blocked until the user interacts with the page
   }
