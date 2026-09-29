@@ -4,7 +4,7 @@
 import { resolvePrevClose } from "../frontend/src/utils/globalMarketHours";
 import type { ScoredNewsArticle } from "../frontend/src/utils/newsScoring";
 import { classifyNewsDuration, leanFromScore, type WhyCommodity, type WhyDriver } from "../frontend/src/utils/whyTodaySummary";
-import { type Env, r2 } from "./env";
+import { cachePut, type Env, r2 } from "./env";
 import { fetchEnergyNews } from "./news";
 
 // ---- GPT News macro backdrop (dollar, rates, gold) ----
@@ -41,7 +41,9 @@ interface MacroQuote {
   error?: string;
 }
 
-const MACRO_CACHE_TTL_SECONDS = 120;
+// 10 minutes (was 2): every expiry while a page is open costs a KV write,
+// and the free plan allows 1,000 a day.
+const MACRO_CACHE_TTL_SECONDS = 10 * 60;
 const MACRO_CACHE_KV_KEY = "gptnews:macro:v1";
 
 async function getYahooMacroQuote(inst: (typeof MACRO_INSTRUMENTS)[number]): Promise<MacroQuote> {
@@ -94,7 +96,7 @@ export async function computeMacroMarkets(env: Env): Promise<{ quotes: MacroQuot
   // Only cache a generation that actually carries data -- caching an all-failed
   // response would pin the page to "unavailable" for the full TTL.
   if (quotes.some((q) => q.price !== null)) {
-    await env.COMMODITY_KV.put(MACRO_CACHE_KV_KEY, JSON.stringify(payload), { expirationTtl: MACRO_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, MACRO_CACHE_KV_KEY, JSON.stringify(payload), { expirationTtl: MACRO_CACHE_TTL_SECONDS });
   }
   return payload;
 }
@@ -105,7 +107,7 @@ export async function computeMacroMarkets(env: Env): Promise<{ quotes: MacroQuot
 // writes the prose, strictly from those headlines -- it can never introduce an
 // event, price, or number that isn't in the fetched news.
 const WHYTODAY_CACHE_KV_KEY = "whytoday:v1";
-const WHYTODAY_CACHE_TTL_SECONDS = 300;
+const WHYTODAY_CACHE_TTL_SECONDS = 15 * 60; // was 5 min; see MACRO_CACHE_TTL_SECONDS
 
 function buildWhyDrivers(articles: ScoredNewsArticle[], market: "CRUDE" | "NG"): { drivers: WhyDriver[]; leanScore: number; rules: string[] } {
   const relevant = articles
@@ -181,6 +183,6 @@ export async function computeWhyToday(env: Env): Promise<{ crude: WhyCommodity; 
     newsAvailable: news.available,
     fetchedAt: new Date().toISOString(),
   };
-  await env.COMMODITY_KV.put(WHYTODAY_CACHE_KV_KEY, JSON.stringify(out), { expirationTtl: WHYTODAY_CACHE_TTL_SECONDS });
+  await cachePut(env.COMMODITY_KV, WHYTODAY_CACHE_KV_KEY, JSON.stringify(out), { expirationTtl: WHYTODAY_CACHE_TTL_SECONDS });
   return out;
 }

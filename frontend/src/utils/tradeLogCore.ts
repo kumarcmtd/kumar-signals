@@ -358,3 +358,27 @@ export function closeRunningAtSessionEnd(
   }
   return { logs: next, closed, withoutPrice };
 }
+
+/**
+ * True when the only difference is a new high-water mark on the same running
+ * trade. Those change on almost every tick of a rising trade, and saving each
+ * one used a large share of the free plan's 1,000 KV writes a day, so they
+ * are saved on a slower clock. Everything that changes an OUTCOME -- a target
+ * hit, the stop moving, a close, the above/below-target state touches are
+ * counted from -- is never "minor".
+ */
+export const MINOR_PROGRESS_SAVE_MS = 30 * 60 * 1000;
+
+export function isMinorProgress(was: TradeLogEntry | undefined, now: TradeLogEntry | undefined): boolean {
+  if (!was || !now || was.id !== now.id || was.closed || now.closed) return false;
+  const { highWaterMark: _a, ...restWas } = was;
+  const { highWaterMark: _b, ...restNow } = now;
+  return JSON.stringify(restWas) === JSON.stringify(restNow);
+}
+
+/** Same, for a whole key's list: only its last (running) entry moved its high. */
+export function isMinorListChange(was: TradeLogEntry[] | undefined, now: TradeLogEntry[] | undefined): boolean {
+  if (!was || !now || was.length !== now.length || now.length === 0) return false;
+  for (let i = 0; i < now.length - 1; i++) if (was[i] !== now[i] && JSON.stringify(was[i]) !== JSON.stringify(now[i])) return false;
+  return isMinorProgress(was[was.length - 1], now[now.length - 1]);
+}

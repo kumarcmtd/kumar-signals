@@ -3,7 +3,7 @@
 import { evaluatePullbackReversal, type ExternalSignal, type PullbackResult, type TfKey } from "../frontend/src/utils/pullbackReversalEngine";
 import { buildSlotSessions, buildTimeProfile, type ClaimResult, eventProfile, type EventProfile, type ScheduledEvent, scheduledEvents, testClaims } from "../frontend/src/utils/timeProfileEngine";
 import { type EiaFetchResult, fetchEiaData } from "./eiaCalendar";
-import { type Candle, type Env, OPTION_SYMBOLS, type Symbol } from "./env";
+import { cachePut, type Candle, type Env, OPTION_SYMBOLS, type Symbol } from "./env";
 import { buildMorningSessions, GAP_STUDY_DAYS, getHistorical30mCandles, hist30mCacheKey } from "./gapStudy";
 import { fetchEnergyNews, type NewsFetchResult } from "./news";
 import { getCandlesForTF } from "./signals";
@@ -285,7 +285,7 @@ async function computeTimeProfile(env: Env, token: string, symbol: Symbol): Prom
   };
 
   if (result.available) {
-    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(result), { expirationTtl: TIME_PROFILE_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, cacheKey, JSON.stringify(result), { expirationTtl: TIME_PROFILE_CACHE_TTL_SECONDS });
   }
   return result;
 }

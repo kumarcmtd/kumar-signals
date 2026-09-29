@@ -5,7 +5,7 @@ import { api } from "./api/client";
 // wins" rule -- that shared rule is what lets the Cron close a trade
 // server-side and have that close survive a browser later pushing its own
 // still-open copy of the same id.
-import { mergeTradeLogs } from "./utils/tradeLogCore";
+import { isMinorListChange, mergeTradeLogs, MINOR_PROGRESS_SAVE_MS } from "./utils/tradeLogCore";
 
 // This app has no login, so trade/signal history has exactly one shared
 // home on the server (same trust level as every other endpoint here) rather
@@ -20,6 +20,10 @@ const PUSH_DEBOUNCE_MS = 8000;
 // free plan allows per request. The Worker merges whatever subset arrives.
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let lastPushed = new Map<string, string>();
+// The lists as last pushed, to tell a new high (minor) from a real change.
+let lastPushedList = new Map<string, TradeLogEntry[]>();
+let lastPushAt = 0;
+let minorTimer: ReturnType<typeof setTimeout> | null = null;
 // The store replaces only the arrays that change, so an array seen before
 // needs no re-stringify to know it is unchanged.
 const checkedRefs = new WeakMap<TradeLogEntry[], string>();
@@ -37,12 +41,39 @@ function changedKeys(logs: Record<string, TradeLogEntry[]>): Record<string, Trad
   return out;
 }
 
+// Each push is a KV write on the Worker, and the free plan allows 1,000 a
+// day. A rising trade sets a new high on nearly every poll, and pushing each
+// one (8 s after it, from every open page) is what used the limit up. So a
+// push made ONLY of new highs waits until MINOR_PROGRESS_SAVE_MS after the
+// last push; any real change -- a new trade, a target hit, a close -- still
+// goes up within seconds, carrying the pending highs with it.
 function pushChanged(logs: Record<string, TradeLogEntry[]>): void {
   const diff = changedKeys(logs);
-  if (Object.keys(diff).length === 0) return; // nothing actually changed
+  const keys = Object.keys(diff);
+  if (keys.length === 0) return; // nothing actually changed
+  const onlyMinor = keys.every((k) => isMinorListChange(lastPushedList.get(k), diff[k]));
+  const wait = lastPushAt + MINOR_PROGRESS_SAVE_MS - Date.now();
+  if (onlyMinor && wait > 0) {
+    if (!minorTimer) {
+      minorTimer = setTimeout(() => {
+        minorTimer = null;
+        lastPushAt = 0; // due now
+        pushChanged(useAppStore.getState().tradeLogs);
+      }, wait);
+    }
+    return;
+  }
+  if (minorTimer) {
+    clearTimeout(minorTimer);
+    minorTimer = null;
+  }
   api.saveTradeLogs(diff).then(
     () => {
-      for (const [key, list] of Object.entries(diff)) lastPushed.set(key, JSON.stringify(list));
+      lastPushAt = Date.now();
+      for (const [key, list] of Object.entries(diff)) {
+        lastPushed.set(key, JSON.stringify(list));
+        lastPushedList.set(key, list);
+      }
     },
     () => {
       // Best-effort: a network hiccup here must never break the rest of the
@@ -83,6 +114,7 @@ export async function initTradeLogSync(): Promise<void> {
   // What the server already holds counts as pushed; only what the merge
   // added on this device goes up.
   lastPushed = remember(server);
+  lastPushedList = new Map(Object.entries(server));
   pushChanged(merged);
 
   useAppStore.subscribe((state, prevState) => {

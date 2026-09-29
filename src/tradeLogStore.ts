@@ -24,7 +24,7 @@
 // LAST, so a migration cut off halfway simply carries on. v1 is then left untouched as a
 // frozen backup; nothing reads it again.
 
-import { mergeTradeLogEntryLists, mergeTradeLogs, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
+import { isMinorProgress, mergeTradeLogEntryLists, mergeTradeLogs, MINOR_PROGRESS_SAVE_MS, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
 import type { Env } from "./env";
 import { getTradeLogsFromKv, getTradeLogsWithRev, saveTradeLogsToKv, tradeLogRevision } from "./storage";
 
@@ -56,15 +56,23 @@ async function readKeys(env: Env): Promise<string[] | null> {
 }
 
 export async function readHot(env: Env): Promise<Logs> {
-  const raw = await env.COMMODITY_KV.get(HOT_KEY);
-  if (!raw) return {};
+  return (await readHotWithTime(env)).hot;
+}
+
+/** hot plus when it was last written (KV metadata; 0 when unknown). */
+async function readHotWithTime(env: Env): Promise<{ hot: Logs; at: number }> {
+  const { value: raw, metadata } = await env.COMMODITY_KV.getWithMetadata<{ at?: number }>(HOT_KEY, "text");
+  const at = typeof metadata?.at === "number" ? metadata.at : 0;
+  if (!raw) return { hot: {}, at };
   try {
     const v = JSON.parse(raw);
-    return v && typeof v === "object" && !Array.isArray(v) ? v : {};
+    return { hot: v && typeof v === "object" && !Array.isArray(v) ? v : {}, at };
   } catch {
-    return {};
+    return { hot: {}, at };
   }
 }
+
+const putHot = (env: Env, hot: Logs) => env.COMMODITY_KV.put(HOT_KEY, JSON.stringify(hot), { metadata: { at: Date.now() } });
 
 async function readShard(env: Env, key: string): Promise<{ raw: string | null; list: TradeLogEntry[] }> {
   const raw = await env.COMMODITY_KV.get(shardKey(key));
@@ -135,7 +143,7 @@ export async function migrateTradeLogs(env: Env): Promise<boolean> {
   }
   const hot: Logs = {};
   for (const k of keys) setHot(hot, k, logs[k] as TradeLogEntry[]);
-  await env.COMMODITY_KV.put(HOT_KEY, JSON.stringify(hot));
+  await putHot(env, hot);
   // The app saved while we copied: our shards may miss that save. Leave the
   // switch uncommitted and start again next run.
   if (rev !== null && (await tradeLogRevision(env)) !== rev) return true;
@@ -212,7 +220,7 @@ export async function pushTradeLogs(env: Env, body: Record<string, unknown>): Pr
     // Re-read right before writing, so a cron write since our read is kept.
     const fresh = await readHot(env);
     for (const [key, tail] of hotChanges) setHot(fresh, key, mergeTradeLogEntryLists(tail, fresh[key] ?? []));
-    await env.COMMODITY_KV.put(HOT_KEY, JSON.stringify(fresh));
+    await putHot(env, fresh);
   }
   if (newKeys.length) {
     const fresh = (await readKeys(env)) ?? keys;
@@ -255,6 +263,7 @@ export async function loadOpenTrades(env: Env): Promise<OpenTrades> {
 export async function saveCronResult(env: Env, before: Logs, after: Logs, stale: Map<string, string>): Promise<void> {
   const progressed = new Map<string, TradeLogEntry>();
   const leaving = new Map(stale);
+  let onlyMinor = true;
   for (const key of Object.keys(before)) {
     const was = before[key][before[key].length - 1];
     const now = after[key]?.[after[key].length - 1];
@@ -266,11 +275,14 @@ export async function saveCronResult(env: Env, before: Logs, after: Logs, stale:
       leaving.set(key, now.id);
     } else {
       progressed.set(key, now);
+      if (!isMinorProgress(was, now)) onlyMinor = false;
     }
   }
   if (!progressed.size && !leaving.size) return;
-  const fresh = await readHot(env);
+  const { hot: fresh, at } = await readHotWithTime(env);
+  // Only new highs on running trades: save them on the slow clock.
+  if (!leaving.size && onlyMinor && Date.now() - at < MINOR_PROGRESS_SAVE_MS) return;
   for (const [key, entry] of progressed) setHot(fresh, key, mergeTradeLogEntryLists(fresh[key] ?? [], [entry]));
   for (const [key, id] of leaving) setHot(fresh, key, (fresh[key] ?? []).filter((e) => e.id !== id));
-  await env.COMMODITY_KV.put(HOT_KEY, JSON.stringify(fresh));
+  await putHot(env, fresh);
 }

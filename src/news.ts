@@ -1,7 +1,8 @@
 // Energy news: trusted RSS feeds plus NewsAPI, scored, clustered and cached.
 
 import { clusterEvents, type NewsEvent, type RawNewsArticle, scoreArticles, type ScoredNewsArticle, stripPublisherSuffix } from "../frontend/src/utils/newsScoring";
-import type { Env } from "./env";
+import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
+import { cachePut, type Env } from "./env";
 
 // ---- News Based Trade AI: news + EIA inventory/storage + econ calendar ----
 // The app must be fully useful with ZERO secrets configured: news comes
@@ -284,7 +285,9 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // missed runs, so a page never finds it empty while the cron is alive.
 const NEWS_BATCHES = 3;
 const NEWS_BATCH_SLOT_MS = 10 * 60 * 1000;
-const NEWS_CACHE_TTL_SECONDS = 60 * 60;
+// Three hours: long enough to survive the hourly off-hours refresh, so the
+// batches keep merging instead of the cache expiring between them.
+const NEWS_CACHE_TTL_SECONDS = 3 * 60 * 60;
 const NEWS_CACHE_KV_KEY = "news:combined:v6";
 
 /** For tests: how many RSS feeds a full rotation covers. */
@@ -367,7 +370,7 @@ async function buildEnergyNews(env: Env, batch?: { index: number; count: number 
   const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);
   const events = clusterEvents(scored);
   const result: NewsFetchResult = { available: true, articles: scored, events, sourceStatus, builtAt: new Date(now).toISOString() };
-  await env.COMMODITY_KV.put(NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
+  await cachePut(env.COMMODITY_KV, NEWS_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: NEWS_CACHE_TTL_SECONDS });
   return result;
 }
 
@@ -405,8 +408,19 @@ function currentBatch(): { index: number; count: number } {
  * in the same invocation as news.
  */
 export async function warmEnergyNews(env: Env): Promise<void> {
+  // Every 10 minutes only while MCX is trading (from 8:30 AM pre-open to
+  // midnight, weekdays); once an hour otherwise. News all night and all
+  // weekend cost ~60 KV writes a day for pages nobody was reading.
+  const now = Date.now();
+  const s = mcxSessionAt(now);
+  const active = s.weekday >= 1 && s.weekday <= 5 && s.minutes >= 8 * 60 + 30;
+  const slot = Math.floor(now / NEWS_BATCH_SLOT_MS);
+  if (!active && slot % 6 !== 0) return;
+  // Off-hours runs are an hour apart, so rotate by the hour or they would
+  // always land on the same batch.
+  const batch = active ? currentBatch() : { index: Math.floor(slot / 6) % NEWS_BATCHES, count: NEWS_BATCHES };
   try {
-    await buildEnergyNews(env, currentBatch());
+    await buildEnergyNews(env, batch);
   } catch {
     // A failed warm is not worth failing the whole Cron run for -- the
     // previous cached payload keeps serving until the next tick.

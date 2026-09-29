@@ -165,6 +165,21 @@ export async function upstoxJson(res: Response, what: string): Promise<any> {
   }
 }
 
+/**
+ * A cache write that can never break a request. On the free plan KV allows
+ * 1,000 writes a day; past that every put throws until midnight UTC. A cache
+ * miss is harmless -- a page failing because it could not SAVE a copy of data
+ * it already has is not. Returns whether the write landed.
+ */
+export async function cachePut(kv: KVNamespace, key: string, value: string, opts?: KVNamespacePutOptions): Promise<boolean> {
+  try {
+    await kv.put(key, value, opts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,

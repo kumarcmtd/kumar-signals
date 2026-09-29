@@ -7,7 +7,7 @@ import { findEliteSignal } from "../frontend/src/utils/eliteSignal";
 import { scanAllSetups } from "../frontend/src/utils/kimiScanner";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { analyzeTimeframe } from "../frontend/src/utils/timeframeEngine";
-import { type Candle, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
+import { cachePut, type Candle, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { getCandlesForTF } from "./signals";
 import { getNearestFuture } from "./upstox";
@@ -91,6 +91,10 @@ function twentySignature(symbol: string, strike: number, optSide: string, entry:
  * the sample buffer would fill with stale prices, and every tick would be a KV
  * write against a 1,000/day free limit for no benefit.
  */
+const TWENTY_MEM_FRESH_MS = 11 * 60 * 1000; // older than two ticks -> trust KV instead
+const TWENTY_KV_BACKUP_MS = 15 * 60 * 1000;
+let twentyMem: { at: number; backedUpAt: number; buffers: TwentySampleBuffer } | null = null;
+
 export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> {
   // Gated on market hours for three reasons, not one: there is nothing to
   // enter outside them, the sample buffer would fill with stale prices, and
@@ -105,11 +109,20 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
   if (!topic) return;
 
+  // Memory first: this was a KV write every 5 minutes (~175 a day, a sixth
+  // of the free plan's 1,000). Cron runs usually land on a warm isolate, so
+  // the buffer lives in memory and KV only keeps a backup copy every
+  // TWENTY_KV_BACKUP_MS. A cold isolate reloads that backup -- at worst a few
+  // samples short, which the momentum read already tolerates.
   let buffers: TwentySampleBuffer = {};
-  try {
-    buffers = JSON.parse((await env.COMMODITY_KV.get(TWENTY_SAMPLES_KV_KEY)) ?? "{}") as TwentySampleBuffer;
-  } catch {
-    buffers = {};
+  if (twentyMem && Date.now() - twentyMem.at < TWENTY_MEM_FRESH_MS) {
+    buffers = twentyMem.buffers;
+  } else {
+    try {
+      buffers = JSON.parse((await env.COMMODITY_KV.get(TWENTY_SAMPLES_KV_KEY)) ?? "{}") as TwentySampleBuffer;
+    } catch {
+      buffers = {};
+    }
   }
 
   let buffersChanged = false;
@@ -146,7 +159,10 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
       const sig = twentySignature(symbol, projection.strike, projection.optSide, projection.entry);
       const sigKey = `notified:TWENTY20-${symbol}`;
       if ((await env.COMMODITY_KV.get(sigKey)) === sig) continue;
-      await env.COMMODITY_KV.put(sigKey, sig);
+      // Only alert if the "already sent" marker was saved -- past the daily
+      // KV write limit it cannot be, and alerting anyway would resend this
+      // same call every five minutes.
+      if (!(await cachePut(env.COMMODITY_KV, sigKey, sig))) continue;
 
       const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
       const lot = TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1;
@@ -174,9 +190,13 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
   }
 
   if (buffersChanged) {
-    // A single key for both symbols, written once per tick and only during
-    // market hours -- roughly 175 writes a day rather than 576.
-    await env.COMMODITY_KV.put(TWENTY_SAMPLES_KV_KEY, JSON.stringify(buffers), { expirationTtl: 24 * 60 * 60 });
+    const now = Date.now();
+    const lastBackup = twentyMem?.backedUpAt ?? 0;
+    let backedUpAt = lastBackup;
+    if (now - lastBackup >= TWENTY_KV_BACKUP_MS) {
+      if (await cachePut(env.COMMODITY_KV, TWENTY_SAMPLES_KV_KEY, JSON.stringify(buffers), { expirationTtl: 24 * 60 * 60 })) backedUpAt = now;
+    }
+    twentyMem = { at: now, backedUpAt, buffers };
   }
 }
 
@@ -249,7 +269,7 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
       const lastSig = await env.COMMODITY_KV.get(lastSigKey);
       const sig = bestCallSignature(pick);
       if (sig === lastSig) continue;
-      await env.COMMODITY_KV.put(lastSigKey, sig);
+      if (!(await cachePut(env.COMMODITY_KV, lastSigKey, sig))) continue; // no marker, no alert (see above)
 
       const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
       const title = `Best Call: ${displayName} ${pick.strike} ${pick.optSide}`;

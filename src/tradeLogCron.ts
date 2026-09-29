@@ -3,7 +3,7 @@
 
 import { lastMcxClose, mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { advanceOpenEntry, closeRunningAtSessionEnd, runningBeforeClose, symbolOfTradeLogKey, TRADE_LOG_SYMBOLS, type TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
-import type { Env, Symbol } from "./env";
+import { cachePut, type Env, type Symbol } from "./env";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { loadOpenTrades, migrateTradeLogs, saveCronResult } from "./tradeLogStore";
 
@@ -128,7 +128,7 @@ export async function runTradeLogAdvanceCheck(env: Env): Promise<boolean> {
         // unreadable -- rewrite it
       }
     }
-    await env.COMMODITY_KV.put(CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
+    await cachePut(env.COMMODITY_KV, CRON_STATUS_KV_KEY, JSON.stringify({ at: now, ...counts, note: note ?? "ok" }));
   };
 
   // One-time copy of the old single-value log into shards (src/tradeLogStore).

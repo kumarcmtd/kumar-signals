@@ -1,7 +1,8 @@
 // EIA inventory / storage data and the economic calendar.
 
 import { type AffectedMarket, type EiaScoreResult, scoreEiaChange } from "../frontend/src/utils/newsScoring";
-import type { Env } from "./env";
+import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
+import { cachePut, type Env } from "./env";
 
 export interface EiaFetchResult {
   available: boolean;
@@ -27,7 +28,17 @@ async function fetchEiaSeries(apiKey: string, path: string, seriesId: string): P
   return rows.map((r: any) => ({ period: r.period, value: Number(r.value) })).filter((r: any) => Number.isFinite(r.value));
 }
 
-const EIA_CACHE_TTL_SECONDS = 8 * 60;
+// The EIA figures change once a week, so most of the week a 30-minute cache is
+// plenty -- each refresh is a KV write against the free plan's 1,000 a day.
+// Around the reports themselves (crude Wednesday, gas Thursday, 10:30 AM ET =
+// 8:00 PM IST in US summer, 9:00 PM in winter) it drops to 3 minutes so the
+// new number shows up promptly.
+function eiaCacheTtlSeconds(now: number = Date.now()): number {
+  const s = mcxSessionAt(now);
+  const reportDay = s.weekday === 3 || s.weekday === 4;
+  const nearRelease = s.minutes >= 19 * 60 + 50 && s.minutes <= 21 * 60 + 45;
+  return reportDay && nearRelease ? 3 * 60 : 30 * 60;
+}
 const EIA_CACHE_KV_KEY = "news:eia:v2";
 
 export async function fetchEiaData(env: Env): Promise<EiaFetchResult> {
@@ -48,7 +59,7 @@ export async function fetchEiaData(env: Env): Promise<EiaFetchResult> {
     const crude = crudeRows.length >= 2 ? scoreEiaChange("crude_inventory", crudeRows[0].value, crudeRows[1].value) : null;
     const ngStorage = ngRows.length >= 2 ? scoreEiaChange("ng_storage", ngRows[0].value, ngRows[1].value) : null;
     const result: EiaFetchResult = { available: crude !== null || ngStorage !== null, crude, ngStorage };
-    await env.COMMODITY_KV.put(EIA_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: EIA_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, EIA_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: eiaCacheTtlSeconds() });
     return result;
   } catch (e: any) {
     return { available: false, crude: null, ngStorage: null, error: e.message ?? "EIA fetch failed" };
@@ -132,7 +143,7 @@ export async function fetchEconCalendar(env: Env): Promise<CalendarFetchResult> 
     );
     const events = results.filter((e): e is EconCalendarEvent => e !== null).sort((a, b) => a.date.localeCompare(b.date));
     const result: CalendarFetchResult = { available: true, events };
-    await env.COMMODITY_KV.put(CALENDAR_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: CALENDAR_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, CALENDAR_CACHE_KV_KEY, JSON.stringify(result), { expirationTtl: CALENDAR_CACHE_TTL_SECONDS });
     return result;
   } catch (e: any) {
     return { available: false, events: [], error: e.message ?? "Economic calendar fetch failed" };

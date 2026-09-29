@@ -161,17 +161,25 @@ test("the cron reads only the running trades, never the closed history", async (
   expect(kv.reads.filter((k) => k.startsWith("tl2:k:")).sort()).toEqual(["tl2:k:BEST-CRUDEOIL", "tl2:k:SHOOT-CRUDEOIL-15"]);
 });
 
-test("progress on a running trade is ONE write, to hot only", async () => {
+test("a new high alone waits for the 30-minute clock; a target hit saves at once, to hot only", async () => {
   const logs = history();
   const kv = await migrated(logs);
   const { logs: open, stale } = await loadOpenTrades(envWith(kv));
   const e = open["BEST-CRUDEOIL"][0];
-  const after = { ...open, "BEST-CRUDEOIL": [{ ...e, highWaterMark: 108 }] };
+
   kv.puts.length = 0;
-  await saveCronResult(envWith(kv), open, after, stale);
+  await saveCronResult(envWith(kv), open, { ...open, "BEST-CRUDEOIL": [{ ...e, highWaterMark: 108 }] }, stale);
+  expect(kv.puts).toEqual([]); // hot was written moments ago by the migration
+
+  await saveCronResult(envWith(kv), open, { ...open, "BEST-CRUDEOIL": [{ ...e, highWaterMark: 112, targetsHit: [true, false, false] }] }, stale);
   expect(kv.puts).toEqual(["tl2:hot"]);
-  const all = await getAll(kv);
-  expect(all["BEST-CRUDEOIL"].at(-1)!.highWaterMark).toBe(108);
+  expect((await getAll(kv))["BEST-CRUDEOIL"].at(-1)!.targetsHit).toEqual([true, false, false]);
+
+  vi.useFakeTimers({ now: Date.now() + 31 * 60_000, toFake: ["Date"] });
+  kv.puts.length = 0;
+  await saveCronResult(envWith(kv), open, { ...open, "BEST-CRUDEOIL": [{ ...e, highWaterMark: 115 }] }, stale);
+  expect(kv.puts).toEqual(["tl2:hot"]);
+  expect((await getAll(kv))["BEST-CRUDEOIL"].at(-1)!.highWaterMark).toBe(115);
 });
 
 test("a trade the cron closes moves into its history and out of hot", async () => {

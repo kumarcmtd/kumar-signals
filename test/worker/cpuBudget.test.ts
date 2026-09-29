@@ -207,3 +207,18 @@ test("wrangler.jsonc declares exactly the three triggers the dispatcher knows", 
   const crons = JSON.parse(/"crons":\s*(\[[^\]]*\])/.exec(text)![1]);
   expect(crons.sort()).toEqual([cron.CRON_FAST, cron.CRON_TRADES, cron.CRON_WARM].sort());
 });
+
+test("outside trading hours news refreshes only once an hour", async () => {
+  const { warmEnergyNews } = await import("../../src/news");
+  globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
+  // Saturday 02:10 IST: not the hourly slot -> nothing fetched, nothing written.
+  vi.useFakeTimers({ now: new Date("2026-09-26T02:10:00+05:30"), toFake: ["Date"] });
+  const kv = makeKv();
+  await warmEnergyNews(envWith(kv));
+  expect(fetchCalls).toHaveLength(0);
+  expect(kv.store.size).toBe(0);
+  // 03:30 IST (22:00 UTC -- the slots count from UTC): the hourly run goes ahead.
+  vi.setSystemTime(new Date("2026-09-26T03:30:00+05:30"));
+  await warmEnergyNews(envWith(kv));
+  expect(fetchCalls.length).toBeGreaterThan(0);
+});

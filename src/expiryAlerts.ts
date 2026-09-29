@@ -1,7 +1,7 @@
 // Options expiry alerts, 2 days out, sent once per (symbol, expiry, day).
 
 import { istParts, mcxSessionAt } from "../frontend/src/utils/mcxSession";
-import { type Env, isRateLimit, OPTION_SYMBOLS } from "./env";
+import { cachePut, type Env, isRateLimit, OPTION_SYMBOLS } from "./env";
 import { NTFY_TOPIC_KV_KEY, sendNtfyNotification } from "./notify";
 import { resolveOptionExpiryCandidates } from "./optionChain";
 import { getNearestFuture } from "./upstox";
@@ -97,7 +97,8 @@ export async function runExpiryAlertCheck(env: Env): Promise<void> {
       const key = `notified:EXPIRY-${alert.symbol}-${alert.expiry}-${alert.daysLeft}`;
       const already = await env.COMMODITY_KV.get(key);
       if (already) continue;
-      await env.COMMODITY_KV.put(key, "1", { expirationTtl: 7 * 86_400 });
+      // No marker saved (daily KV write limit) -> no alert, or it would repeat every run.
+      if (!(await cachePut(env.COMMODITY_KV, key, "1", { expirationTtl: 7 * 86_400 }))) continue;
 
       const daysLabel = alert.daysLeft <= 0 ? "TODAY" : alert.daysLeft === 1 ? "1 day" : `${alert.daysLeft} days`;
       const title = `⏳ ${alert.displayName} options expiry in ${daysLabel}`;

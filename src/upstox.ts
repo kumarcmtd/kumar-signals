@@ -3,7 +3,7 @@
 
 import { expiryStillLive } from "../frontend/src/utils/mcxSession";
 import { resampleCandles } from "../frontend/src/utils/candleResample";
-import { type Candle, type Env, type FutureInfo, UPSTOX_HIST_URL, UPSTOX_INTRADAY_URL, UPSTOX_SEARCH_URL, upstoxJson } from "./env";
+import { cachePut, type Candle, type Env, type FutureInfo, UPSTOX_HIST_URL, UPSTOX_INTRADAY_URL, UPSTOX_SEARCH_URL, upstoxJson } from "./env";
 
 // ---- Futures contract list ----
 // The nearest future was being looked up on EVERY request -- candles, options,
@@ -137,7 +137,7 @@ export async function getHistoricalCandles(env: Env, token: string, instrumentKe
   const fresh = await fetchHistoricalCandles(token, instrumentKey);
   // Only a real result is cached -- caching a null would blank out every
   // daily-candle consumer for the whole TTL after one bad response.
-  if (fresh) await env.COMMODITY_KV.put(cacheKey, JSON.stringify(fresh), { expirationTtl: DAILY_CANDLE_CACHE_TTL_SECONDS });
+  if (fresh) await cachePut(env.COMMODITY_KV, cacheKey, JSON.stringify(fresh), { expirationTtl: DAILY_CANDLE_CACHE_TTL_SECONDS });
   return fresh;
 }
 
@@ -288,7 +288,7 @@ export async function getPriorDayBars(env: Env, token: string, instrumentKey: st
     const bars: Record<string, Candle[]> = {};
     for (const tf of PREBUCKETED_TFS) bars[tf] = resampleCandles(minutes, tf);
     priorBarsMem.set(cacheKey, { at: Date.now(), bars });
-    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(bars), { expirationTtl: HIST_INTRADAY_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, cacheKey, JSON.stringify(bars), { expirationTtl: HIST_INTRADAY_CACHE_TTL_SECONDS });
     return bars[tfMinutes] ?? null;
   } catch {
     return null;

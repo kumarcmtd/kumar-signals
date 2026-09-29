@@ -1,6 +1,6 @@
 // Morning-window gap study (9:00-11:00 AM IST) over 30-minute history.
 
-import { type Candle, type Env, type Symbol, UPSTOX_HIST_URL, upstoxJson } from "./env";
+import { cachePut, type Candle, type Env, type Symbol, UPSTOX_HIST_URL, upstoxJson } from "./env";
 import { getYahooQuote, GLOBAL_INSTRUMENTS } from "./globalMarkets";
 import { getCandlesForTF } from "./signals";
 import { getIntradayCandles, getNearestFuture, sortByTime } from "./upstox";
@@ -98,7 +98,7 @@ export async function getHistorical30mCandles(env: Env, token: string, instrumen
       date: c[0], open: c[1], high: c[2], low: c[3], close: c[4], volume: c[5] ?? 0, oi: c[6] ?? 0,
     }));
     sortByTime(candles);
-    await env.COMMODITY_KV.put(cacheKey, JSON.stringify(candles), { expirationTtl: GAP_STUDY_CACHE_TTL_SECONDS });
+    await cachePut(env.COMMODITY_KV, cacheKey, JSON.stringify(candles), { expirationTtl: GAP_STUDY_CACHE_TTL_SECONDS });
     return candles;
   } catch {
     return [];
