@@ -48,6 +48,8 @@ export interface AlertSettings {
   soundVolume?: number;
   /** Seconds the alarm sounds; missing on older settings (read as 5). */
   soundSeconds?: number;
+  /** "tone" (the owner's ringtone) or "siren"; missing on older settings (read as "tone"). */
+  soundTone?: "tone" | "siren";
   // "strong" only fires on STRONG BUY/STRONG SELL (Timeframe/Elite) or a
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.

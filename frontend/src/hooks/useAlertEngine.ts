@@ -7,7 +7,7 @@ import { findPlaybookSetup, calculateHitProbability } from "../utils/kimiPlayboo
 import { findEliteSignal } from "../utils/eliteSignal";
 import { decisionLabelWithScore } from "../utils/timeframeEngine";
 import { useAppStore, type AlertEntry } from "../store/appStore";
-import { DEFAULT_ALERT_SECONDS, DEFAULT_ALERT_VOLUME, fireBrowserNotification, playAlertSound } from "../utils/notify";
+import { DEFAULT_ALERT_SECONDS, DEFAULT_ALERT_TONE, DEFAULT_ALERT_VOLUME, fireBrowserNotification, playAlertSound, preloadAlertTone } from "../utils/notify";
 
 type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
 const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -41,6 +41,12 @@ function useKimiScan(symbol: TradableSymbol, commodity: "NG" | "CL"): TimedScanR
 export function useAlertEngine(): void {
   const alertSettings = useAppStore((s) => s.alertSettings);
   const addAlerts = useAppStore((s) => s.addAlerts);
+
+  // Fetch and decode the ringtone up front, so the first alert rings at once.
+  const wantsTone = alertSettings.soundEnabled && (alertSettings.soundTone ?? DEFAULT_ALERT_TONE) === "tone";
+  useEffect(() => {
+    if (wantsTone) preloadAlertTone();
+  }, [wantsTone]);
   const tradeLogs = useAppStore((s) => s.tradeLogs);
 
   const crudeOil = useTimeframeSuite("CRUDEOIL", null);
@@ -220,7 +226,9 @@ export function useAlertEngine(): void {
     if (alertSettings.browserNotifications) {
       for (const a of fresh) fireBrowserNotification(a.title, a.detail);
     }
-    if (alertSettings.soundEnabled) playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME, alertSettings.soundSeconds ?? DEFAULT_ALERT_SECONDS);
+    if (alertSettings.soundEnabled) {
+      playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME, alertSettings.soundSeconds ?? DEFAULT_ALERT_SECONDS, alertSettings.soundTone ?? DEFAULT_ALERT_TONE);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     alertSettings.enabled,
@@ -235,6 +243,7 @@ export function useAlertEngine(): void {
     alertSettings.soundEnabled,
     alertSettings.soundVolume,
     alertSettings.soundSeconds,
+    alertSettings.soundTone,
     crudeOil.analyses,
     naturalGas.analyses,
     ngKimi,

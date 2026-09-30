@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair, Target } from "lucide-react";
 import { useAppStore, type AlertEntry, type AlertSource } from "../store/appStore";
 import {
-  ALERT_SECONDS_OPTIONS, DEFAULT_ALERT_SECONDS, DEFAULT_ALERT_VOLUME, notificationPermission, playAlertSound, requestNotificationPermission, stopAlertSound,
+  ALERT_SECONDS_OPTIONS, DEFAULT_ALERT_SECONDS, DEFAULT_ALERT_TONE, DEFAULT_ALERT_VOLUME, notificationPermission, playAlertSound, requestNotificationPermission,
+  stopAlertSound,
 } from "../utils/notify";
 
 const SOURCE_STYLE: Record<AlertSource, { label: string; icon: typeof FlaskConical; bg: string; text: string }> = {
@@ -104,6 +105,22 @@ export function Alerts() {
               />
               <Volume2 size={15} className="text-[var(--color-muted)] shrink-0" />
             </div>
+            <p className="text-xs text-[var(--color-muted)] mt-2.5 mb-1">Tone</p>
+            <div className="flex gap-1.5">
+              {([["tone", "Your ringtone"], ["siren", "Siren"]] as const).map(([value, label]) => {
+                const on = (alertSettings.soundTone ?? DEFAULT_ALERT_TONE) === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setAlertSettings({ soundTone: value })}
+                    className={`flex-1 text-xs font-bold py-1.5 rounded-lg border ${on ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]" : "border-[var(--color-border)] text-[var(--color-muted)]"}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
             <p className="text-xs text-[var(--color-muted)] mt-2.5 mb-1">Sound length</p>
             <div className="flex gap-1.5">
               {ALERT_SECONDS_OPTIONS.map((sec) => {
@@ -121,7 +138,9 @@ export function Alerts() {
             </div>
             <div className="mt-2 flex gap-2">
               <button
-                onClick={() => playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME, alertSettings.soundSeconds ?? DEFAULT_ALERT_SECONDS)}
+                onClick={() =>
+                  playAlertSound(alertSettings.soundVolume ?? DEFAULT_ALERT_VOLUME, alertSettings.soundSeconds ?? DEFAULT_ALERT_SECONDS, alertSettings.soundTone ?? DEFAULT_ALERT_TONE)
+                }
                 className="flex-1 flex items-center justify-center gap-1.5 text-xs font-bold py-2 rounded-lg bg-blue-50 text-[var(--color-primary)]"
               >
                 <BellRing size={13} /> Test sound
@@ -131,7 +150,7 @@ export function Alerts() {
               </button>
             </div>
             <p className="text-[10.5px] text-[var(--color-muted)] mt-1.5 leading-snug">
-              A siren-style alarm; tap anywhere on the screen to stop it early. Your phone's media volume also applies. This sound only plays while the app is open — for alerts with the app closed, use the ntfy app
+              Your ringtone loops for the length you pick; tap anywhere on the screen to stop it early. Your phone's media volume also applies. This sound only plays while the app is open — for alerts with the app closed, use the ntfy app
               and set its notification sound there.
             </p>
           </div>
