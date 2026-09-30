@@ -43,11 +43,23 @@ function bestCallSignature(pick: BestCallPick): string {
   return `${pick.optSide}-${pick.source}`;
 }
 
-export async function sendNtfyNotification(topic: string, title: string, body: string): Promise<{ ok: boolean; error?: string }> {
+// ntfy priorities: "urgent" (5) is the max-priority channel -- the one the
+// ntfy app can ring through Do Not Disturb and keep ringing until dismissed
+// ("insistent"). Trade calls use it: with the phone locked the page cannot
+// sound anything, so this push IS the alert. Informational pushes (expiry
+// reminders) stay at "high".
+export type NtfyPriority = "urgent" | "high" | "default";
+
+export async function sendNtfyNotification(
+  topic: string,
+  title: string,
+  body: string,
+  priority: NtfyPriority = "high"
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
       method: "POST",
-      headers: { Title: title, Priority: "high", Tags: "chart_with_upwards_trend" },
+      headers: { Title: title, Priority: priority, Tags: priority === "urgent" ? "rotating_light,chart_with_upwards_trend" : "chart_with_upwards_trend" },
       body,
     });
     if (!res.ok) return { ok: false, error: `ntfy.sh responded HTTP ${res.status}` };
@@ -185,7 +197,8 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
           "",
           "Open the app and tap Can I Buy Now? before entering -- this call was",
           "sent the moment it fired, and price may have moved since.",
-        ].join("\n")
+        ].join("\n"),
+        "urgent"
       );
     } catch {
       // One symbol failing must never stop the other, and must never fail the
@@ -294,7 +307,7 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
         "",
         "Open Capital Guard for your lot size before entering -- price may have moved.",
       ].join("\n");
-      await sendNtfyNotification(topic, title, body);
+      await sendNtfyNotification(topic, title, body, "urgent");
     } catch {
       // best-effort -- one symbol failing shouldn't block the other
     }

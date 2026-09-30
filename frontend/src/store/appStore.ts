@@ -50,6 +50,8 @@ export interface AlertSettings {
   soundSeconds?: number;
   /** "tone" (the owner's ringtone) or "siren"; missing on older settings (read as "tone"). */
   soundTone?: "tone" | "siren";
+  /** Hold the screen awake while the app is open, so alerts keep running. */
+  keepScreenOn?: boolean;
   // "strong" only fires on STRONG BUY/STRONG SELL (Timeframe/Elite) or a
   // tradeable BUY/STRONG BUY Kimi setup -- "all" also includes the weaker
   // BUY/WATCH BUY/SELL tiers, which is noisier but catches earlier signals.

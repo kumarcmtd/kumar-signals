@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 import { Header } from "./Header";
 import { BottomNav } from "./BottomNav";
 import { useAlertEngine } from "../hooks/useAlertEngine";
+import { useKeepScreenOn } from "../hooks/useKeepScreenOn";
+import { useAppStore } from "../store/appStore";
 import { PullbackStrip } from "./PullbackStrip";
 
 export function AppShell({ children }: { children: ReactNode }) {
   // Mounted once here (not on any single page) so alerts keep firing across
   // the whole app no matter which page is currently open.
   useAlertEngine();
+  useKeepScreenOn(useAppStore((s) => s.alertSettings.keepScreenOn ?? false));
 
   return (
     <div className="min-h-full flex flex-col">

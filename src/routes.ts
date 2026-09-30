@@ -260,7 +260,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
           const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
           if (!topic) return json({ error: "No ntfy topic saved yet -- save one first" }, 400);
-          const result = await sendNtfyNotification(topic, "Kumar Signals Pro test", "If you can see this, background push notifications are working.");
+          // Sent at the same "urgent" priority as real trade calls, so the test
+          // sounds exactly like a real alert would.
+          const result = await sendNtfyNotification(
+            topic,
+            "Kumar Signals Pro test",
+            "If you hear this with the phone locked, trade alerts will reach you the same way.",
+            "urgent"
+          );
           if (!result.ok) return json({ error: result.error ?? "Failed to send test notification" }, 502);
           return json({ ok: true });
         }

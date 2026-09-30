@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Bell, BellRing, Trash2, CheckCheck, Volume2, VolumeX, TrendingUp, TrendingDown, Radar, ShieldCheck, FlaskConical, Crosshair, Target } from "lucide-react";
 import { useAppStore, type AlertEntry, type AlertSource } from "../store/appStore";
+import { LockedAlertsCard } from "../components/LockedAlertsCard";
 import {
   ALERT_SECONDS_OPTIONS, DEFAULT_ALERT_SECONDS, DEFAULT_ALERT_TONE, DEFAULT_ALERT_VOLUME, notificationPermission, playAlertSound, requestNotificationPermission,
   stopAlertSound,
@@ -49,6 +50,8 @@ export function Alerts() {
           <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-[var(--color-sell-soft)] text-[var(--color-sell)]">{unreadCount} new</span>
         )}
       </div>
+
+      <LockedAlertsCard />
 
       <div className="card p-4 space-y-3">
         <p className="text-xs font-bold uppercase text-[var(--color-muted)]">Alert Settings</p>
