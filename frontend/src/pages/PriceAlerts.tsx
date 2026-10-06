@@ -27,6 +27,7 @@ import { useTimeProfile, useMarketStatus } from "../api/hooks";
 import { OvernightFollowThroughCard } from "../components/OvernightFollowThroughCard";
 import { LiveSessionTrendCard } from "../components/LiveSessionTrendCard";
 import { OvernightToNowCard } from "../components/OvernightToNowCard";
+import { SeasonalWeekCard } from "../components/SeasonalWeekCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -476,6 +477,11 @@ export function PriceAlerts() {
           time-profile query did: it reads its own 30-minute history, so a
           missing time profile must not hide it. */}
       <OvernightFollowThroughCard symbol={symbol} />
+
+      {/* Gas trades the season (heating in winter, power burn in summer,
+          storage in between), so the same week in past years is the fair
+          comparison -- not last month. */}
+      <SeasonalWeekCard symbol={symbol} />
 
       {data && !data.available && !isLoading && (
         <Card tone={`${C.warn}55`}>

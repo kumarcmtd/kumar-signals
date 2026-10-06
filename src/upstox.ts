@@ -63,13 +63,27 @@ function liveFutures(list: FutureInfo[]): FutureInfo[] {
   return list.filter((f) => expiryStillLive(f.expiry, now));
 }
 
+export const UPSTOX_LOGIN_EXPIRED =
+  "Upstox login has expired -- Upstox tokens expire every day around 3:30 AM IST. Log in again via the main kumarcmtd worker's /login to restore live data.";
+
 async function fetchFuturesList(token: string, query: string): Promise<FutureInfo[]> {
   const usp = new URLSearchParams({ query, exchanges: "MCX", instrument_types: "FUT", records: "10" });
   const res = await fetch(`${UPSTOX_SEARCH_URL}?${usp.toString()}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   const json: any = await upstoxJson(res, "the futures contract list");
-  if (json.status !== "success" || !json.data || !json.data.length) return [];
+  // An expired or invalid login used to come back as an empty list, which
+  // every page then reported as "No instrument found" -- sounding broken when
+  // the real cause is routine: Upstox tokens expire every day around 3:30 AM.
+  const messages: string[] = (json?.errors ?? []).map((e: any) => String(e?.message ?? e?.errorCode ?? "")).filter(Boolean);
+  if (res.status === 401 || messages.some((m) => /token|unauthori[sz]ed|UDAPI100050/i.test(m))) {
+    throw new Error(UPSTOX_LOGIN_EXPIRED);
+  }
+  if (json.status !== "success") {
+    if (messages.length) throw new Error(`Upstox could not list the futures contracts: ${messages.join("; ")}`);
+    return [];
+  }
+  if (!json.data || !json.data.length) return [];
   return [...json.data]
     .sort((a: any, b: any) => +new Date(a.expiry) - +new Date(b.expiry))
     .map((c: any) => ({ instrument_key: c.instrument_key, expiry: c.expiry, trading_symbol: c.trading_symbol }));

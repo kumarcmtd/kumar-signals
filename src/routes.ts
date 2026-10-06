@@ -15,6 +15,7 @@ import { fetchEnergyNews } from "./news";
 import { NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification } from "./notify";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
+import { computeSeasonal } from "./seasonal";
 import { computeCandles, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
 import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, type PortfolioTrade, updatePortfolioTrade } from "./storage";
 import { pushTradeLogs, readAllTradeLogsJson } from "./tradeLogStore";
@@ -59,6 +60,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // no Upstox call, so it is safe to poll from the Price-Alerts page.
         if (url.pathname === "/api/overnight-tracker") {
           return json(await computeOvernightTracker(env));
+        }
+
+        // Weekly NYMEX history (Yahoo, no Upstox call) for the "same week in
+        // past years" seasonal comparison on Price-Alerts. Cached 6 hours.
+        if (url.pathname === "/api/seasonal") {
+          const symbol = url.searchParams.get("symbol") === "CRUDEOIL" ? "CRUDEOIL" : "NATURALGAS";
+          return json(await computeSeasonal(env, symbol));
         }
 
         // GPT News only. Kept off /api/global-markets so the Global Markets

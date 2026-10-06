@@ -300,6 +300,16 @@ export function useHistory30m(symbol: InstrumentSymbol, enabled: boolean) {
 // cadence here is genuinely cheap. It stays on overnight and through the
 // morning, which is exactly when it is worth reading and when nothing else on
 // the page is polling.
+// Weekly history for the same-week-in-past-years comparison. Weekly bars
+// barely change within a day, so this never polls.
+export function useSeasonal(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["seasonal", symbol],
+    queryFn: () => api.seasonal(symbol),
+    staleTime: 60 * 60_000,
+  });
+}
+
 export function useOvernightTracker() {
   return useQuery({
     queryKey: ["overnight-tracker"],
