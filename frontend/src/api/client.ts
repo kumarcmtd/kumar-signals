@@ -1,6 +1,7 @@
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, OvernightTrackerResponse, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
 import type { OiBuildupResponse } from "../utils/oiBuildup";
 import type { WeekBar } from "../utils/seasonalCompare";
+import type { WeatherRegion } from "../utils/weatherCompare";
 import type { WhyCommodity } from "../utils/whyTodaySummary";
 import type { EiaScoreResult } from "../utils/newsScoring";
 import type { MorningGapRecord } from "../utils/overnightGapEngine";
@@ -148,6 +149,7 @@ export const api = {
   newsFeed: () => getJSON<NewsFeedResponse>("/news"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   overnightTracker: () => getJSON<OvernightTrackerResponse>("/overnight-tracker"),
+  weather: () => getJSON<{ asOf: string; source: string; regions: WeatherRegion[]; fetchedAt: string; error?: string }>("/weather"),
   seasonal: (symbol: InstrumentSymbol) =>
     getJSON<{ symbol: string; source: string; unit: string; weeks: WeekBar[]; months?: WeekBar[]; fetchedAt: string; error?: string }>(`/seasonal?symbol=${symbol}`),
   macroMarkets: () => getJSON<MacroMarketsResponse>("/macro-markets"),

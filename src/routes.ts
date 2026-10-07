@@ -16,6 +16,7 @@ import { NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification }
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
 import { computeSeasonal } from "./seasonal";
+import { computeWeather } from "./weather";
 import { computeCandles, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
 import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, type PortfolioTrade, updatePortfolioTrade } from "./storage";
 import { pushTradeLogs, readAllTradeLogsJson } from "./tradeLogStore";
@@ -67,6 +68,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (url.pathname === "/api/seasonal") {
           const symbol = url.searchParams.get("symbol") === "CRUDEOIL" ? "CRUDEOIL" : "NATURALGAS";
           return json(await computeSeasonal(env, symbol));
+        }
+
+        // Weather demand (Open-Meteo, no Upstox call): the next 16 days against
+        // the same days in the last three years, for the US, Europe and East
+        // Asia. History cached a day, forecast 3 hours.
+        if (url.pathname === "/api/weather") {
+          return json(await computeWeather(env));
         }
 
         // GPT News only. Kept off /api/global-markets so the Global Markets

@@ -29,6 +29,7 @@ import { LiveSessionTrendCard } from "../components/LiveSessionTrendCard";
 import { OvernightToNowCard } from "../components/OvernightToNowCard";
 import { SeasonalWeekCard } from "../components/SeasonalWeekCard";
 import { SeasonalMonthCard } from "../components/SeasonalMonthCard";
+import { WeatherDemandCard } from "../components/WeatherDemandCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -484,6 +485,8 @@ export function PriceAlerts() {
           comparison -- not last month. */}
       <SeasonalWeekCard symbol={symbol} />
       <SeasonalMonthCard symbol={symbol} />
+      {/* Weather drives gas demand; it barely moves crude. */}
+      {symbol === "NATURALGAS" && <WeatherDemandCard />}
 
       {data && !data.available && !isLoading && (
         <Card tone={`${C.warn}55`}>

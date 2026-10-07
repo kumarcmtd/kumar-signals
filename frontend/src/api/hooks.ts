@@ -310,6 +310,16 @@ export function useSeasonal(symbol: InstrumentSymbol) {
   });
 }
 
+// Weather demand vs the last three years. History changes daily and the
+// forecast a few times a day, so an hour's staleness is plenty.
+export function useWeather() {
+  return useQuery({
+    queryKey: ["weather"],
+    queryFn: api.weather,
+    staleTime: 60 * 60_000,
+  });
+}
+
 export function useOvernightTracker() {
   return useQuery({
     queryKey: ["overnight-tracker"],
