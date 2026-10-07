@@ -17,6 +17,7 @@ import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
 import { computeSeasonal } from "./seasonal";
 import { computeWeather } from "./weather";
+import { computeNgStorage } from "./ngStorage";
 import { computeCandles, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
 import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, type PortfolioTrade, updatePortfolioTrade } from "./storage";
 import { pushTradeLogs, readAllTradeLogsJson } from "./tradeLogStore";
@@ -75,6 +76,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // Asia. History cached a day, forecast 3 hours.
         if (url.pathname === "/api/weather") {
           return json(await computeWeather(env));
+        }
+
+        // ~6 years of EIA weekly gas storage for the storage-vs-past-years card.
+        if (url.pathname === "/api/ng-storage") {
+          return json(await computeNgStorage(env));
         }
 
         // GPT News only. Kept off /api/global-markets so the Global Markets

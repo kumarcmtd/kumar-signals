@@ -320,6 +320,17 @@ export function useWeather() {
   });
 }
 
+// EIA weekly gas storage, ~6 years. New data once a week (Thursday), so a
+// 30-minute refetch while the page is open is enough.
+export function useNgStorage() {
+  return useQuery({
+    queryKey: ["ng-storage"],
+    queryFn: api.ngStorage,
+    staleTime: 20 * 60_000,
+    refetchInterval: 30 * 60_000,
+  });
+}
+
 export function useOvernightTracker() {
   return useQuery({
     queryKey: ["overnight-tracker"],
