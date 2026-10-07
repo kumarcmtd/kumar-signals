@@ -10,7 +10,8 @@ const DOWN = "#DC2626";
 
 function signed(v: number | null, digits = 1): string {
   if (v === null) return "—";
-  return `${v > 0 ? "+" : ""}${v.toFixed(digits)}%`;
+  const r = Number(v.toFixed(digits));
+  return r === 0 ? `${(0).toFixed(digits)}%` : `${r > 0 ? "+" : ""}${r.toFixed(digits)}%`; // never "-0%"
 }
 const inkOf = (v: number | null) => (v === null ? "#94A3B8" : v > 0 ? UP : v < 0 ? DOWN : "#64748B");
 const fmtDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });

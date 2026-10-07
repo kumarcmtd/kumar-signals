@@ -11,7 +11,8 @@
 // tendency into a prediction.
 
 export interface WeekBar {
-  date: string; // week start YYYY-MM-DD
+  date: string; // week start YYYY-MM-DD (or YYYY-MM-01 for a month bar)
+  open?: number;
   close: number;
   high: number;
   low: number;
@@ -143,4 +144,80 @@ export function seasonGrid(bars: WeekBar[], view: SeasonalView, weeksAhead = 12)
     rows.push({ offset: k, week: firstDate ? isoWeekOf(firstDate).week : ((view.week + k - 1) % 52) + 1, cells });
   }
   return rows;
+}
+
+// ---- Monthly ---------------------------------------------------------------
+
+export const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export interface MonthCell {
+  year: number;
+  month: number; // 0-11
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  usdInr: number | null;
+  changePct: number; // open -> close
+  rangePct: number; // low -> high, as % of low
+  partial: boolean; // the month in progress
+}
+
+export interface MonthRow {
+  month: number;
+  label: string;
+  cells: Record<number, MonthCell | null>;
+  /** Past (complete) years only. */
+  up: number;
+  years: number;
+  avgChangePct: number | null;
+  avgRangePct: number | null;
+}
+
+export interface MonthlyView {
+  years: number[]; // oldest -> newest
+  currentYear: number;
+  currentMonth: number;
+  rows: MonthRow[];
+}
+
+export function buildMonthly(months: WeekBar[], yearsBack = 3): MonthlyView | null {
+  if (months.length < 6) return null;
+  const sorted = [...months].sort((a, b) => a.date.localeCompare(b.date));
+  const last = sorted[sorted.length - 1];
+  const currentYear = Number(last.date.slice(0, 4));
+  const currentMonth = Number(last.date.slice(5, 7)) - 1;
+  const years = Array.from({ length: yearsBack + 1 }, (_, i) => currentYear - yearsBack + i);
+
+  const byKey = new Map<string, WeekBar>();
+  for (const b of sorted) byKey.set(b.date.slice(0, 7), b);
+
+  const rows: MonthRow[] = MONTH_LABELS.map((label, month) => {
+    const cells: Record<number, MonthCell | null> = {};
+    for (const year of years) {
+      const b = byKey.get(`${year}-${String(month + 1).padStart(2, "0")}`);
+      if (!b) {
+        cells[year] = null;
+        continue;
+      }
+      const open = b.open ?? b.close;
+      cells[year] = {
+        year, month, open, high: b.high, low: b.low, close: b.close, usdInr: b.usdInr,
+        changePct: ((b.close - open) / open) * 100,
+        rangePct: b.low > 0 ? ((b.high - b.low) / b.low) * 100 : 0,
+        partial: year === currentYear && month === currentMonth,
+      };
+    }
+    const past = years.filter((y) => y < currentYear).map((y) => cells[y]).filter((c): c is MonthCell => c !== null);
+    return {
+      month,
+      label,
+      cells,
+      up: past.filter((c) => c.changePct > 0).length,
+      years: past.length,
+      avgChangePct: past.length ? past.reduce((s, c) => s + c.changePct, 0) / past.length : null,
+      avgRangePct: past.length ? past.reduce((s, c) => s + c.rangePct, 0) / past.length : null,
+    };
+  });
+  return { years, currentYear, currentMonth, rows };
 }

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildSeasonal, isoWeekOf, seasonGrid, type WeekBar } from "../utils/seasonalCompare";
+import { buildMonthly, buildSeasonal, isoWeekOf, seasonGrid, type WeekBar } from "../utils/seasonalCompare";
 
 test("ISO week numbers, including the year-boundary cases", () => {
   expect(isoWeekOf("2026-10-05")).toEqual({ year: 2026, week: 41 });
@@ -57,4 +57,26 @@ test("week-by-week grid keeps each season in its own column, across New Year", (
   expect(y2024[1].close).toBeGreaterThan(y2024[0].close!);
   // The current year has no future weeks.
   expect(g[3].cells.find((c) => c.year === 2026)!.close).toBeNull();
+});
+
+test("monthly: open/high/low/close per month and year, with the season summary", () => {
+  const months = [];
+  for (let y = 2022; y <= 2026; y++) {
+    for (let m = 0; m < 12; m++) {
+      if (y === 2026 && m > 9) break; // data runs to October 2026
+      const open = 3;
+      const close = m >= 9 ? 3.3 : 2.9; // Oct-Dec up 10%, other months down
+      months.push({ date: `${y}-${String(m + 1).padStart(2, "0")}-01`, open, high: 3.6, low: 2.4, close, usdInr: 85 });
+    }
+  }
+  const v = buildMonthly(months)!;
+  expect(v.years).toEqual([2023, 2024, 2025, 2026]);
+  expect(v.currentMonth).toBe(9);
+  const oct = v.rows[9];
+  expect(oct.cells[2024]!.changePct).toBeCloseTo(10);
+  expect(oct.cells[2024]!.rangePct).toBeCloseTo(50); // 2.4 -> 3.6
+  expect(oct.cells[2026]!.partial).toBe(true);
+  expect(oct).toMatchObject({ up: 3, years: 3 }); // the current year is not counted
+  expect(v.rows[3]).toMatchObject({ up: 0, years: 3 });
+  expect(v.rows[11].cells[2026]).toBeNull(); // December 2026 has not happened
 });

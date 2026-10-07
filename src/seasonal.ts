@@ -25,6 +25,8 @@ export interface SeasonalResponse {
   source: string;
   unit: string;
   weeks: SeasonalWeek[];
+  /** Calendar-month bars (date = first of the month), same shape as weeks. */
+  months: SeasonalWeek[];
   fetchedAt: string;
   error?: string;
 }
@@ -65,8 +67,8 @@ export function parseYahooChart(json: any): Bar[] {
   return out;
 }
 
-async function yahooWeekly(ticker: string): Promise<Bar[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1wk&range=5y`;
+async function yahooBars(ticker: string, interval: "1wk" | "1mo"): Promise<Bar[]> {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=${interval}&range=5y`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; KumarSignalsPro/1.0)", Accept: "application/json" } });
   if (!res.ok) throw new Error(`Yahoo Finance returned ${res.status} for ${ticker}`);
   return parseYahooChart(await res.json());
@@ -87,7 +89,7 @@ const r2 = (n: number) => Math.round(n * 1000) / 1000;
 
 export async function computeSeasonal(env: Env, symbol: SeasonalResponse["symbol"]): Promise<SeasonalResponse> {
   const cfg = YAHOO[symbol];
-  const cacheKey = `seasonal:v1:${symbol}`;
+  const cacheKey = `seasonal:v2:${symbol}`;
   const cached = await env.COMMODITY_KV.get(cacheKey);
   if (cached) {
     try {
@@ -98,13 +100,28 @@ export async function computeSeasonal(env: Env, symbol: SeasonalResponse["symbol
   }
   const base = { symbol, source: cfg.source, unit: cfg.unit, fetchedAt: new Date().toISOString() };
   try {
-    const [bars, fx] = await Promise.all([yahooWeekly(cfg.ticker), yahooWeekly("INR=X").catch(() => [] as Bar[])]);
-    if (bars.length === 0) return { ...base, weeks: [], error: "Yahoo Finance returned no weekly history" };
+    const [bars, fx, monthBars, fxMonths] = await Promise.all([
+      yahooBars(cfg.ticker, "1wk"),
+      yahooBars("INR=X", "1wk").catch(() => [] as Bar[]),
+      yahooBars(cfg.ticker, "1mo").catch(() => [] as Bar[]),
+      yahooBars("INR=X", "1mo").catch(() => [] as Bar[]),
+    ]);
+    if (bars.length === 0) return { ...base, weeks: [], months: [], error: "Yahoo Finance returned no weekly history" };
     const weeks: SeasonalWeek[] = bars.map((b) => ({ date: b.date, open: r2(b.open), high: r2(b.high), low: r2(b.low), close: r2(b.close), usdInr: inrFor(b.date, fx) }));
-    const result: SeasonalResponse = { ...base, weeks };
+    // Monthly bars can be stamped on the 1st in exchange time or the last day
+    // of the previous month in UTC; normalise to YYYY-MM-01 of the month the
+    // bar mostly covers (a stamp after the 25th belongs to the next month).
+    const months: SeasonalWeek[] = monthBars.map((b) => {
+      const [y, m, d] = b.date.split("-").map(Number);
+      const first = d > 25 ? new Date(Date.UTC(y, m, 1)) : new Date(Date.UTC(y, m - 1, 1));
+      const key = first.toISOString().slice(0, 10);
+      const fxBar = fxMonths.find((f) => f.date.slice(0, 7) === key.slice(0, 7)) ?? null;
+      return { date: key, open: r2(b.open), high: r2(b.high), low: r2(b.low), close: r2(b.close), usdInr: fxBar ? fxBar.close : inrFor(key, fx) };
+    });
+    const result: SeasonalResponse = { ...base, weeks, months };
     await cachePut(env.COMMODITY_KV, cacheKey, JSON.stringify(result), { expirationTtl: CACHE_TTL_SECONDS });
     return result;
   } catch (e: any) {
-    return { ...base, weeks: [], error: e?.message ?? "Could not load weekly history" };
+    return { ...base, weeks: [], months: [], error: e?.message ?? "Could not load weekly history" };
   }
 }

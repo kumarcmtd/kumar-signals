@@ -28,6 +28,7 @@ import { OvernightFollowThroughCard } from "../components/OvernightFollowThrough
 import { LiveSessionTrendCard } from "../components/LiveSessionTrendCard";
 import { OvernightToNowCard } from "../components/OvernightToNowCard";
 import { SeasonalWeekCard } from "../components/SeasonalWeekCard";
+import { SeasonalMonthCard } from "../components/SeasonalMonthCard";
 import {
   liveWindow, bestWindows, quietWindows, slotLabel, istMinutesNow,
   plainDirection, plainBusyness, plainMultiple,
@@ -482,6 +483,7 @@ export function PriceAlerts() {
           storage in between), so the same week in past years is the fair
           comparison -- not last month. */}
       <SeasonalWeekCard symbol={symbol} />
+      <SeasonalMonthCard symbol={symbol} />
 
       {data && !data.available && !isLoading && (
         <Card tone={`${C.warn}55`}>
