@@ -27,6 +27,7 @@ import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
 import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
+import { AiVerifyQuickCard } from "../components/AiVerifyQuickCard";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -794,6 +795,9 @@ export function AiTwentyTwenty() {
         <VolatilityMeter symbol="CRUDEOIL" />
         <VolatilityMeter symbol="NATURALGAS" />
       </div>
+
+      {/* The strict, closed-candle read from AI Verify Pro, at a glance. */}
+      <AiVerifyQuickCard />
 
       {anyLiveDataUnavailable && (
         <div className="rounded-2xl bg-white border border-rose-200 p-4 text-center shadow-sm">
