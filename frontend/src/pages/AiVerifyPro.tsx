@@ -6,6 +6,7 @@ import { TimeframeStrip } from "../components/decision/TimeframeStrip";
 import { TradePlanCard } from "../components/decision/TradePlanCard";
 import { EvidenceCard } from "../components/decision/EvidenceCard";
 import { DecisionTimeline } from "../components/decision/DecisionTimeline";
+import { LiveNowCard } from "../components/decision/LiveNow";
 import { sessionBucketStart } from "../utils/candleResample";
 import type { DecisionResult } from "../utils/buyDecisionEngine";
 import type { TradeLogEntry } from "../store/appStore";
@@ -61,7 +62,7 @@ function RunningCall({ trade, result }: { trade: TradeLogEntry; result: Decision
 }
 
 function SymbolView({ symbol }: { symbol: Sym }) {
-  const { result, pick, entry, running, marketOpen, loading, error, refetch, updatedAt } = useBuyDecision(symbol);
+  const { result, pick, entry, live, running, marketOpen, loading, error, refetch, updatedAt } = useBuyDecision(symbol);
   const [spinning, setSpinning] = useState(false);
 
   if (error && !result) {
@@ -89,6 +90,7 @@ function SymbolView({ symbol }: { symbol: Sym }) {
   return (
     <div className="space-y-3.5">
       <VerdictHero result={result} name={NAME[symbol]} pick={pick} entry={entry} nextCloseIn={minutesToNextClose(marketOpen)} />
+      <LiveNowCard read={live} updatedAt={updatedAt} onRefresh={refetch} />
       <Cautions items={result.cautions} />
       {running && <RunningCall trade={running} result={result} />}
       <TimeframeStrip result={result} />

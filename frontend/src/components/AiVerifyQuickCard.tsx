@@ -4,8 +4,11 @@
 // The full reasons stay on AI Verify Pro; tapping a row goes there.
 
 import { Link } from "react-router-dom";
-import { BadgeCheck, TrendingUp, TrendingDown, Hourglass, PauseCircle, Moon, Zap, ChevronRight, Clock } from "lucide-react";
+import { RefreshCw, BadgeCheck, TrendingUp, TrendingDown, Hourglass, PauseCircle, Moon, Zap, ChevronRight, Clock } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useBuyDecision } from "../hooks/useBuyDecision";
+import { LiveNowPill } from "./decision/LiveNow";
 import { useAppStore } from "../store/appStore";
 import { sessionBucketStart } from "../utils/candleResample";
 import type { Verdict } from "../utils/buyDecisionEngine";
@@ -29,7 +32,7 @@ function minutesToNextClose(): number {
 }
 
 function Row({ symbol }: { symbol: Sym }) {
-  const { result, pick, marketOpen, loading } = useBuyDecision(symbol);
+  const { result, pick, live, marketOpen, loading } = useBuyDecision(symbol);
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   if (!result) {
     return <div className="rounded-2xl bg-slate-100 px-3 py-2.5 text-[11.5px] text-slate-500">{NAME[symbol]}: {loading ? "reading the charts…" : "not enough finished candles yet"}</div>;
@@ -82,6 +85,7 @@ function Row({ symbol }: { symbol: Sym }) {
           </Chip>
         )}
       </div>
+      {live && <LiveNowPill read={live} />}
       {vsCall && (
         <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={{ background: vsCall.ok ? "rgba(255,255,255,.92)" : "rgba(15,23,42,.35)", color: vsCall.ok ? "#047857" : "#fff" }}>
           {vsCall.ok === false ? "⚠ " : vsCall.ok ? "✓ " : ""}
@@ -101,17 +105,25 @@ function Chip({ children }: { children: React.ReactNode }) {
 }
 
 export function AiVerifyQuickCard() {
+  const qc = useQueryClient();
+  const [spinning, setSpinning] = useState(false);
+  const refresh = async () => {
+    setSpinning(true);
+    await Promise.all([qc.refetchQueries({ queryKey: ["candles"] }), qc.refetchQueries({ queryKey: ["options-analytics"] })]).finally(() => setSpinning(false));
+  };
   return (
     <section className="rounded-3xl bg-white shadow-md p-3 space-y-2">
       <div className="flex items-center gap-1.5 px-1">
         <BadgeCheck size={15} className="text-indigo-600" />
         <p className="text-[12.5px] font-black text-slate-800">AI Verify Pro — quick look</p>
-        <p className="text-[9.5px] text-slate-400 ml-auto">15m · 1h · 4h closed candles</p>
+        <button onClick={refresh} className="ml-auto text-[10.5px] font-black text-indigo-700 bg-indigo-50 rounded-lg px-2 py-1 flex items-center gap-1">
+          <RefreshCw size={11} className={spinning ? "animate-spin" : ""} /> Refresh
+        </button>
       </div>
       <Row symbol="NATURALGAS" />
       <Row symbol="CRUDEOIL" />
       <p className="text-[9.5px] text-slate-400 leading-snug px-1">
-        "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
+        Decision: 15m · 1h · 4h closed candles. "Right now" is the live candle and can change before it closes. "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
       </p>
     </section>
   );
