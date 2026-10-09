@@ -1,6 +1,7 @@
 import { TrendingUp, TrendingDown, Hourglass, PauseCircle, Moon, Zap, CheckCircle2, Clock, AlertTriangle, XCircle } from "lucide-react";
 import type { DecisionResult, Verdict } from "../../utils/buyDecisionEngine";
 import type { EntryCheck, OptionPick } from "../../hooks/useBuyDecision";
+import { sideLook } from "./sideLook";
 
 interface Look {
   from: string;
@@ -40,16 +41,16 @@ const TECH_LABEL: Record<Verdict, string> = {
   BUY_CE: "BUY CE", BUY_PE: "BUY PE", FORMING_CE: "CE setup forming", FORMING_PE: "PE setup forming", WAIT: "WAIT", EVENT_WAIT: "WAIT", CLOSED: "WAIT",
 };
 
-function Ring({ value }: { value: number }) {
+function Ring({ value, ink, light }: { value: number; ink: string; light: boolean }) {
   const r = 30;
   const c = 2 * Math.PI * r;
   return (
     <div className="relative w-[76px] h-[76px] shrink-0">
       <svg viewBox="0 0 76 76" className="w-full h-full -rotate-90">
-        <circle cx="38" cy="38" r={r} fill="none" stroke="rgba(255,255,255,.22)" strokeWidth="7" />
-        <circle cx="38" cy="38" r={r} fill="none" stroke="#fff" strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(value / 100) * c} ${c}`} />
+        <circle cx="38" cy="38" r={r} fill="none" stroke={light ? "rgba(15,23,42,.12)" : "rgba(255,255,255,.22)"} strokeWidth="7" />
+        <circle cx="38" cy="38" r={r} fill="none" stroke={ink} strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(value / 100) * c} ${c}`} />
       </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+      <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ color: ink }}>
         <span className="text-[19px] font-black leading-none">{value}</span>
         <span className="text-[8px] font-bold uppercase tracking-wide opacity-80 mt-0.5">agree</span>
       </div>
@@ -67,12 +68,15 @@ export function VerdictHero({
   result, name, pick, entry, nextCloseIn,
 }: { result: DecisionResult; name: string; pick: OptionPick | null; entry: EntryCheck | null; nextCloseIn: number | null }) {
   const look = lookFor(result.verdict, result);
+  // Colour by side and stage (green CE / red PE, deeper = further along).
+  const sl = sideLook(result);
+  const soft = sl.light ? "rgba(15,23,42,.07)" : "rgba(255,255,255,.16)";
   const buying = result.verdict === "BUY_CE" || result.verdict === "BUY_PE";
   const showTechnical = (result.verdict === "CLOSED" || result.verdict === "EVENT_WAIT") && result.technical !== "WAIT";
 
   return (
     <div className="space-y-2">
-      <div className="rounded-3xl p-4 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${look.from}, ${look.to})`, boxShadow: `0 12px 28px ${look.to}55` }}>
+      <div className="rounded-3xl p-4 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${sl.from}, ${sl.to})`, color: sl.ink, boxShadow: `0 12px 28px ${sl.to}55`, border: sl.light ? `1px solid ${sl.ink}33` : undefined }}>
         <div className="absolute -right-8 -top-10 w-40 h-40 rounded-full" style={{ background: "rgba(255,255,255,.08)" }} />
         <div className="absolute -left-10 -bottom-14 w-44 h-44 rounded-full" style={{ background: "rgba(255,255,255,.06)" }} />
 
@@ -80,9 +84,10 @@ export function VerdictHero({
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[.14em] opacity-80">{name} · decision</p>
             <p className="text-[28px] font-black leading-tight flex items-center gap-2 mt-0.5">
-              <look.Icon size={26} strokeWidth={2.6} />
-              {look.title}
+              <sl.Icon size={26} strokeWidth={2.6} />
+              {sl.label}
             </p>
+            {sl.tag && <p className="text-[11.5px] font-black mt-0.5 opacity-90">{sl.tag}</p>}
             {buying && pick && (
               <p className="text-[14px] font-extrabold mt-0.5">
                 {name} {pick.strike} {pick.side}
@@ -90,21 +95,21 @@ export function VerdictHero({
               </p>
             )}
           </div>
-          <Ring value={result.strength} />
+          <Ring value={result.strength} ink={sl.ink} light={sl.light} />
         </div>
 
         <p className="relative text-[12px] leading-snug mt-2 opacity-95">{look.sub}</p>
         {showTechnical && (
-          <p className="relative text-[11.5px] font-bold mt-1.5 rounded-lg px-2 py-1 inline-block" style={{ background: "rgba(255,255,255,.16)" }}>
+          <p className="relative text-[11.5px] font-bold mt-1.5 rounded-lg px-2 py-1 inline-block" style={{ background: soft }}>
             Chart alone says: {TECH_LABEL[result.technical]}
           </p>
         )}
 
         <div className="relative flex flex-wrap gap-1.5 mt-3">
-          {result.since && buying && <Chip>Confirmed since {result.since}</Chip>}
-          {result.lastClosedAt && <Chip>Last closed candle {result.lastClosedAt}</Chip>}
+          {result.since && buying && <Chip bg={soft}>Confirmed since {result.since}</Chip>}
+          {result.lastClosedAt && <Chip bg={soft}>Last closed candle {result.lastClosedAt}</Chip>}
           {nextCloseIn !== null && result.verdict !== "CLOSED" && (
-            <Chip>
+            <Chip bg={soft}>
               <Clock size={10} className="inline -mt-0.5 mr-0.5" />
               Next check in {nextCloseIn} min
             </Chip>
@@ -112,12 +117,12 @@ export function VerdictHero({
         </div>
 
         {(result.waitingFor.length > 0 && !buying && result.verdict !== "CLOSED") && (
-          <div className="relative mt-3 rounded-2xl p-2.5" style={{ background: "rgba(255,255,255,.14)" }}>
+          <div className="relative mt-3 rounded-2xl p-2.5" style={{ background: soft }}>
             <p className="text-[10px] font-black uppercase tracking-wide opacity-90 mb-1">Waiting for</p>
             <ul className="space-y-1">
               {result.waitingFor.map((w) => (
                 <li key={w} className="text-[11.5px] leading-snug flex gap-1.5">
-                  <span className="mt-[5px] w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                  <span className="mt-[5px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: sl.ink }} />
                   <span>{w}</span>
                 </li>
               ))}
@@ -139,9 +144,9 @@ export function VerdictHero({
   );
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
+function Chip({ children, bg }: { children: React.ReactNode; bg: string }) {
   return (
-    <span className="text-[10px] font-bold rounded-full px-2 py-[3px]" style={{ background: "rgba(255,255,255,.18)" }}>
+    <span className="text-[10px] font-bold rounded-full px-2 py-[3px]" style={{ background: bg }}>
       {children}
     </span>
   );

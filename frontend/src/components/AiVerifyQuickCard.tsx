@@ -4,27 +4,17 @@
 // The full reasons stay on AI Verify Pro; tapping a row goes there.
 
 import { Link } from "react-router-dom";
-import { RefreshCw, BadgeCheck, TrendingUp, TrendingDown, Hourglass, PauseCircle, Moon, Zap, ChevronRight, Clock } from "lucide-react";
+import { RefreshCw, BadgeCheck, ChevronRight, Clock } from "lucide-react";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useBuyDecision } from "../hooks/useBuyDecision";
 import { LiveNowPill } from "./decision/LiveNow";
 import { useAppStore } from "../store/appStore";
 import { sessionBucketStart } from "../utils/candleResample";
-import type { Verdict } from "../utils/buyDecisionEngine";
+import { sideLook } from "./decision/sideLook";
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
 const NAME: Record<Sym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
-
-const LOOK: Record<Verdict, { label: string; from: string; to: string; Icon: typeof TrendingUp }> = {
-  BUY_CE: { label: "BUY CE", from: "#047857", to: "#10B981", Icon: TrendingUp },
-  BUY_PE: { label: "BUY PE", from: "#9F1239", to: "#E11D48", Icon: TrendingDown },
-  FORMING_CE: { label: "CE SETUP FORMING", from: "#B45309", to: "#F59E0B", Icon: Hourglass },
-  FORMING_PE: { label: "PE SETUP FORMING", from: "#B45309", to: "#F59E0B", Icon: Hourglass },
-  WAIT: { label: "WAIT", from: "#312E81", to: "#4F46E5", Icon: PauseCircle },
-  EVENT_WAIT: { label: "WAIT — EIA REPORT", from: "#7C2D12", to: "#EA580C", Icon: Zap },
-  CLOSED: { label: "MARKET CLOSED", from: "#0F172A", to: "#334155", Icon: Moon },
-};
 
 function minutesToNextClose(): number {
   const now = Date.now();
@@ -37,7 +27,9 @@ function Row({ symbol }: { symbol: Sym }) {
   if (!result) {
     return <div className="rounded-2xl bg-slate-100 px-3 py-2.5 text-[11.5px] text-slate-500">{NAME[symbol]}: {loading ? "reading the charts…" : "not enough finished candles yet"}</div>;
   }
-  const L = LOOK[result.verdict];
+  const L = sideLook(result);
+  // Light (early-lean) rows use dark ink; the rest stay white on colour.
+  const soft = L.light ? "rgba(15,23,42,.07)" : "rgba(255,255,255,.18)";
   const buying = result.verdict === "BUY_CE" || result.verdict === "BUY_PE";
 
   // An open Ai20-20 call on this market, if any.
@@ -60,7 +52,7 @@ function Row({ symbol }: { symbol: Sym }) {
     : result.waitingFor[0] ?? (result.side ? `Leaning ${result.side}, not confirmed yet` : "No clear edge either way");
 
   return (
-    <Link to="/ai-verify-pro" className="block rounded-2xl p-3 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${L.from}, ${L.to})` }}>
+    <Link to="/ai-verify-pro" className="block rounded-2xl p-3 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${L.from}, ${L.to})`, color: L.ink, border: L.light ? `1px solid ${L.ink}33` : undefined }}>
       <div className="absolute -right-6 -top-8 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,.08)" }} />
       <div className="relative flex items-center gap-2.5">
         <div className="flex-1 min-w-0">
@@ -68,8 +60,9 @@ function Row({ symbol }: { symbol: Sym }) {
           <p className="text-[16px] font-black leading-tight flex items-center gap-1.5">
             <L.Icon size={16} strokeWidth={2.6} /> {L.label}
           </p>
+          {L.tag && <p className="text-[10px] font-black mt-0.5 opacity-90">{L.tag}</p>}
         </div>
-        <div className="text-center shrink-0 rounded-xl px-2 py-1" style={{ background: "rgba(255,255,255,.16)" }}>
+        <div className="text-center shrink-0 rounded-xl px-2 py-1" style={{ background: soft }}>
           <p className="text-[17px] font-black leading-none">{result.strength}</p>
           <p className="text-[7.5px] font-bold uppercase tracking-wide opacity-85">agree</p>
         </div>
@@ -77,9 +70,9 @@ function Row({ symbol }: { symbol: Sym }) {
       </div>
       <p className="relative text-[11px] leading-snug mt-1.5 opacity-95">{line}</p>
       <div className="relative flex flex-wrap gap-1 mt-1.5">
-        {result.lastClosedAt && <Chip>Last candle {result.lastClosedAt}</Chip>}
+        {result.lastClosedAt && <Chip bg={soft}>Last candle {result.lastClosedAt}</Chip>}
         {marketOpen && result.verdict !== "CLOSED" && (
-          <Chip>
+          <Chip bg={soft}>
             <Clock size={9} className="inline -mt-0.5 mr-0.5" />
             Next check {minutesToNextClose()} min
           </Chip>
@@ -87,7 +80,7 @@ function Row({ symbol }: { symbol: Sym }) {
       </div>
       {live && <LiveNowPill read={live} />}
       {vsCall && (
-        <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={{ background: vsCall.ok ? "rgba(255,255,255,.92)" : "rgba(15,23,42,.35)", color: vsCall.ok ? "#047857" : "#fff" }}>
+        <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={vsCall.ok ? { background: "rgba(255,255,255,.92)", color: "#047857" } : L.light ? { background: "rgba(15,23,42,.08)", color: L.ink } : { background: "rgba(15,23,42,.35)", color: "#fff" }}>
           {vsCall.ok === false ? "⚠ " : vsCall.ok ? "✓ " : ""}
           {vsCall.text}
         </p>
@@ -96,9 +89,9 @@ function Row({ symbol }: { symbol: Sym }) {
   );
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
+function Chip({ children, bg }: { children: React.ReactNode; bg: string }) {
   return (
-    <span className="text-[9.5px] font-bold rounded-full px-1.5 py-[2px]" style={{ background: "rgba(255,255,255,.18)" }}>
+    <span className="text-[9.5px] font-bold rounded-full px-1.5 py-[2px]" style={{ background: bg }}>
       {children}
     </span>
   );
@@ -123,7 +116,7 @@ export function AiVerifyQuickCard() {
       <Row symbol="NATURALGAS" />
       <Row symbol="CRUDEOIL" />
       <p className="text-[9.5px] text-slate-400 leading-snug px-1">
-        Decision: 15m · 1h · 4h closed candles. "Right now" is the live candle and can change before it closes. "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
+        Decision: 15m · 1h · 4h closed candles. "Right now" is the live candle and can change before it closes. Green = CE (bullish), red = PE (bearish); light = early lean, medium = setup forming, deep = BUY. "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
       </p>
     </section>
   );
