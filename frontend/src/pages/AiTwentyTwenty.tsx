@@ -159,8 +159,12 @@ function TwentyCandidateCard({
   setCopiedKey,
   createTrade,
   onOpenDetail,
+  scanState = "qualifying",
 }: {
   candidate: AiTwentyCandidate;
+  /** "qualifying": the live scan picks this symbol now. Otherwise the card is
+   *  shown only because a call is still running, so it can be managed. */
+  scanState?: "qualifying" | "not_qualifying" | "other_side";
   tradeLogs: Record<string, TradeLogEntry[]>;
   options: OptionsAnalytics | undefined;
   candles: Candle[];
@@ -267,7 +271,7 @@ function TwentyCandidateCard({
           </p>
           <p className="text-lg font-black flex items-center gap-1.5" style={{ color: accent }}>
             {bullish ? <TrendingUp size={18} /> : <TrendingDown size={18} />}
-            {candidate.analysis.optSide} Quick Win
+            {candidate.analysis.optSide} {scanState === "qualifying" ? "Quick Win" : "· Running call"}
           </p>
           {latest && (
             <>
@@ -287,6 +291,21 @@ function TwentyCandidateCard({
           <p className="text-[9px] font-bold text-slate-400 mt-1">Per Lot at T1</p>
         </div>
       </div>
+
+      {scanState !== "qualifying" && (
+        <div className="px-4 pt-4">
+          <div className={`rounded-xl px-3 py-2.5 ${scanState === "other_side" ? "bg-rose-50 border border-rose-200" : "bg-amber-50 border border-amber-200"}`}>
+            <p className={`text-[11.5px] font-black ${scanState === "other_side" ? "text-rose-700" : "text-amber-800"}`}>
+              {scanState === "other_side" ? `The live scan now leans the OTHER way` : "The live scan no longer qualifies"}
+            </p>
+            <p className="text-[10.5px] text-slate-600 leading-snug mt-0.5">
+              {scanState === "other_side"
+                ? `Your ${candidate.analysis.optSide} call is still running. Protect it — follow its exit level below; don't add to it.`
+                : `Your ${candidate.analysis.optSide} call is still running, so it stays here for you to manage. Follow its exit level below; no new entry now.`}
+            </p>
+          </div>
+        </div>
+      )}
 
       {tradeLight && (
         <div className="px-4 pt-4">
@@ -309,7 +328,7 @@ function TwentyCandidateCard({
         </div>
       )}
 
-      {buyInput && (
+      {buyInput && scanState === "qualifying" && (
         <div className="px-4 pt-4">
           <CanIBuyNowButton {...buyInput} />
         </div>
@@ -356,7 +375,7 @@ function TwentyCandidateCard({
               <Copy size={13} />
               {copiedKey === tradeLogKey ? "Copied ✓" : "Copy"}
             </button>
-            {openTrade && (
+            {openTrade && scanState === "qualifying" && (
               <button
                 disabled={loggedKey === tradeLogKey}
                 onClick={() =>
@@ -385,7 +404,7 @@ function TwentyCandidateCard({
           </div>
         )}
 
-        {categories && (
+        {categories && scanState === "qualifying" && (
           <div className="space-y-1.5">
             <p className="text-[10px] font-bold uppercase text-slate-400">Why this qualified (live, not tied to any candle timeframe)</p>
             <CategoryBar label="Trend" score={bullish ? categories.trend.score : 100 - categories.trend.score} />
@@ -760,6 +779,37 @@ export function AiTwentyTwenty() {
 
   const candlesFor = (symbol: TradableSymbol) => board[symbol].candles;
 
+  // Cards to show: every symbol the scan picks now, plus any symbol with a
+  // call still running -- a running call must stay manageable even after the
+  // scan stops qualifying (it used to vanish, leaving it only in Call History).
+  // A running call's card always follows the call's own side.
+  const shown = useMemo(() => {
+    const out: { candidate: AiTwentyCandidate; scanState: "qualifying" | "not_qualifying" | "other_side" }[] = [];
+    const analyses: [TradableSymbol, typeof crudeAnalysis][] = [["NATURALGAS", gasAnalysis], ["CRUDEOIL", crudeAnalysis]];
+    for (const [symbol, analysis] of analyses) {
+      const log = tradeLogs[`${keyPrefix}-${symbol}-${LIVE_TF}`] ?? [];
+      const last = log[log.length - 1];
+      const open = last && !last.closed ? last : null;
+      const picked = candidates.find((c) => c.symbol === symbol);
+      if (!open) {
+        if (picked) out.push({ candidate: picked, scanState: "qualifying" });
+        continue;
+      }
+      const sameSide = picked && picked.analysis.optSide === open.optSide;
+      out.push({
+        candidate: sameSide
+          ? picked
+          : {
+              symbol,
+              analysis: { ...analysis, bias: open.optSide === "CE" ? "bullish" : "bearish", optSide: open.optSide },
+              reason: picked ? `Live scan now favours ${picked.analysis.optSide}; this ${open.optSide} call is still running.` : `Live scan is not qualifying now; this ${open.optSide} call is still running.`,
+            },
+        scanState: sameSide ? "qualifying" : picked ? "other_side" : "not_qualifying",
+      });
+    }
+    return out;
+  }, [candidates, crudeAnalysis, gasAnalysis, tradeLogs]);
+
   const anyLiveDataUnavailable = crudeOil.liveDataUnavailable || naturalGas.liveDataUnavailable;
 
   return (
@@ -806,7 +856,7 @@ export function AiTwentyTwenty() {
         </div>
       )}
 
-      {candidates.length === 0 ? (
+      {shown.length === 0 ? (
         <section className="rounded-3xl bg-white shadow-md p-8 text-center space-y-2">
           <Gauge size={28} className="mx-auto text-sky-400 animate-pulse" />
           <p className="text-base font-black text-slate-700">No Quick Win Setup Right Now</p>
@@ -814,10 +864,11 @@ export function AiTwentyTwenty() {
         </section>
       ) : (
         <div className="space-y-3">
-          {candidates.map((c) => (
+          {shown.map(({ candidate: c, scanState }) => (
             <TwentyCandidateCard
               key={c.symbol}
               candidate={c}
+              scanState={scanState}
               tradeLogs={tradeLogs}
               options={board[c.symbol as TradableSymbol].options}
               candles={candlesFor(c.symbol as TradableSymbol)}
