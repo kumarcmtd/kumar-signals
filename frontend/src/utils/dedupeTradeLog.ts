@@ -14,13 +14,32 @@ import type { TradeLogEntry } from "./tradeLogCore";
 // correct even in a browser that hasn't reloaded since the merge fix
 // shipped, and so the Call History can visibly mark which entry is the one
 // actually being counted).
+// A second rule for "ghost" re-entries: a stale option-chain snapshot used
+// to re-open a just-stopped leg at the SAME stale entry price within moments,
+// and the next fresh quote stopped it again -- many identical losing lines
+// for one real move. Same leg, same entry price, opened within GHOST_MS of
+// the previous line's stop-out: that is the same call repeated, not a new one.
+const GHOST_MS = 2 * 60_000;
+const STOP_STATUSES = new Set(["sl_hit", "stopped_breakeven", "stopped_after_t1"]);
+
 export function dedupeOverlappingEntries(sorted: TradeLogEntry[]): TradeLogEntry[] {
   const out: TradeLogEntry[] = [];
+  let prev: TradeLogEntry | undefined; // the previous entry seen, kept or not -- a ghost run chains
   for (const e of sorted) {
     const last = out[out.length - 1];
     const sameLeg = last && last.strike === e.strike && last.optSide === e.optSide;
     const lastEnd = last ? (last.closed ? (last.closedAt ?? last.openedAt) : Infinity) : -Infinity;
+    const ghost =
+      prev !== undefined &&
+      prev.strike === e.strike &&
+      prev.optSide === e.optSide &&
+      prev.closed &&
+      STOP_STATUSES.has(prev.status) &&
+      e.entry === prev.entry &&
+      e.openedAt - (prev.closedAt ?? prev.openedAt) < GHOST_MS;
+    prev = e;
     if (sameLeg && e.openedAt < lastEnd) continue;
+    if (ghost) continue;
     out.push(e);
   }
   return out;

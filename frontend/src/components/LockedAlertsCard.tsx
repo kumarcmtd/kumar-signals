@@ -10,7 +10,7 @@ import { keepScreenOnSupported } from "../hooks/useKeepScreenOn";
 // A locked phone freezes this web page -- timers stop and no sound may start
 // -- so the in-app alert engine cannot fire. That is the phone's rule, not a
 // bug. The alerts that DO reach a locked phone are the ones the SERVER sends
-// through ntfy (Ai20-20 and Best Call), at "urgent" priority.
+// through ntfy (MATCHED Ai20-20 + AI Verify calls, and Best Call), at "urgent" priority.
 export function LockedAlertsCard() {
   const { data } = useNtfyTopic();
   const test = useSendTestNotification();
@@ -34,8 +34,8 @@ export function LockedAlertsCard() {
 
       <p className="text-[11.5px] leading-snug text-slate-700">
         When the phone locks, Android freezes this web page, so the ringtone above <b>cannot</b> play. That is the phone's rule, not a bug. Alerts that
-        reach a locked phone come from the <b>server</b> through the free <b>ntfy</b> app — Ai20-20 and Best Call calls are sent there as
-        <b> urgent</b>.
+        reach a locked phone come from the <b>server</b> through the free <b>ntfy</b> app as <b>urgent</b>: Best Call calls, and <b>MATCHED</b> calls —
+        an Ai20-20 call only when AI Verify Pro has confirmed the same side (BUY) and the live candle is not turning against it.
       </p>
 
       <div className="rounded-xl p-3 space-y-2" style={{ background: topic ? "#ECFDF5" : "#FEF2F2" }}>

@@ -1,4 +1,4 @@
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import assert from "node:assert/strict";
 import { advanceOpenEntry, mergeTradeLogs, openNewEntry, symbolOfTradeLogKey, type TradeLogEntry } from "../utils/tradeLogCore";
 import { exitPriceFor, flattenClosedTrades } from "../utils/tradeLogPnl";
@@ -66,4 +66,32 @@ test("flattenClosedTrades uses the real fill for net points", () => {
   const realized = flattenClosedTrades({ "BEST-CRUDEOIL": [stopped] });
   assert.equal(realized.length, 1);
   assert.equal(realized[0].pnlPoints, -5.8);
+});
+
+test("no instant re-entry into a leg that was just stopped out (the ghost loop)", async () => {
+  const { advanceTradeLog, REENTRY_COOLDOWN_MS } = await import("../utils/tradeLogCore");
+  const proj = { strike: 8850, optSide: "CE" as const, entry: 263.2, targets: [283.2, 295.2, 308.2] as [number, number, number], stop: 251.2 };
+  const ctx = { decision: "STRONG BUY" as const, insufficient: null, optSide: "CE" as const, proj, liveLtpForOpen: null };
+  const t0 = 1_000_000;
+  let h = advanceTradeLog([], ctx, t0);
+  expect(h).toHaveLength(1);
+  // The fresh quote is below the stop: stopped out.
+  h = advanceTradeLog(h, { ...ctx, liveLtpForOpen: 247.7 }, t0 + 8_000);
+  expect(h[0].status).toBe("sl_hit");
+  // The stale snapshot still says buy at 263.2: no new line.
+  expect(advanceTradeLog(h, ctx, t0 + 16_000)).toBe(h);
+  // A different leg may open; the same leg may again after the cool-down.
+  expect(advanceTradeLog(h, { ...ctx, optSide: "PE", proj: { ...proj, optSide: "PE" } }, t0 + 16_000)).toHaveLength(2);
+  expect(advanceTradeLog(h, ctx, t0 + 8_000 + REENTRY_COOLDOWN_MS)).toHaveLength(2);
+});
+
+test("existing ghost repeats are dropped from history and stats", async () => {
+  const { verifiedEntryIds } = await import("../utils/dedupeTradeLog");
+  const base = { strike: 8850, optSide: "CE" as const, entry: 263.2, targets: [283.2, 295.2, 308.2] as [number, number, number], stop: 251.2, targetsHit: [false, false, false] as [boolean, boolean, boolean], status: "sl_hit" as const, closed: true, exitPrice: 247.7 };
+  const t0 = 1_000_000;
+  const ghosts = Array.from({ length: 20 }, (_, i) => ({ ...base, id: `g${i}`, openedAt: t0 + i * 8_000, closedAt: t0 + i * 8_000 + 4_000 }));
+  // A real later re-entry at a different price, 30 minutes on, is kept.
+  const real = { ...base, id: "real", entry: 240, openedAt: t0 + 30 * 60_000, closedAt: t0 + 31 * 60_000 };
+  const keep = verifiedEntryIds([...ghosts, real]);
+  expect([...keep].sort()).toEqual(["g0", "real"]);
 });

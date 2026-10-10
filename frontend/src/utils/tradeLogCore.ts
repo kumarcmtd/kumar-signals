@@ -175,6 +175,13 @@ export function advanceOpenEntry(entry: TradeLogEntry, liveLtp: number | null, n
   return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status: "running" };
 }
 
+/** After a stop-loss close, the same strike + side cannot re-open for this long. */
+export const REENTRY_COOLDOWN_MS = 10 * 60_000;
+
+function isStopClose(e: TradeLogEntry): boolean {
+  return e.status === "sl_hit" || e.status === "stopped_breakeven" || e.status === "stopped_after_t1";
+}
+
 // Pure reducer over one key's trade log: advances the currently open entry
 // (if any) against the live premium, or opens a fresh entry once the previous
 // one has closed and the engine is newly actionable again. Returns the SAME
@@ -203,6 +210,13 @@ export function advanceTradeLog(
   }
 
   if (!ctx.insufficient && ctx.decision !== "WAIT" && ctx.optSide && ctx.proj) {
+    // No instant re-entry into a leg that has just been stopped out. Without
+    // this, a stale option-chain snapshot (entry above the real premium)
+    // re-opened the same strike every scan and the next fresh quote stopped
+    // it out again -- dozens of identical losing lines in a minute.
+    if (last && last.closed && isStopClose(last) && last.strike === ctx.proj.strike && last.optSide === ctx.optSide && now - (last.closedAt ?? last.openedAt) < REENTRY_COOLDOWN_MS) {
+      return history;
+    }
     const created = openNewEntry({ strike: ctx.proj.strike, optSide: ctx.optSide, entry: ctx.proj.entry, targets: ctx.proj.targets, stop: ctx.proj.stop }, now, ctx.meta, ctx.decision);
     const next = [...history, created];
     return next.length > maxHistory ? next.slice(next.length - maxHistory) : next;

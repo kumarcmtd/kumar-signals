@@ -12,6 +12,16 @@ import { LiveNowPill } from "./decision/LiveNow";
 import { useAppStore } from "../store/appStore";
 import { sessionBucketStart } from "../utils/candleResample";
 import { sideLook } from "./decision/sideLook";
+import { callMatch, type MatchLevel } from "../utils/callMatch";
+
+const MATCH_STYLE: Record<MatchLevel, React.CSSProperties> = {
+  matched: { background: "#FFFFFF", color: "#047857", boxShadow: "0 0 0 2px #10B981" },
+  same_side_unconfirmed: { background: "rgba(255,255,255,.85)", color: "#475569" },
+  fading: { background: "#FFFBEB", color: "#B45309" },
+  against: { background: "#FEF2F2", color: "#B91C1C" },
+  no_view: { background: "rgba(255,255,255,.85)", color: "#475569" },
+};
+const MATCH_ICON: Record<MatchLevel, string> = { matched: "✅", same_side_unconfirmed: "⏳", fading: "⚠", against: "⚠", no_view: "·" };
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
 const NAME: Record<Sym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -37,13 +47,9 @@ function Row({ symbol }: { symbol: Sym }) {
     .filter(([k]) => k.startsWith(`TWENTY20-${symbol}-`))
     .flatMap(([, v]) => v)
     .find((e) => !e.closed);
-  const vsCall = open
-    ? result.side === open.optSide
-      ? { ok: true, text: `Agrees with your Ai20-20 ${open.strike} ${open.optSide}` }
-      : result.side
-        ? { ok: false, text: `Leans ${result.side} — against your Ai20-20 ${open.strike} ${open.optSide}. Keep its exit level.` }
-        : { ok: null, text: `No clear view on your Ai20-20 ${open.strike} ${open.optSide}` }
-    : null;
+  // Same rule as the MATCHED push alert (utils/callMatch).
+  const match = open ? callMatch(result, live, open.optSide) : null;
+  const vsCall = match && open ? { level: match.level, text: `${match.text} (your Ai20-20 ${open.strike} ${open.optSide})` } : null;
 
   const line = buying
     ? pick
@@ -80,9 +86,8 @@ function Row({ symbol }: { symbol: Sym }) {
       </div>
       {live && <LiveNowPill read={live} />}
       {vsCall && (
-        <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={vsCall.ok ? { background: "rgba(255,255,255,.92)", color: "#047857" } : L.light ? { background: "rgba(15,23,42,.08)", color: L.ink } : { background: "rgba(15,23,42,.35)", color: "#fff" }}>
-          {vsCall.ok === false ? "⚠ " : vsCall.ok ? "✓ " : ""}
-          {vsCall.text}
+        <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={MATCH_STYLE[vsCall.level]}>
+          {MATCH_ICON[vsCall.level]} {vsCall.text}
         </p>
       )}
     </Link>

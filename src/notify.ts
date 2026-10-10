@@ -6,6 +6,11 @@ import { evaluateDirectionalGate } from "../frontend/src/utils/directionalGateEn
 import { findEliteSignal } from "../frontend/src/utils/eliteSignal";
 import { scanAllSetups } from "../frontend/src/utils/kimiScanner";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
+import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
+import { callMatch } from "../frontend/src/utils/callMatch";
+import { liveMomentum } from "../frontend/src/utils/liveMomentum";
+import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
+import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
 import { analyzeTimeframe } from "../frontend/src/utils/timeframeEngine";
 import { cachePut, type Candle, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
@@ -172,8 +177,32 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
       const projection = projectPremium20(analysis, options);
       if (!projection) continue;
 
-      const sig = twentySignature(symbol, projection.strike, projection.optSide, projection.entry);
-      const sigKey = `notified:TWENTY20-${symbol}`;
+      // Push ONLY when AI Verify Pro (closed 15m/1h/4h candles) has confirmed
+      // the same side and the live candle is not already turning against it.
+      // An unmatched Ai20-20 call alone fires too often to trade on.
+      const now = Date.now();
+      const [c15, c60, c240] = await Promise.all(["15", "60", "240"].map((tf) => getCandlesForTF(env, token, fut, tf)));
+      if ("error" in c15 || "error" in c60 || "error" in c240) continue;
+      const session = mcxSessionAt(now);
+      const event = scheduledEvents(now).find((e) => e.affects === symbol);
+      const verify = evaluateBuyDecision({
+        c15,
+        c60,
+        c240,
+        now,
+        marketOpen: true,
+        eia: event ? { minutesAway: event.minutesAway, minutesSince: 7 * 24 * 60 - event.minutesAway, label: event.name } : null,
+        minutesToClose: session.isOpen ? session.closeMin - session.minutes : null,
+        daysToOptionExpiry: options ? daysToExpiry(options.expiry, now) : null,
+      });
+      if (!verify) continue;
+      const live = liveMomentum(c15, fast, verify, now, true);
+      const match = callMatch(verify, live, projection.optSide);
+      if (!match.ok) continue;
+
+      // One push per confirmed AI Verify setup -- not one per premium tick.
+      const sig = `${twentySignature(symbol, projection.strike, projection.optSide, 0)}-${verify.since ?? verify.lastClosedAt ?? ""}`;
+      const sigKey = `notified:MATCHED-${symbol}`;
       if ((await env.COMMODITY_KV.get(sigKey)) === sig) continue;
       // Only alert if the "already sent" marker was saved -- past the daily
       // KV write limit it cannot be, and alerting anyway would resend this
@@ -185,9 +214,11 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
       const t1 = projection.targets[0];
       await sendNtfyNotification(
         topic,
-        `Ai20-20: ${displayName} ${projection.strike} ${projection.optSide}`,
+        `MATCHED: ${displayName} ${projection.strike} ${projection.optSide}`,
         [
           `BUY ${displayName} ${projection.strike} ${projection.optSide}`,
+          `Ai20-20 call + AI Verify Pro BUY ${projection.optSide} agree (${verify.strength}/94${verify.since ? `, confirmed since ${verify.since}` : ""}).`,
+          live ? `Right now: ${live.headline}` : "",
           "",
           `Entry: Rs ${projection.entry}`,
           `Target 1: Rs ${t1}`,
