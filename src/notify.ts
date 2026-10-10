@@ -55,23 +55,39 @@ function bestCallSignature(pick: BestCallPick): string {
 // reminders) stay at "high".
 export type NtfyPriority = "urgent" | "high" | "default";
 
+/** Waits before each retry of a failed push (ms). Exported so tests can pass zeros. */
+export const NTFY_RETRY_DELAYS_MS = [1_500, 4_000];
+
+// A push is a trade alert: one brief hiccup at ntfy.sh (a 5xx such as
+// Cloudflare's 522 "origin timed out", a 429, or a dropped connection) must
+// not lose it. So it is retried twice with a short wait before giving up,
+// and the final error says plainly whose side the problem is on.
 export async function sendNtfyNotification(
   topic: string,
   title: string,
   body: string,
-  priority: NtfyPriority = "high"
+  priority: NtfyPriority = "high",
+  retryDelaysMs: number[] = NTFY_RETRY_DELAYS_MS
 ): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
-      method: "POST",
-      headers: { Title: title, Priority: priority, Tags: priority === "urgent" ? "rotating_light,chart_with_upwards_trend" : "chart_with_upwards_trend" },
-      body,
-    });
-    if (!res.ok) return { ok: false, error: `ntfy.sh responded HTTP ${res.status}` };
-    return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: err.message ?? "ntfy.sh request failed" };
+  let last = "";
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, retryDelaysMs[attempt - 1]));
+    try {
+      const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
+        method: "POST",
+        headers: { Title: title, Priority: priority, Tags: priority === "urgent" ? "rotating_light,chart_with_upwards_trend" : "chart_with_upwards_trend" },
+        body,
+      });
+      if (res.ok) return { ok: true };
+      last = `HTTP ${res.status}`;
+      // A 4xx other than rate-limiting is our request's fault -- retrying cannot help.
+      if (res.status < 500 && res.status !== 429) return { ok: false, error: `ntfy.sh responded ${last}` };
+    } catch (err: any) {
+      last = err?.message ?? "request failed";
+    }
   }
+  const tries = retryDelaysMs.length + 1;
+  return { ok: false, error: `ntfy.sh is not responding right now (${last}, tried ${tries} times). This is on ntfy's side -- try again in a few minutes.` };
 }
 
 // ---- Ai20-20 background push (ntfy.sh) ----
