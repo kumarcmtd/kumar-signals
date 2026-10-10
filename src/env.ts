@@ -13,6 +13,9 @@ export interface Env {
   // fetchEconCalendar below), never fabricating data to fill the gap.
   NEWSAPI_KEY?: string;
   EIA_API_KEY?: string;
+  /** ntfy.sh access token (free account). Pushes then count against the account, not the IP
+   *  Cloudflare shares with thousands of other Workers -- without it ntfy.sh answers 429/522. */
+  NTFY_TOKEN?: string;
   FRED_API_KEY?: string;
   // Owner key for writes and private reads. Set as a Cloudflare SECRET (never
   // in wrangler.jsonc or the repo). Unset = nothing enforced; see apiGuard.ts.

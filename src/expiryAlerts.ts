@@ -102,7 +102,7 @@ export async function runExpiryAlertCheck(env: Env): Promise<void> {
 
       const daysLabel = alert.daysLeft <= 0 ? "TODAY" : alert.daysLeft === 1 ? "1 day" : `${alert.daysLeft} days`;
       const title = `⏳ ${alert.displayName} options expiry in ${daysLabel}`;
-      await sendNtfyNotification(topic, title, alert.message);
+      await sendNtfyNotification(topic, title, alert.message, "high", { token: env.NTFY_TOKEN });
     }
   } catch {
     // best-effort -- a failed check just means no alert fires this tick

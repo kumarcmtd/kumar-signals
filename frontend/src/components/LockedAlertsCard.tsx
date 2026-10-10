@@ -91,6 +91,28 @@ export function LockedAlertsCard() {
       {test.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — it should ring on your phone within seconds.</p>}
       {test.isError && <p className="text-[11px] font-bold text-rose-700">{(test.error as Error).message}</p>}
 
+      <div className="rounded-xl p-3 space-y-1.5" style={{ background: data?.tokenSet ? "#ECFDF5" : "#FFFBEB" }}>
+        <p className="text-[11.5px] font-black flex items-center gap-1.5" style={{ color: data?.tokenSet ? "#047857" : "#B45309" }}>
+          {data?.tokenSet ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+          {data?.tokenSet ? "ntfy access token set — pushes are not blocked" : "No ntfy access token — pushes may be blocked (HTTP 429 / 522)"}
+        </p>
+        {!data?.tokenSet && (
+          <ol className="list-decimal pl-5 space-y-1 text-[11px] text-slate-700 leading-snug">
+            <li>
+              Open <b>ntfy.sh/app</b> in your browser, tap <b>Sign up</b> and create a free account.
+            </li>
+            <li>
+              Tap <b>Account</b> → <b>Access tokens</b> → <b>Create access token</b> (no expiry). Copy it — it starts with <b>tk_</b>.
+            </li>
+            <li>
+              Cloudflare dashboard → <b>Workers &amp; Pages</b> → <b>kumar-signals</b> → <b>Settings</b> → <b>Variables and Secrets</b> → <b>+ Add</b> → Type <b>Secret</b>,
+              name <b>NTFY_TOKEN</b>, paste the token → <b>Deploy</b>.
+            </li>
+            <li>Come back here and tap Send test push. Keep the token private — never paste it in chat.</li>
+          </ol>
+        )}
+      </div>
+
       <MatchedAlertTest hasTopic={Boolean(topic)} />
 
       <div className="pt-2 border-t border-slate-100">

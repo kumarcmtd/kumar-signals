@@ -67,26 +67,36 @@ export async function sendNtfyNotification(
   title: string,
   body: string,
   priority: NtfyPriority = "high",
-  retryDelaysMs: number[] = NTFY_RETRY_DELAYS_MS
+  opts: { token?: string; retryDelaysMs?: number[] } = {}
 ): Promise<{ ok: boolean; error?: string }> {
+  const retryDelaysMs = opts.retryDelaysMs ?? NTFY_RETRY_DELAYS_MS;
+  const headers: Record<string, string> = { Title: title, Priority: priority, Tags: priority === "urgent" ? "rotating_light,chart_with_upwards_trend" : "chart_with_upwards_trend" };
+  // With an access token ntfy.sh rate-limits per account instead of per IP.
+  // Cloudflare Workers send from IPs shared with countless other apps, which
+  // ntfy.sh throttles (429) or drops (522) when anonymous.
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
   let last = "";
   for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, retryDelaysMs[attempt - 1]));
     try {
       const res = await fetch(`https://ntfy.sh/${encodeURIComponent(topic)}`, {
         method: "POST",
-        headers: { Title: title, Priority: priority, Tags: priority === "urgent" ? "rotating_light,chart_with_upwards_trend" : "chart_with_upwards_trend" },
+        headers,
         body,
       });
       if (res.ok) return { ok: true };
       last = `HTTP ${res.status}`;
       // A 4xx other than rate-limiting is our request's fault -- retrying cannot help.
+      if (res.status === 401 || res.status === 403) return { ok: false, error: `ntfy.sh refused the access token (${last}) -- check the NTFY_TOKEN secret in Cloudflare.` };
       if (res.status < 500 && res.status !== 429) return { ok: false, error: `ntfy.sh responded ${last}` };
     } catch (err: any) {
       last = err?.message ?? "request failed";
     }
   }
   const tries = retryDelaysMs.length + 1;
+  if (!opts.token && (last === "HTTP 429" || last === "HTTP 522")) {
+    return { ok: false, error: `ntfy.sh is limiting pushes from Cloudflare's shared servers (${last}, tried ${tries} times). Fix: add a free ntfy.sh access token as the NTFY_TOKEN secret in Cloudflare.` };
+  }
   return { ok: false, error: `ntfy.sh is not responding right now (${last}, tried ${tries} times). This is on ntfy's side -- try again in a few minutes.` };
 }
 
@@ -306,7 +316,7 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         since: verify.since,
         liveHeadline: live?.headline ?? null,
       });
-      const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent");
+      const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {
       // One symbol failing must never stop the other, and must never fail the
@@ -417,7 +427,7 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
         "",
         "Open Capital Guard for your lot size before entering -- price may have moved.",
       ].join("\n");
-      await sendNtfyNotification(topic, title, body, "urgent");
+      await sendNtfyNotification(topic, title, body, "urgent", { token: env.NTFY_TOKEN });
     } catch {
       // best-effort -- one symbol failing shouldn't block the other
     }

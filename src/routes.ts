@@ -260,7 +260,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         if (url.pathname === "/api/notify/topic") {
           if (request.method === "GET") {
             const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
-            return json({ topic: topic ?? null });
+            // Whether the NTFY_TOKEN secret is set (never the token itself).
+            return json({ topic: topic ?? null, tokenSet: Boolean(env.NTFY_TOKEN) });
           }
           if (request.method === "POST") {
             const body = (await request.json().catch(() => ({}))) as { topic?: string };
@@ -293,7 +294,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
             topic,
             sample ? `TEST — ${sample.title}` : "Kumar Signals Pro test",
             sample ? `TEST ONLY -- sample numbers, not a real call. A real MATCHED alert looks exactly like this:\n\n${sample.body}` : "If you hear this with the phone locked, trade alerts will reach you the same way.",
-            "urgent"
+            "urgent",
+            { token: env.NTFY_TOKEN }
           );
           if (!result.ok) return json({ error: result.error ?? "Failed to send test notification" }, 502);
           return json({ ok: true });
