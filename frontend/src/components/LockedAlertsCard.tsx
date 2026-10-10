@@ -4,6 +4,7 @@ import { Lock, Smartphone, CheckCircle2, AlertTriangle, Send, MonitorSmartphone,
 import { useNtfyTopic, useSendTestNotification } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { keepScreenOnSupported } from "../hooks/useKeepScreenOn";
+import { MatchedAlertTest } from "./MatchedAlertTest";
 
 // Why in-app alerts go quiet on a locked phone, and the two ways round it.
 //
@@ -89,6 +90,8 @@ export function LockedAlertsCard() {
       </button>
       {test.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — it should ring on your phone within seconds.</p>}
       {test.isError && <p className="text-[11px] font-bold text-rose-700">{(test.error as Error).message}</p>}
+
+      <MatchedAlertTest hasTopic={Boolean(topic)} />
 
       <div className="pt-2 border-t border-slate-100">
         <div className="flex items-center justify-between gap-3">

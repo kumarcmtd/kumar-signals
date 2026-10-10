@@ -179,6 +179,8 @@ export const api = {
   deleteNtfyTopic: () => sendJSON<{ ok: true }>("/notify/topic", "DELETE"),
   sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
   checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
+  sendTestMatched: () => sendJSON<{ ok: true }>("/notify/test?kind=matched", "POST"),
+  checkMatchedNow: () => sendJSON<{ report: string[] }>("/notify/check-matched", "POST"),
   getTradeLogs: () => getJSON<Record<string, TradeLogEntry[]>>("/trade-logs"),
   saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => saveTradeLogsInChunks(logs),
 };

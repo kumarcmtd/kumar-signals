@@ -432,6 +432,15 @@ export function useSendTestNotification() {
   return useMutation({ mutationFn: () => api.sendTestNotification() });
 }
 
+// A sample MATCHED push (marked TEST), and the real MATCHED check run now.
+export function useSendTestMatched() {
+  return useMutation({ mutationFn: () => api.sendTestMatched() });
+}
+
+export function useCheckMatchedNow() {
+  return useMutation({ mutationFn: () => api.checkMatchedNow() });
+}
+
 // The background push check normally only runs on the server's own 5-minute
 // Cron schedule -- this lets a user trigger it on demand right after saving
 // a topic, so they don't have to wait up to 5 minutes to see whether a

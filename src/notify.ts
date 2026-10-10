@@ -116,19 +116,59 @@ const TWENTY_MEM_FRESH_MS = 11 * 60 * 1000; // older than two ticks -> trust KV 
 const TWENTY_KV_BACKUP_MS = 0;
 let twentyMem: { at: number; backedUpAt: number; buffers: TwentySampleBuffer } | null = null;
 
-export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> {
+/** The MATCHED push, shared by the real alert and the test button so they look identical. */
+export function matchedPushText(p: {
+  displayName: string;
+  strike: number;
+  optSide: "CE" | "PE";
+  entry: number;
+  t1: number;
+  stop: number;
+  lot: number;
+  strength: number;
+  since: string | null;
+  liveHeadline: string | null;
+}): { title: string; body: string } {
+  return {
+    title: `MATCHED: ${p.displayName} ${p.strike} ${p.optSide}`,
+    body: [
+      `BUY ${p.displayName} ${p.strike} ${p.optSide}`,
+      `Ai20-20 call + AI Verify Pro BUY ${p.optSide} agree (${p.strength}/94${p.since ? `, confirmed since ${p.since}` : ""}).`,
+      p.liveHeadline ? `Right now: ${p.liveHeadline}` : "",
+      "",
+      `Entry: Rs ${p.entry}`,
+      `Target 1: Rs ${p.t1}`,
+      `Stop: Rs ${p.stop}`,
+      "",
+      `About Rs ${Math.round((p.t1 - p.entry) * p.lot)} per lot at Target 1.`,
+      "",
+      "Open the app and tap Can I Buy Now? before entering -- this call was",
+      "sent the moment it fired, and price may have moved since.",
+    ]
+      .filter((l, i, a) => l !== "" || a[i - 1] !== "")
+      .join("\n"),
+  };
+}
+
+/**
+ * Returns one plain-English line per market saying what the check found, so
+ * the "Check for MATCHED now" button can show why a push did or did not go.
+ * The Cron ignores the report.
+ */
+export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string[]> {
+  const report: string[] = [];
   // Gated on market hours for three reasons, not one: there is nothing to
   // enter outside them, the sample buffer would fill with stale prices, and
   // every tick would spend Upstox requests -- which is what pushes the app
   // into Upstox's 1015 rate limit -- for no possible benefit.
-  if (!getMarketStatus().isOpen) return;
+  if (!getMarketStatus().isOpen) return ["MCX is closed -- the MATCHED check only runs while the market is open."];
   const token = await env.COMMODITY_KV.get("access_token");
-  if (!token) return;
+  if (!token) return ["Not logged in to Upstox today -- no live data to check."];
   // Checked BEFORE any upstream call. With no ntfy topic saved there is
   // nowhere to send a push, so fetching the data to build one would be pure
   // waste against the rate limit.
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
-  if (!topic) return;
+  if (!topic) return ["No ntfy topic saved -- there is nowhere to send a push."];
 
   // Memory first: this was a KV write every 5 minutes (~175 a day, a sixth
   // of the free plan's 1,000). Cron runs usually land on a warm isolate, so
@@ -149,11 +189,19 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
   let buffersChanged = false;
 
   for (const symbol of OPTION_SYMBOLS) {
+    const name = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
+    const say = (t: string) => report.push(`${name}: ${t}`);
     try {
       const fut = await getNearestFuture(token, symbol as Symbol);
-      if (!fut) continue;
+      if (!fut) {
+        say("no futures contract found.");
+        continue;
+      }
       const fast = await getCandlesForTF(env, token, fut, "5");
-      if ("error" in fast || fast.length === 0) continue;
+      if ("error" in fast || fast.length === 0) {
+        say("no 5-minute candles yet.");
+        continue;
+      }
 
       const optionsResult = await computeOptionsAnalytics(env, token, symbol as Symbol);
       const options = "error" in optionsResult ? undefined : optionsResult;
@@ -173,16 +221,25 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
       // --- the same engine the page runs --------------------------------
       const analysis = analyzeImmediate(fast, twentyMomentumPct(buf.ce), twentyMomentumPct(buf.pe));
       const candidates = scanForAiTwenty([{ symbol, analysis }]);
-      if (candidates.length === 0) continue;
+      if (candidates.length === 0) {
+        say("no Ai20-20 call right now.");
+        continue;
+      }
       const projection = projectPremium20(analysis, options);
-      if (!projection) continue;
+      if (!projection) {
+        say("Ai20-20 leans one way but no option premium to price the call.");
+        continue;
+      }
 
       // Push ONLY when AI Verify Pro (closed 15m/1h/4h candles) has confirmed
       // the same side and the live candle is not already turning against it.
       // An unmatched Ai20-20 call alone fires too often to trade on.
       const now = Date.now();
       const [c15, c60, c240] = await Promise.all(["15", "60", "240"].map((tf) => getCandlesForTF(env, token, fut, tf)));
-      if ("error" in c15 || "error" in c60 || "error" in c240) continue;
+      if ("error" in c15 || "error" in c60 || "error" in c240) {
+        say(`Ai20-20 ${projection.optSide} call, but the 15m/1h/4h candles did not load.`);
+        continue;
+      }
       const session = mcxSessionAt(now);
       const event = scheduledEvents(now).find((e) => e.affects === symbol);
       const verify = evaluateBuyDecision({
@@ -195,45 +252,50 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
         minutesToClose: session.isOpen ? session.closeMin - session.minutes : null,
         daysToOptionExpiry: options ? daysToExpiry(options.expiry, now) : null,
       });
-      if (!verify) continue;
+      if (!verify) {
+        say(`Ai20-20 ${projection.optSide} call, but not enough closed candles for AI Verify Pro.`);
+        continue;
+      }
       const live = liveMomentum(c15, fast, verify, now, true);
       const match = callMatch(verify, live, projection.optSide);
-      if (!match.ok) continue;
+      if (!match.ok) {
+        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: ${match.text}.`);
+        continue;
+      }
 
       // One push per confirmed AI Verify setup -- not one per premium tick.
       const sig = `${twentySignature(symbol, projection.strike, projection.optSide, 0)}-${verify.since ?? verify.lastClosedAt ?? ""}`;
       const sigKey = `notified:MATCHED-${symbol}`;
-      if ((await env.COMMODITY_KV.get(sigKey)) === sig) continue;
+      if ((await env.COMMODITY_KV.get(sigKey)) === sig) {
+        say(`MATCHED ${projection.strike} ${projection.optSide} -- already pushed for this setup.`);
+        continue;
+      }
       // Only alert if the "already sent" marker was saved -- past the daily
       // KV write limit it cannot be, and alerting anyway would resend this
       // same call every five minutes.
-      if (!(await cachePut(env.COMMODITY_KV, sigKey, sig))) continue;
+      if (!(await cachePut(env.COMMODITY_KV, sigKey, sig))) {
+        say("MATCHED, but the already-sent marker could not be saved, so no push (it would repeat).");
+        continue;
+      }
 
-      const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
-      const lot = TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1;
-      const t1 = projection.targets[0];
-      await sendNtfyNotification(
-        topic,
-        `MATCHED: ${displayName} ${projection.strike} ${projection.optSide}`,
-        [
-          `BUY ${displayName} ${projection.strike} ${projection.optSide}`,
-          `Ai20-20 call + AI Verify Pro BUY ${projection.optSide} agree (${verify.strength}/94${verify.since ? `, confirmed since ${verify.since}` : ""}).`,
-          live ? `Right now: ${live.headline}` : "",
-          "",
-          `Entry: Rs ${projection.entry}`,
-          `Target 1: Rs ${t1}`,
-          `Stop: Rs ${projection.stop}`,
-          "",
-          `About Rs ${Math.round((t1 - projection.entry) * lot)} per lot at Target 1.`,
-          "",
-          "Open the app and tap Can I Buy Now? before entering -- this call was",
-          "sent the moment it fired, and price may have moved since.",
-        ].join("\n"),
-        "urgent"
-      );
-    } catch {
+      const msg = matchedPushText({
+        displayName: name,
+        strike: projection.strike,
+        optSide: projection.optSide,
+        entry: projection.entry,
+        t1: projection.targets[0],
+        stop: projection.stop,
+        lot: TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1,
+        strength: verify.strength,
+        since: verify.since,
+        liveHeadline: live?.headline ?? null,
+      });
+      const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent");
+      say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);
+    } catch (e: any) {
       // One symbol failing must never stop the other, and must never fail the
       // whole Cron run.
+      say(`check failed (${e?.message ?? "error"}).`);
     }
   }
 
@@ -246,6 +308,7 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<void> 
     }
     twentyMem = { at: now, backedUpAt, buffers };
   }
+  return report;
 }
 
 // Runs the exact same 3-engine comparison (AI Elite + Directional Gate +

@@ -12,7 +12,7 @@ import { computeGlobalMarkets, computeOvernightTracker } from "./globalMarkets";
 import { type RequestGuard, requireToken } from "./guard";
 import { computeKumarAiAnalysis, type KumarAiAnalyzeRequest } from "./kumarAi";
 import { fetchEnergyNews } from "./news";
-import { NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification } from "./notify";
+import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, runTwentyTwentyNotificationCheck, sendNtfyNotification } from "./notify";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
 import { computeSeasonal } from "./seasonal";
@@ -283,15 +283,27 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
           if (!topic) return json({ error: "No ntfy topic saved yet -- save one first" }, 400);
           // Sent at the same "urgent" priority as real trade calls, so the test
-          // sounds exactly like a real alert would.
+          // sounds exactly like a real alert would. ?kind=matched sends a sample
+          // MATCHED alert in exactly the real format, marked TEST.
+          const sample =
+            url.searchParams.get("kind") === "matched"
+              ? matchedPushText({ displayName: "Crude Oil", strike: 8850, optSide: "CE", entry: 263.2, t1: 283.2, stop: 251.2, lot: 100, strength: 72, since: "21:15", liveHeadline: "HOLDING — still bullish right now" })
+              : null;
           const result = await sendNtfyNotification(
             topic,
-            "Kumar Signals Pro test",
-            "If you hear this with the phone locked, trade alerts will reach you the same way.",
+            sample ? `TEST — ${sample.title}` : "Kumar Signals Pro test",
+            sample ? `TEST ONLY -- sample numbers, not a real call. A real MATCHED alert looks exactly like this:\n\n${sample.body}` : "If you hear this with the phone locked, trade alerts will reach you the same way.",
             "urgent"
           );
           if (!result.ok) return json({ error: result.error ?? "Failed to send test notification" }, 502);
           return json({ ok: true });
+        }
+
+        // Runs the real MATCHED check on live data right now (it pushes if a
+        // matched call is found, exactly like the Cron) and says why per market.
+        if (url.pathname === "/api/notify/check-matched") {
+          if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+          return json({ report: await runTwentyTwentyNotificationCheck(env) });
         }
 
         if (url.pathname === "/api/notify/check-now") {
