@@ -110,7 +110,11 @@ export function useBuyDecision(symbol: InstrumentSymbol) {
   const bestLog = useAppStore((s) => s.tradeLogs[`BEST-${symbol}`]);
   const running: TradeLogEntry | null = bestLog?.length && !bestLog[bestLog.length - 1].closed ? bestLog[bestLog.length - 1] : null;
 
-  const error = (c15.error as Error | null)?.message ?? null;
+  // The Worker answers 200 with { error } when Upstox fails (login expired,
+  // no contract, too few bars), so that counts as an error too -- it used to
+  // vanish and read as "not enough finished candles".
+  const bodyError = (d: unknown) => (d && typeof d === "object" && "error" in d ? String((d as { error: unknown }).error) : null);
+  const error = (c15.error as Error | null)?.message ?? bodyError(c15.data) ?? bodyError(c60.data) ?? bodyError(c240.data) ?? null;
   const loading = c15.isLoading || c60.isLoading || c240.isLoading;
   const updatedAt = Math.max(c15.dataUpdatedAt, c5.dataUpdatedAt, c60.dataUpdatedAt, c240.dataUpdatedAt);
   const refetch = () => Promise.all([c15.refetch(), c5.refetch(), c60.refetch(), c240.refetch(), optionsQ.refetch()]);

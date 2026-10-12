@@ -32,9 +32,19 @@ function minutesToNextClose(): number {
 }
 
 function Row({ symbol }: { symbol: Sym }) {
-  const { result, pick, live, marketOpen, loading } = useBuyDecision(symbol);
+  const { result, pick, live, marketOpen, loading, error } = useBuyDecision(symbol);
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   if (!result) {
+    // Show the real reason. "Not enough candles" used to cover every failure,
+    // including an expired Upstox login or a blocked request.
+    if (error && !loading) {
+      return (
+        <div className="rounded-2xl bg-rose-50 border border-rose-200 px-3 py-2.5">
+          <p className="text-[11.5px] font-black text-rose-700">{NAME[symbol]}: live data unavailable</p>
+          <p className="text-[10.5px] text-rose-700/90 leading-snug mt-0.5">{error}</p>
+        </div>
+      );
+    }
     return <div className="rounded-2xl bg-slate-100 px-3 py-2.5 text-[11.5px] text-slate-500">{NAME[symbol]}: {loading ? "reading the charts…" : "not enough finished candles yet"}</div>;
   }
   const L = sideLook(result);
