@@ -82,7 +82,7 @@ test("every save gets a new revision, and it can be read without the body", asyn
 });
 
 // ---------------------------------------------------------------------------
-// News: one rotating third of the feeds per run
+// News: every feed on every run (paid plan)
 // ---------------------------------------------------------------------------
 
 const feedXml = (u: string) =>
@@ -90,20 +90,13 @@ const feedXml = (u: string) =>
 
 const countFeeds = async () => (await import("../../src/news")).TRUSTED_FEED_COUNT;
 
-test("from an empty cache, three runs fetch every feed exactly once and fill the cache", async () => {
+test("one run fetches every feed exactly once and fills the cache", async () => {
   vi.useFakeTimers({ now: new Date("2026-09-23T14:00:00+05:30"), toFake: ["Date"] });
   globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
   const { warmEnergyNews, fetchEnergyNews } = await import("../../src/news");
   const feeds = await countFeeds();
   const kv = makeKv();
-  const perRun: number[] = [];
-  for (let i = 0; i < 3; i++) {
-    const before = fetchCalls.length;
-    await warmEnergyNews(envWith(kv));
-    perRun.push(fetchCalls.length - before);
-    vi.setSystemTime(Date.now() + 10 * 60_000);
-  }
-  for (const n of perRun) expect(n).toBeLessThanOrEqual(Math.ceil(feeds / 3));
+  await warmEnergyNews(envWith(kv));
   expect(new Set(fetchCalls).size).toBe(feeds);
   expect(fetchCalls).toHaveLength(feeds);
   const cached = await fetchEnergyNews(envWith(kv));
@@ -111,27 +104,23 @@ test("from an empty cache, three runs fetch every feed exactly once and fill the
   expect(cached.sourceStatus).toHaveLength(feeds);
 });
 
-test("once full, a run refreshes a third and carries every other source forward", async () => {
+test("the next run five minutes later refreshes every feed again", async () => {
   vi.useFakeTimers({ now: new Date("2026-09-23T14:00:00+05:30"), toFake: ["Date"] });
   globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
-  const { warmEnergyNews, fetchEnergyNews } = await import("../../src/news");
+  const { warmEnergyNews } = await import("../../src/news");
   const kv = makeKv();
-  for (let i = 0; i < 3; i++) { await warmEnergyNews(envWith(kv)); vi.setSystemTime(Date.now() + 10 * 60_000); }
-  const full = await fetchEnergyNews(envWith(kv));
+  await warmEnergyNews(envWith(kv));
+  vi.setSystemTime(Date.now() + 5 * 60_000);
   fetchCalls.length = 0;
   await warmEnergyNews(envWith(kv));
-  expect(fetchCalls.length).toBeLessThanOrEqual(Math.ceil((await countFeeds()) / 3));
-  const after = await fetchEnergyNews(envWith(kv));
-  expect(new Set(after.articles.map((a) => a.source))).toEqual(new Set(full.articles.map((a) => a.source)));
-  expect(after.sourceStatus.map((s) => s.source)).toEqual(full.sourceStatus.map((s) => s.source));
+  expect(fetchCalls).toHaveLength(await countFeeds());
 });
 
-test("a page request on an empty cache fetches one batch, not every feed", async () => {
+test("a page request on an empty cache builds the full feed once", async () => {
   const { fetchEnergyNews } = await import("../../src/news");
   globalThis.fetch = (async (u: RequestInfo | URL) => { fetchCalls.push(String(u)); return new Response(feedXml(String(u))); }) as typeof fetch;
   await fetchEnergyNews(envWith(makeKv()));
-  expect(fetchCalls.length).toBeLessThanOrEqual(Math.ceil((await countFeeds()) / 3));
-  expect(fetchCalls.length).toBeGreaterThan(0);
+  expect(fetchCalls).toHaveLength(await countFeeds());
 });
 
 // ---------------------------------------------------------------------------

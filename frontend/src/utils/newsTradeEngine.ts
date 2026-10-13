@@ -221,7 +221,7 @@ function computeLiquidityReading(depth: MarketDepthResult | null): CategoryReadi
   return { net, available: true, reasons: [`Order book imbalance ${depth.imbalance >= 0 ? "+" : ""}${depth.imbalance} (${depth.tier})`, `Liquidity score ${depth.liquidityScore}/10`] };
 }
 
-function computeNewsReading(symbol: NewsTradeSymbol, articles: ScoredNewsArticle[], eia: EiaScoreResult | null): CategoryReading & { articles: ScoredNewsArticle[]; events: NewsEvent[] } {
+export function computeNewsReading(symbol: NewsTradeSymbol, articles: ScoredNewsArticle[], eia: EiaScoreResult | null): CategoryReading & { articles: ScoredNewsArticle[]; events: NewsEvent[] } {
   const marketKey = symbol === "CRUDEOIL" ? "CRUDE" : "NG";
   const relevant = articles.filter((a) => a.affectedMarket === marketKey || a.affectedMarket === "BOTH");
   if (relevant.length === 0 && !eia) return { net: 0, available: false, reasons: ["No news available"], articles: [], events: [] };

@@ -25,6 +25,6 @@
   "triggers": {
     // Three triggers = three separate invocations, each with its own 10 ms of
     // CPU on the free plan. What runs on which is in src/cron.ts.
-    "crons": ["*/5 * * * *", "1-59/5 * * * *", "2-59/10 * * * *"]
+    "crons": ["*/5 * * * *", "1-59/5 * * * *", "2-59/5 * * * *"]
   }
 }

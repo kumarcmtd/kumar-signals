@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCandles, useMarketStatus, useOptionsAnalytics } from "../api/hooks";
+import { useCandles, useMarketStatus, useNewsTrade, useOptionsAnalytics } from "../api/hooks";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { evaluateBuyDecision, type DecisionResult, type Plan } from "../utils/buyDecisionEngine";
 import { mcxSessionAt } from "../utils/mcxSession";
 import { scheduledEvents } from "../utils/timeProfileEngine";
 import { daysToExpiry } from "../utils/oiBuildup";
 import { liveMomentum } from "../utils/liveMomentum";
+import { trendPulse } from "../utils/trendPulse";
+import { newsPulseFor } from "../utils/newsPulse";
+import { callMatch } from "../utils/callMatch";
 import type { InstrumentSymbol, OptionsAnalytics } from "../types";
 
 export interface OptionPick {
@@ -102,8 +105,37 @@ export function useBuyDecision(symbol: InstrumentSymbol) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [candles, c5.data, result, minute, marketOpen],
   );
+  // Steady vs choppy 5-minute candles, and whether price has already run far.
+  const pulse = useMemo(
+    () => (c5.data?.candles?.length ? trendPulse(c5.data.candles, Date.now(), livePrice) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [c5.data, livePrice, minute],
+  );
+  // The news (risk premium) side, from the shared news feed the News page uses.
+  const newsQ = useNewsTrade();
+  const news = useMemo(() => {
+    const d = newsQ.data;
+    if (!d?.news?.available) return null;
+    const eia = symbol === "CRUDEOIL" ? (d.eia?.crude ?? null) : symbol === "NATURALGAS" ? (d.eia?.ngStorage ?? null) : null;
+    return newsPulseFor(symbol === "NATURALGAS" ? "NATURALGAS" : "CRUDEOIL", d.news.articles ?? [], eia, d.news.builtAt ?? d.fetchedAt ?? null, Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newsQ.data, symbol, minute]);
+
   // "Close to the entry zone" must not sit next to a live REVERSING / stop-broken read.
-  const entry = rawEntry?.tone === "ok" && live?.tone === "bad" ? null : rawEntry;
+  // On a BUY, one entry answer that also weighs the 5-minute candles, a late
+  // (stretched) entry and the news -- the same rule as the MATCHED alert.
+  const entryGate = useMemo(
+    () => (result?.side && (result.verdict === "BUY_CE" || result.verdict === "BUY_PE") ? callMatch(result, live, result.side, { pulse, news }) : null),
+    [result, live, pulse, news],
+  );
+  const entry: EntryCheck | null =
+    rawEntry?.tone === "ok" && live?.tone === "bad"
+      ? null
+      : rawEntry?.tone === "ok" && entryGate && !entryGate.ok
+        ? { tone: "warn", text: entryGate.text.replace(/^Both agree, but /, "Don't enter yet: ") }
+        : rawEntry?.tone === "ok" && entryGate?.ok
+          ? { tone: "ok", text: `${rawEntry.text} Steady 5-min candles, not stretched, news not against — clean entry.` }
+          : rawEntry;
 
   // A Best Call trade already running on this symbol, so the page can say
   // whether this read agrees with it.
@@ -119,5 +151,5 @@ export function useBuyDecision(symbol: InstrumentSymbol) {
   const updatedAt = Math.max(c15.dataUpdatedAt, c5.dataUpdatedAt, c60.dataUpdatedAt, c240.dataUpdatedAt);
   const refetch = () => Promise.all([c15.refetch(), c5.refetch(), c60.refetch(), c240.refetch(), optionsQ.refetch()]);
 
-  return { result, pick, entry, live, livePrice, running, marketOpen, loading, error, updatedAt, refetch };
+  return { result, pick, entry, entryGate, live, pulse, news, livePrice, running, marketOpen, loading, error, updatedAt, refetch };
 }

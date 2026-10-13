@@ -9,6 +9,10 @@ import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
 import { callMatch } from "../frontend/src/utils/callMatch";
 import { liveMomentum } from "../frontend/src/utils/liveMomentum";
+import { trendPulse } from "../frontend/src/utils/trendPulse";
+import { newsPulseFor } from "../frontend/src/utils/newsPulse";
+import { fetchEiaData } from "./eiaCalendar";
+import { fetchEnergyNews } from "./news";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
 import { analyzeTimeframe } from "../frontend/src/utils/timeframeEngine";
@@ -154,6 +158,8 @@ export function matchedPushText(p: {
   strength: number;
   since: string | null;
   liveHeadline: string | null;
+  pulseTitle?: string | null;
+  newsText?: string | null;
 }): { title: string; body: string } {
   return {
     title: `MATCHED: ${p.displayName} ${p.strike} ${p.optSide}`,
@@ -161,6 +167,8 @@ export function matchedPushText(p: {
       `BUY ${p.displayName} ${p.strike} ${p.optSide}`,
       `Ai20-20 call + AI Verify Pro BUY ${p.optSide} agree (${p.strength}/94${p.since ? `, confirmed since ${p.since}` : ""}).`,
       p.liveHeadline ? `Right now: ${p.liveHeadline}` : "",
+      p.pulseTitle ? `5-min trend: ${p.pulseTitle}` : "",
+      p.newsText ? `News: ${p.newsText}` : "",
       "",
       `Entry: Rs ${p.entry}`,
       `Target 1: Rs ${p.t1}`,
@@ -283,7 +291,14 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         continue;
       }
       const live = liveMomentum(c15, fast, verify, now, true);
-      const match = callMatch(verify, live, projection.optSide);
+      // Same extra checks as the card: steady 5-minute candles, no chase, and
+      // news (risk premium) not against the side. Both are cached server-side.
+      const pulse = trendPulse(fast, now, fast[fast.length - 1]?.close ?? null);
+      const [newsFeed, eiaData] = await Promise.all([fetchEnergyNews(env).catch(() => null), fetchEiaData(env).catch(() => null)]);
+      const sym = symbol === "NATURALGAS" ? "NATURALGAS" : "CRUDEOIL";
+      const eia = sym === "CRUDEOIL" ? (eiaData?.crude ?? null) : (eiaData?.ngStorage ?? null);
+      const news = newsFeed?.available ? newsPulseFor(sym, newsFeed.articles, eia, newsFeed.builtAt ?? null, now) : null;
+      const match = callMatch(verify, live, projection.optSide, { pulse, news });
       if (!match.ok) {
         say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: ${match.text}.`);
         continue;
@@ -315,6 +330,8 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         strength: verify.strength,
         since: verify.since,
         liveHeadline: live?.headline ?? null,
+        pulseTitle: pulse?.title ?? null,
+        newsText: news ? `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${news.top ? ` -- ${news.top.headline}` : ""}` : null,
       });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);

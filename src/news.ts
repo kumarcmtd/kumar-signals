@@ -283,9 +283,12 @@ async function fetchNewsApiArticles(apiKey: string): Promise<{ source: string; o
 // feeds (before the parser fixes, ~15 after): over the free plan's 10 ms per
 // run however it was scheduled. The cache TTL covers a full rotation plus
 // missed runs, so a page never finds it empty while the cron is alive.
-const NEWS_BATCHES = 3;
+// Paid plan (30 s CPU): every run refreshes EVERY feed. War-time crude moves
+// on headlines, so a source must never be more than ~5 minutes old. (The free
+// plan's 10 ms forced a rotating third per run -- each source ~30 min old.)
+const NEWS_BATCHES = 1;
 const NEWS_ALWAYS_ON = true;
-const NEWS_BATCH_SLOT_MS = 10 * 60 * 1000;
+const NEWS_BATCH_SLOT_MS = 5 * 60 * 1000;
 // Three hours: long enough to survive the hourly off-hours refresh, so the
 // batches keep merging instead of the cache expiring between them.
 const NEWS_CACHE_TTL_SECONDS = 3 * 60 * 60;

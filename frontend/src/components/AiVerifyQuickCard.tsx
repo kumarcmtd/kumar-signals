@@ -12,16 +12,20 @@ import { LiveNowPill } from "./decision/LiveNow";
 import { useAppStore } from "../store/appStore";
 import { sessionBucketStart } from "../utils/candleResample";
 import { sideLook } from "./decision/sideLook";
+import { NewsLine, PulseStrip } from "./decision/PulseAndNews";
 import { callMatch, type MatchLevel } from "../utils/callMatch";
 
 const MATCH_STYLE: Record<MatchLevel, React.CSSProperties> = {
   matched: { background: "#FFFFFF", color: "#047857", boxShadow: "0 0 0 2px #10B981" },
   same_side_unconfirmed: { background: "rgba(255,255,255,.85)", color: "#475569" },
   fading: { background: "#FFFBEB", color: "#B45309" },
+  choppy: { background: "#FEF08A", color: "#713F12" },
+  stretched: { background: "#FFFBEB", color: "#B45309" },
+  news_against: { background: "#FEF2F2", color: "#B91C1C" },
   against: { background: "#FEF2F2", color: "#B91C1C" },
   no_view: { background: "rgba(255,255,255,.85)", color: "#475569" },
 };
-const MATCH_ICON: Record<MatchLevel, string> = { matched: "✅", same_side_unconfirmed: "⏳", fading: "⚠", against: "⚠", no_view: "·" };
+const MATCH_ICON: Record<MatchLevel, string> = { matched: "✅", same_side_unconfirmed: "⏳", fading: "⚠", choppy: "〰", stretched: "⚠", news_against: "📰", against: "⚠", no_view: "·" };
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
 const NAME: Record<Sym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -32,7 +36,7 @@ function minutesToNextClose(): number {
 }
 
 function Row({ symbol }: { symbol: Sym }) {
-  const { result, pick, live, marketOpen, loading, error } = useBuyDecision(symbol);
+  const { result, pick, live, pulse, news, entryGate, marketOpen, loading, error } = useBuyDecision(symbol);
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   if (!result) {
     // Show the real reason. "Not enough candles" used to cover every failure,
@@ -58,8 +62,14 @@ function Row({ symbol }: { symbol: Sym }) {
     .flatMap(([, v]) => v)
     .find((e) => !e.closed);
   // Same rule as the MATCHED push alert (utils/callMatch).
-  const match = open ? callMatch(result, live, open.optSide) : null;
+  const match = open ? callMatch(result, live, open.optSide, { pulse, news }) : null;
   const vsCall = match && open ? { level: match.level, text: `${match.text} (your Ai20-20 ${open.strike} ${open.optSide})` } : null;
+
+  // The row's frame says at a glance whether the small candles back the call:
+  // yellow = choppy (doubt), glowing = a steady run on the call's own side.
+  const side = result.side;
+  const steadyWith = pulse && side && (side === "CE" ? pulse.state === "STEADY_UP" : pulse.state === "STEADY_DOWN");
+  const frame = pulse?.state === "CHOPPY" ? "0 0 0 3px #FACC15" : steadyWith ? `0 0 0 3px ${side === "CE" ? "#4ADE80" : "#FB7185"}, 0 0 18px ${side === "CE" ? "#22C55E99" : "#F43F5E99"}` : undefined;
 
   const line = buying
     ? pick
@@ -68,7 +78,7 @@ function Row({ symbol }: { symbol: Sym }) {
     : result.waitingFor[0] ?? (result.side ? `Leaning ${result.side}, not confirmed yet` : "No clear edge either way");
 
   return (
-    <Link to="/ai-verify-pro" className="block rounded-2xl p-3 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${L.from}, ${L.to})`, color: L.ink, border: L.light ? `1px solid ${L.ink}33` : undefined }}>
+    <Link to="/ai-verify-pro" className="block rounded-2xl p-3 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${L.from}, ${L.to})`, color: L.ink, border: L.light ? `1px solid ${L.ink}33` : undefined, boxShadow: frame }}>
       <div className="absolute -right-6 -top-8 w-24 h-24 rounded-full" style={{ background: "rgba(255,255,255,.08)" }} />
       <div className="relative flex items-center gap-2.5">
         <div className="flex-1 min-w-0">
@@ -94,7 +104,18 @@ function Row({ symbol }: { symbol: Sym }) {
           </Chip>
         )}
       </div>
+      {(pulse || news) && (
+        <div className="relative mt-1.5 space-y-1">
+          {pulse && <PulseStrip pulse={pulse} compact />}
+          {news && <NewsLine news={news} side={side} compact />}
+        </div>
+      )}
       {live && <LiveNowPill read={live} />}
+      {!vsCall && entryGate && (
+        <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={MATCH_STYLE[entryGate.level]}>
+          {MATCH_ICON[entryGate.level]} {entryGate.ok ? "Clean entry now — steady 5-min candles, not stretched, news not against" : entryGate.text.replace(/^Both agree, but /, "Don't enter yet: ")}
+        </p>
+      )}
       {vsCall && (
         <p className="relative text-[10.5px] font-black mt-1.5 rounded-lg px-2 py-1" style={MATCH_STYLE[vsCall.level]}>
           {MATCH_ICON[vsCall.level]} {vsCall.text}
@@ -131,7 +152,7 @@ export function AiVerifyQuickCard() {
       <Row symbol="NATURALGAS" />
       <Row symbol="CRUDEOIL" />
       <p className="text-[9.5px] text-slate-400 leading-snug px-1">
-        Decision: 15m · 1h · 4h closed candles. "Right now" is the live candle and can change before it closes. Green = CE (bullish), red = PE (bearish); light = early lean, medium = setup forming, deep = BUY. "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
+        Decision: 15m · 1h · 4h closed candles. "Right now" is the live candle and can change before it closes. Green = CE (bullish), red = PE (bearish); light = early lean, medium = setup forming, deep = BUY. Yellow frame = choppy 5-min candles (doubt); glowing frame = a steady run on the call's side. "Forming" is not a buy until one more candle confirms. "Agree" is how much of the evidence points the same way (max 94), not a chance of profit. Tap for every reason.
       </p>
     </section>
   );

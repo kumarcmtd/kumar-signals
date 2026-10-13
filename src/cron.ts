@@ -11,7 +11,7 @@
 //   */5        FAST     Ai20-20 + Best Call pushes, expiry alerts, overnight anchor
 //   1-59/5     TRADES   trade-log advance and the end-of-day close; when no
 //                       trade is open, one missing time profile instead
-//   2-59/10    WARM     one third of the news feeds (rotating)
+//   2-59/5     WARM     every news feed (paid plan: each source <= ~5 min old)
 //
 // Each job still decides for itself whether it has anything to do: most exit
 // immediately outside MCX hours, and none makes an Upstox call while the
@@ -33,7 +33,7 @@ import { bindSharedCache } from "./upstox";
 
 export const CRON_FAST = "*/5 * * * *";
 export const CRON_TRADES = "1-59/5 * * * *";
-export const CRON_WARM = "2-59/10 * * * *";
+export const CRON_WARM = "2-59/5 * * * *";
 
 export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string): Promise<void> {
   bindSharedCache(env);

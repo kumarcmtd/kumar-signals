@@ -288,7 +288,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           // MATCHED alert in exactly the real format, marked TEST.
           const sample =
             url.searchParams.get("kind") === "matched"
-              ? matchedPushText({ displayName: "Crude Oil", strike: 8850, optSide: "CE", entry: 263.2, t1: 283.2, stop: 251.2, lot: 100, strength: 72, since: "21:15", liveHeadline: "HOLDING — still bullish right now" })
+              ? matchedPushText({ displayName: "Crude Oil", strike: 8850, optSide: "CE", entry: 263.2, t1: 283.2, stop: 251.2, lot: 100, strength: 72, since: "21:15", liveHeadline: "HOLDING — still bullish right now", pulseTitle: "STEADY UP", newsText: "+38 bullish -- sample headline" })
               : null;
           const result = await sendNtfyNotification(
             topic,
