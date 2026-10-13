@@ -22,13 +22,14 @@ import {
 } from "lucide-react";
 import { useNewsFeed, useNewsTrade, useMarketStatus, usePullback } from "../api/hooks";
 import {
-  computeTilt, rankMovers, breakingSince, bucketThemes, summariseSourceHealth, readFreshness, relativeAge,
+  computeTilt, rankMovers, bucketThemes, summariseSourceHealth, readFreshness, relativeAge,
   type NewsCommodity,
 } from "../utils/claudeNewsAnalytics";
 import { analyzeFlash } from "../utils/aiFlashEngine";
 import { EiaPanel, EconCalendarCardV2, TopEventsList } from "../components/NewsDashboardKit";
 import { NewsTradeDecisionCard } from "../components/NewsTradeDecisionCard";
 import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
+import { BreakingFlash, ImpactFeed, NewsVerdict } from "../components/news/NewsHero";
 import type { NewsTradeSymbol } from "../utils/newsTradeEngine";
 import type { ScoredNewsArticle } from "../utils/newsScoring";
 import type { InstrumentSymbol } from "../types";
@@ -69,14 +70,14 @@ function ArticleRow({ article, now }: { article: ScoredNewsArticle; now: number 
   return (
     <a href={article.url || undefined} target="_blank" rel="noopener noreferrer" className="block px-3 py-2.5 border-b last:border-b-0 border-slate-100 active:bg-slate-50">
       <div className="flex items-center gap-1.5 flex-wrap mb-1">
-        <span className="text-[9px] font-black px-1.5 py-[1px] rounded-md" style={{ background: chip.bg, color: chip.ink }}>{chip.text}</span>
+        <span className="text-[11px] font-black px-1.5 py-[1px] rounded-md" style={{ background: chip.bg, color: chip.ink }}>{chip.text}</span>
         <span className="text-[9px] font-bold text-slate-500">
           {article.affectedMarket === "BOTH" ? "Crude + Gas" : article.affectedMarket === "CRUDE" ? "Crude" : "Gas"}
         </span>
         <span className="text-[9px] text-slate-400">· {TIER_LABEL[article.sourceTier] ?? "Other"}</span>
         <span className="text-[9px] text-slate-400 ml-auto tabular-nums">{relativeAge(article.publishedAt, now)}</span>
       </div>
-      <p className="text-[11.5px] font-bold text-slate-800 leading-snug">{article.headline}</p>
+      <p className="text-[14px] font-bold text-slate-900 leading-snug">{article.headline}</p>
       <div className="flex items-center gap-1 mt-1">
         <span className="text-[9px] text-slate-400 truncate">{article.source}</span>
         {article.url && <ExternalLink size={9} className="text-slate-300 shrink-0" />}
@@ -114,7 +115,6 @@ export function AiNews() {
 
   const flash = useMemo(() => analyzeFlash(articles, active.news, now), [articles, active.news, now]);
   const movers = useMemo(() => rankMovers(articles, active.news, 12, now), [articles, active.news, now]);
-  const breaking = useMemo(() => breakingSince(articles, 60, now), [articles, now]);
   const themes = useMemo(() => bucketThemes(articles, active.news, now), [articles, active.news, now]);
   const health = useMemo(() => summariseSourceHealth(feed.data?.sourceStatus ?? []), [feed.data]);
   const freshness = useMemo(() => readFreshness(articles, now), [articles, now]);
@@ -185,6 +185,16 @@ export function AiNews() {
             {feed.data.error ?? "No source answered."} Open Source health below — that list is what gets the dead feeds replaced.
           </p>
         </div>
+      )}
+
+      {/* ---- BREAKING + the news verdict, first: in war-time crude a headline
+          moves price within seconds, so the newest big story leads the page. */}
+      {feed.data?.available && (
+        <>
+          <BreakingFlash articles={articles} market={active.news === "CRUDE" ? "CRUDE" : "NG"} label={active.label} now={now} />
+          <NewsVerdict tilt={active.news === "CRUDE" ? crudeTilt : ngTilt} label={active.label} />
+          <ImpactFeed articles={articles} market={active.news === "CRUDE" ? "CRUDE" : "NG"} now={now} />
+        </>
       )}
 
       {/* ---- THE VERDICT ----
@@ -274,16 +284,6 @@ export function AiNews() {
           <p className="text-[10px] text-slate-500 leading-snug mt-1">
             {flash.pulse.totalCount} scored {flash.pulse.totalCount === 1 ? "item" : "items"} ({flash.pulse.freshCount} in the last 30 min), weighted hardest toward the newest. This is the fast read; the verdict above is the considered one.
           </p>
-        </section>
-      )}
-
-      {/* ---- Last hour ---- */}
-      {breaking.length > 0 && (
-        <section>
-          <h2 className="text-[13px] font-black text-slate-800">Last hour ({breaking.length})</h2>
-          <div className="rounded-2xl bg-white border border-[var(--color-border)] overflow-hidden mt-1.5">
-            {breaking.slice(0, 6).map((a) => <ArticleRow key={`${a.url}-${a.headline}`} article={a} now={now} />)}
-          </div>
         </section>
       )}
 

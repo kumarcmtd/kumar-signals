@@ -189,6 +189,33 @@ const RULES: Rule[] = [
     whyItMatters: "US crude inventories rising signals supply outpacing demand that week.", expectedEffect: "Generally bearish for WTI/Brent, more so on a larger-than-usual build." },
   { key: "war", patterns: [/\bwar\b/i, /\battack(s|ed)?\b.{0,25}(oil|energy|refiner|tanker|pipeline)/i, /military conflict/i], market: "CRUDE", bullish: 60, importance: 80, timeImpact: "30m",
     whyItMatters: "Armed conflict near energy infrastructure raises supply-disruption risk.", expectedEffect: "Bullish for crude on fear of lost supply -- strength depends on how close the conflict is to producing/shipping regions." },
+  // War-time crude: a strike on oil infrastructure, a producer or a shipping
+  // lane is the headline that moves price within seconds. These are scored as
+  // the strongest bullish rules so they dominate any milder rule they share a
+  // headline with (e.g. "Houthi" alone only means shipping risk).
+  { key: "energyStrike",
+    patterns: [
+      /\b(missile|drone|rocket|air ?strike|strikes?|attack(s|ed)?|hit|struck|explosion|blast|ablaze)\b.{0,60}\b(aramco|abqaiq|ras tanura|kharg|refiner(y|ies)|oil (field|facility|facilities|terminal|port|installation)s?|export terminal|pipeline|tanker|oil tanker)/i,
+      /\b(aramco|abqaiq|ras tanura|kharg|oil (field|facility|terminal|port))\b.{0,60}\b(hit|struck|attack(ed)?|missile|drone|explosion|fire|ablaze|damaged|targeted)/i,
+    ],
+    market: "CRUDE", bullish: 95, importance: 100, timeImpact: "15m",
+    whyItMatters: "A strike on oil infrastructure or a major producer can take supply offline instantly.", expectedEffect: "Sharply bullish for crude within seconds to minutes; fades only if damage proves minor." },
+  { key: "supplyHalt",
+    patterns: [/force majeure/i, /\bhalt(s|ed)? (oil |crude )?(exports?|production|output|loadings)/i, /(exports?|production|output|loadings) (halted|suspended|shut)/i, /shut[s]? in .{0,25}(barrels|production|output)/i],
+    market: "CRUDE", bullish: 75, importance: 90, timeImpact: "15m",
+    whyItMatters: "Oil that stops flowing is removed from the market immediately.", expectedEffect: "Bullish for crude, more so the larger and longer the outage." },
+  { key: "escalation",
+    patterns: [/\bescalat(e|es|ed|ion|ing)\b/i, /retaliat/i, /(israel|u\.?s\.?|united states).{0,25}(strikes?|attacks?|bombs?).{0,25}iran/i, /iran.{0,25}(strikes?|attacks?|missiles?).{0,25}(israel|u\.?s\.?|saudi|gulf)/i],
+    market: "CRUDE", bullish: 65, importance: 85, timeImpact: "30m",
+    whyItMatters: "Escalation between oil-region powers raises the chance of real supply loss.", expectedEffect: "Bullish for crude as the risk premium builds." },
+  { key: "deEscalation",
+    patterns: [/de-?escalat/i, /ceasefire (agreed|reached|holds|deal|takes effect)/i, /peace deal (signed|agreed|reached)/i, /talks? (progress|breakthrough)/i],
+    market: "CRUDE", bullish: -70, importance: 85, timeImpact: "30m",
+    whyItMatters: "De-escalation removes the war risk premium priced into crude.", expectedEffect: "Sharply bearish for crude as the fear premium unwinds." },
+  { key: "sprRelease",
+    patterns: [/(strategic petroleum reserve|\bspr\b).{0,40}(release|sale|sell|draw)/i],
+    market: "CRUDE", bullish: -45, importance: 70, timeImpact: "4h",
+    whyItMatters: "Releasing emergency stocks adds supply to the market.", expectedEffect: "Bearish for crude, mostly in the near term." },
   { key: "peace", patterns: [/peace (deal|agreement|talks)/i, /ceasefire/i, /truce/i], market: "CRUDE", bullish: -50, importance: 70, timeImpact: "1h",
     whyItMatters: "A ceasefire/peace deal removes part of the geopolitical risk premium priced into crude.", expectedEffect: "Bearish for crude as the fear premium unwinds." },
   { key: "pipelineExplosion", patterns: [/pipeline.{0,20}(explosion|blast|fire|attack|sabotage)/i], market: "BOTH", bullish: 65, importance: 85, timeImpact: "15m",
@@ -340,6 +367,12 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 }
 
 const RULE_MAP: Record<string, Rule> = Object.fromEntries(RULES.map((r) => [r.key, r]));
+
+/** Why the strongest matched rule matters, in one line -- for the BREAKING flash. */
+export function whyHeadlineMatters(matchedRules: string[]): { why: string; effect: string } | null {
+  const best = matchedRules.map((k) => RULE_MAP[k]).filter((r): r is Rule => Boolean(r)).sort((a, b) => b.importance - a.importance)[0];
+  return best ? { why: best.whyItMatters, effect: best.expectedEffect } : null;
+}
 
 export function clusterEvents(articles: ScoredNewsArticle[]): NewsEvent[] {
   const withTokens = articles.map((a) => ({ article: a, tokens: normalizeTokens(a.headline) }));

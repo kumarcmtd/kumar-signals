@@ -26,6 +26,7 @@ import type { Env } from "./env";
 import { runExpiryAlertCheck } from "./expiryAlerts";
 import { captureOvernightAnchor } from "./globalMarkets";
 import { warmEnergyNews } from "./news";
+import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "./notify";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
@@ -54,7 +55,9 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   if (cron === CRON_WARM) {
     // Keeps the news feeds warm so no browser request ever has to rebuild
     // ~35 RSS sources inside a 10 ms CPU budget.
-    ctx.waitUntil(warmEnergyNews(env));
+    // Then push any brand-new major headline (war, supply halt, ceasefire)
+    // from the freshly built feed.
+    ctx.waitUntil(warmEnergyNews(env).then(() => runNewsFlashCheck(env)).catch(() => undefined));
     return;
   }
 
