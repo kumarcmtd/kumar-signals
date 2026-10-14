@@ -160,11 +160,11 @@ export function useOptionsAnalytics(symbol: InstrumentSymbol, enabled = true) {
 // fastest thing here -- just not three times faster than it needs to be. The
 // pages that genuinely need an instant read still force-refresh this key on
 // their own tick.
-export function useMarketDepth(symbol: InstrumentSymbol) {
+export function useMarketDepth(symbol: InstrumentSymbol, pollMs = 15_000) {
   return useQuery({
     queryKey: ["depth", symbol],
     queryFn: () => api.depth(symbol),
-    refetchInterval: usePollInterval(15_000),
+    refetchInterval: usePollInterval(pollMs),
   });
 }
 

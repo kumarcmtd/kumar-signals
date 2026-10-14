@@ -194,11 +194,48 @@ async function fetchHistoricalCandles(token: string, instrumentKey: string): Pro
 const INTRADAY_CACHE_TTL_MS = 8_000;
 const intradayCache = new Map<string, { at: number; promise: Promise<Candle[] | null> }>();
 
+// SHARED across every isolate (KV). Cloudflare runs many copies of this
+// Worker, and each used to call Upstox for itself -- 2 symbols x 4 timeframes
+// every 15 s from one phone, plus the Cron, was enough to trip Upstox's
+// Cloudflare rate limit (1015). Now any isolate reuses a copy under 15 s old,
+// and if Upstox refuses (rate limit, hiccup) a copy up to 10 minutes old is
+// served instead of an error -- prices a little behind beat a blank page.
+const INTRADAY_SHARED_FRESH_MS = 15_000;
+const INTRADAY_SHARED_STALE_MS = 10 * 60_000;
+const intradayKey = (instrumentKey: string) => `intraday1m:v1:${instrumentKey}`;
+
+async function readSharedIntraday(instrumentKey: string): Promise<{ at: number; candles: Candle[] } | null> {
+  if (!sharedKv) return null;
+  try {
+    const raw = await sharedKv.get(intradayKey(instrumentKey));
+    return raw ? (JSON.parse(raw) as { at: number; candles: Candle[] }) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchIntradayShared(token: string, instrumentKey: string): Promise<Candle[] | null> {
+  const shared = await readSharedIntraday(instrumentKey);
+  if (shared && Date.now() - shared.at < INTRADAY_SHARED_FRESH_MS) return shared.candles;
+  try {
+    const fresh = await fetchIntradayCandles(token, instrumentKey);
+    if (fresh && fresh.length && sharedKv) {
+      await cachePut(sharedKv, intradayKey(instrumentKey), JSON.stringify({ at: Date.now(), candles: fresh }), { expirationTtl: 3600 });
+    }
+    if (fresh) return fresh;
+  } catch (e) {
+    // Upstox refused (rate limit, outage). Fall back to a recent shared copy.
+    if (shared && Date.now() - shared.at < INTRADAY_SHARED_STALE_MS) return shared.candles;
+    throw e;
+  }
+  return shared && Date.now() - shared.at < INTRADAY_SHARED_STALE_MS ? shared.candles : null;
+}
+
 export async function getIntradayCandles(token: string, instrumentKey: string): Promise<Candle[] | null> {
   const hit = intradayCache.get(instrumentKey);
   if (hit && Date.now() - hit.at < INTRADAY_CACHE_TTL_MS) return hit.promise;
 
-  const promise = fetchIntradayCandles(token, instrumentKey);
+  const promise = fetchIntradayShared(token, instrumentKey);
   intradayCache.set(instrumentKey, { at: Date.now(), promise });
   promise
     .then((v) => {

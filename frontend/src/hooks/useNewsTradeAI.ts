@@ -27,10 +27,12 @@ function atmOiFor(options: ReturnType<typeof useOptionsAnalytics>["data"]): numb
 // currently available (a closed MCX session doesn't stop the news cycle) --
 // candlesError/loading only ever affects the Technical/Momentum/Options/
 // Liquidity categories, never blocks the news side of the page.
-export function useNewsTradeAI(symbol: NewsTradeSymbol) {
+export function useNewsTradeAI(symbol: NewsTradeSymbol, opts: { depthPollMs?: number } = {}) {
   const candlesQ = useCandles(symbol, "15");
   const optionsQ = useOptionsAnalytics(symbol);
-  const depthQ = useMarketDepth(symbol);
+  // Depth is one input of five; a page that only shows the score can poll it
+  // slowly (each poll is an Upstox call).
+  const depthQ = useMarketDepth(symbol, opts.depthPollMs);
   const newsQ = useNewsTrade();
 
   const candles = candlesQ.data?.candles ?? [];

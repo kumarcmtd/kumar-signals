@@ -24,7 +24,8 @@ const MOVE_LOOK: Record<NewsTradeResult["expectedMove"], { label: string; ink: s
 
 /** The Ai-News "Final Decision" net score (news + technical + momentum + options + liquidity), same engine. */
 function FinalDecision({ sym }: { sym: Sym }) {
-  const { result } = useNewsTradeAI(sym);
+  // Depth once a minute here (not every 15 s): keeps Upstox calls down.
+  const { result } = useNewsTradeAI(sym, { depthPollMs: 60_000 });
   const look = MOVE_LOOK[result.expectedMove];
   const score = Math.round((result.finalNet + 100) / 2);
   const newsOnly = result.weightsUsed.technical === 0 && result.weightsUsed.momentum === 0;
