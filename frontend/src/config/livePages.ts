@@ -21,7 +21,7 @@ export const LIVE_PAGE_PATHS = [
   "/ai-20-20",
   "/level-cross-scan",
   "/ai-up",
-  "/ai-supertrend-pro",
+  "/ai-news", // took SuperTrend's tab: war-time crude moves on headlines
 ] as const;
 
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];

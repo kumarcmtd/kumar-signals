@@ -38,14 +38,14 @@ const PRIMARY: NavItem[] = [
   { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
   { to: LIVE_PAGE_PATHS[3], label: "Level Cross", icon: Waypoints },
   { to: LIVE_PAGE_PATHS[4], label: "AI-Up", icon: Repeat },
-  { to: LIVE_PAGE_PATHS[5], label: "SuperTrend", icon: Zap },
+  { to: LIVE_PAGE_PATHS[5], label: "Ai-News", icon: Rss },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Signals",
     items: [
-      { to: "/ai-news", label: "Ai-News", icon: Rss },
+      { to: "/ai-supertrend-pro", label: "SuperTrend", icon: Zap },
       { to: "/ai-pullback", label: "AI Pullback", icon: ActivityIcon },
       { to: "/ai-backtest-lab", label: "Backtest Lab", icon: Microscope },
       { to: "/price-alerts", label: "Price-Alerts", icon: AlarmClock },
