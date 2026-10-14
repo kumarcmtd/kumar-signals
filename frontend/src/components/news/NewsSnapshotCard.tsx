@@ -10,6 +10,7 @@ import { Newspaper, ChevronRight, Clock } from "lucide-react";
 import { useCandles, useNewsFeed } from "../../api/hooks";
 import { computeTilt } from "../../utils/claudeNewsAnalytics";
 import { newsReaction, type NewsReaction, type RoomRead } from "../../utils/newsReaction";
+import { NewsScanBar } from "./NewsScanBar";
 import type { ScoredNewsArticle } from "../../utils/newsScoring";
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
@@ -105,6 +106,7 @@ export function NewsSnapshotCard() {
           Ai-News <ChevronRight size={14} />
         </span>
       </Link>
+      <NewsScanBar compact />
       {MARKETS.map((m) => (
         <MarketRow key={m.sym} sym={m.sym} keyName={m.key} label={m.label} articles={articles} now={now} />
       ))}

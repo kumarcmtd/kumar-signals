@@ -30,6 +30,7 @@ import { EiaPanel, EconCalendarCardV2, TopEventsList } from "../components/NewsD
 import { NewsTradeDecisionCard } from "../components/NewsTradeDecisionCard";
 import { useNewsTradeAI } from "../hooks/useNewsTradeAI";
 import { BreakingFlash, ImpactFeed, NewsVerdict } from "../components/news/NewsHero";
+import { NewsScanBar } from "../components/news/NewsScanBar";
 import type { NewsTradeSymbol } from "../utils/newsTradeEngine";
 import type { ScoredNewsArticle } from "../utils/newsScoring";
 import type { InstrumentSymbol } from "../types";
@@ -155,6 +156,8 @@ export function AiNews() {
           </button>
         ))}
       </div>
+
+      <NewsScanBar />
 
       {/* Freshness before anything else -- stale news presented as news is the
           failure this whole area of the app was rebuilt to stop. */}

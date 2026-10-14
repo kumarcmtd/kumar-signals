@@ -148,6 +148,7 @@ export const api = {
   // /news-trade -- the flash page needs only headlines, not the EIA and
   // economic-calendar payloads, and it polls far more often than that page.
   newsFeed: () => getJSON<NewsFeedResponse>("/news"),
+  scanNewsNow: () => sendJSON<NewsFeedResponse>("/news/refresh", "POST"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   overnightTracker: () => getJSON<OvernightTrackerResponse>("/overnight-tracker"),
   ngStorage: () => getJSON<{ source: string; weeks: StorageWeek[]; fetchedAt: string; error?: string }>("/ng-storage"),

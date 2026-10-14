@@ -22,8 +22,22 @@ export interface NewsFetchResult {
   sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
   /** When the Cron last rebuilt this payload. Absent on an all-sources-down result. */
   builtAt?: string;
+  /** How the last scan went (automatic or "Scan now") -- shown on the page. */
+  lastScan?: NewsScanRecord;
   error?: string;
 }
+
+export interface NewsScanRecord {
+  at: string;
+  ok: boolean;
+  trigger: "auto" | "manual";
+  sourcesOk: number;
+  sourcesTotal: number;
+  articles: number;
+  ms: number;
+  error?: string;
+}
+const NEWS_SCAN_KV_KEY = "news:lastscan:v1";
 
 // Only these exact, hand-verified official/public RSS endpoints are ever
 // fetched -- the frontend can never submit an arbitrary URL for the Worker
@@ -228,9 +242,14 @@ async function fetchOneRssFeed(feed: RssFeedConfig): Promise<{ source: string; o
       },
       signal: controller.signal,
     });
-    clearTimeout(timer);
-    if (!res.ok) return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
+    if (!res.ok) {
+      clearTimeout(timer);
+      return { source: feed.source, ok: false, count: 0, error: `HTTP ${res.status} ${res.statusText}`.trim(), articles: [] };
+    }
+    // The timeout covers reading the body too: one feed that sends headers and
+    // then trickles must not hold up the whole scan.
     const xml = await res.text();
+    clearTimeout(timer);
     const articles = parseRssFeed(xml, feed.source, feed.stripPublisherSuffix === true, MAX_ITEMS_PER_FEED);
     return { source: feed.source, ok: true, count: articles.length, articles };
   } catch (e: any) {
@@ -386,15 +405,59 @@ async function buildEnergyNews(env: Env, batch?: { index: number; count: number 
  * rest over the next 20 minutes.
  */
 export async function fetchEnergyNews(env: Env): Promise<NewsFetchResult> {
-  const cached = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
+  const [cached, scan] = await Promise.all([env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY), env.COMMODITY_KV.get(NEWS_SCAN_KV_KEY)]);
+  let lastScan: NewsScanRecord | undefined;
+  try {
+    lastScan = scan ? (JSON.parse(scan) as NewsScanRecord) : undefined;
+  } catch {
+    lastScan = undefined;
+  }
   if (cached) {
     try {
-      return JSON.parse(cached) as NewsFetchResult;
+      return { ...(JSON.parse(cached) as NewsFetchResult), lastScan };
     } catch {
       // fall through and rebuild on a corrupt cache entry
     }
   }
-  return buildEnergyNews(env, currentBatch());
+  return scanNews(env, "auto");
+}
+
+/** One full scan of every source, timed and recorded so the page can show it. */
+async function scanNews(env: Env, trigger: NewsScanRecord["trigger"]): Promise<NewsFetchResult> {
+  const started = Date.now();
+  let result: NewsFetchResult;
+  try {
+    result = await buildEnergyNews(env, currentBatch());
+  } catch (e: any) {
+    result = { available: false, articles: [], events: [], sourceStatus: [], error: e?.message ?? "News scan failed" };
+  }
+  const record: NewsScanRecord = {
+    at: new Date().toISOString(),
+    ok: result.available,
+    trigger,
+    sourcesOk: result.sourceStatus.filter((x) => x.ok).length,
+    sourcesTotal: result.sourceStatus.length,
+    articles: result.articles.length,
+    ms: Date.now() - started,
+    ...(result.error ? { error: result.error } : {}),
+  };
+  await cachePut(env.COMMODITY_KV, NEWS_SCAN_KV_KEY, JSON.stringify(record), { expirationTtl: 7 * 86_400 });
+  return { ...result, lastScan: record };
+}
+
+/** Minimum gap between two "Scan now" rebuilds; a tap inside it gets the fresh cache. */
+export const MANUAL_SCAN_MIN_GAP_MS = 45_000;
+
+/** "Scan now": rebuild every source immediately, unless a scan just ran. */
+export async function scanNewsNow(env: Env): Promise<NewsFetchResult> {
+  // Only reuse a cache that exists; an empty cache must not trigger a second
+  // ("auto") build on the way to this manual one.
+  if (await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY)) {
+    const current = await fetchEnergyNews(env);
+    const last = current.lastScan ? Date.parse(current.lastScan.at) : 0;
+    if (current.available && Date.now() - last < MANUAL_SCAN_MIN_GAP_MS) return current;
+  }
+  return scanNews(env, "manual");
 }
 
 function currentBatch(): { index: number; count: number } {
@@ -426,6 +489,11 @@ export async function warmEnergyNews(env: Env): Promise<void> {
   // Off-hours runs are an hour apart, so rotate by the hour or they would
   // always land on the same batch.
   const batch = active ? currentBatch() : { index: Math.floor(slot / 6) % NEWS_BATCHES, count: NEWS_BATCHES };
+  if (batch.count === 1) {
+    // Every feed every run (paid plan): a timed, recorded full scan.
+    await scanNews(env, "auto");
+    return;
+  }
   try {
     await buildEnergyNews(env, batch);
   } catch {

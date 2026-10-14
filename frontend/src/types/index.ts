@@ -148,6 +148,8 @@ export interface NewsFetchResponse {
   sourceStatus: { source: string; ok: boolean; count: number; error?: string }[];
   /** When the Worker's Cron last rebuilt the feed payload. */
   builtAt?: string;
+  /** How the last scan went (automatic every 5 min, or "Scan now"). */
+  lastScan?: { at: string; ok: boolean; trigger: "auto" | "manual"; sourcesOk: number; sourcesTotal: number; articles: number; ms: number; error?: string };
   error?: string;
 }
 

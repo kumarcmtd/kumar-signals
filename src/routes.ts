@@ -11,7 +11,7 @@ import { computeGapStudy, GAP_STUDY_DAYS, getHistorical30mCandles } from "./gapS
 import { computeGlobalMarkets, computeOvernightTracker } from "./globalMarkets";
 import { type RequestGuard, requireToken } from "./guard";
 import { computeKumarAiAnalysis, type KumarAiAnalyzeRequest } from "./kumarAi";
-import { fetchEnergyNews } from "./news";
+import { fetchEnergyNews, scanNewsNow } from "./news";
 import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, runTwentyTwentyNotificationCheck, sendNtfyNotification } from "./notify";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
@@ -228,6 +228,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // that actually talks to RSS/EIA/FRED), exposed individually for
         // any consumer that only needs one slice rather than the combined
         // decision payload. All server-side, no client ever sees a secret.
+        // "Scan now": rebuild every news source immediately (at most every 45 s).
+        if (url.pathname === "/api/news/refresh") {
+          if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
+          return json({ ...(await scanNewsNow(env)), fetchedAt: new Date().toISOString() });
+        }
+
         if (url.pathname === "/api/news") {
           const symbolParam = url.searchParams.get("symbol");
           const news = await fetchEnergyNews(env);

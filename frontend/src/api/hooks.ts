@@ -184,6 +184,19 @@ export function useNewsTrade() {
 // minimum), so polling faster than that would only re-serve the same cached
 // payload -- 30s keeps the on-screen "X min ago" ages ticking and picks up a
 // new server cache generation within seconds of it existing.
+// "Scan now": rebuild every news source on the server right away, then show
+// the fresh feed everywhere (News page, AI-Shoot card, cards' news line).
+export function useScanNewsNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.scanNewsNow(),
+    onSuccess: (data) => {
+      qc.setQueryData(["news-feed"], data);
+      void qc.invalidateQueries({ queryKey: ["news-trade"] });
+    },
+  });
+}
+
 export function useNewsFeed() {
   return useQuery({
     queryKey: ["news-feed"],
