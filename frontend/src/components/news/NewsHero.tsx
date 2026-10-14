@@ -13,6 +13,8 @@ import { Zap, TrendingUp, TrendingDown, Minus, Clock, ExternalLink, ChevronDown,
 import type { ScoredNewsArticle } from "../../utils/newsScoring";
 import { whyHeadlineMatters } from "../../utils/newsScoring";
 import type { NewsTilt } from "../../utils/claudeNewsAnalytics";
+import type { Candle } from "../../types";
+import { newsReaction } from "../../utils/newsReaction";
 
 type Market = "CRUDE" | "NG";
 const relevantTo = (a: ScoredNewsArticle, m: Market) => a.affectedMarket === m || a.affectedMarket === "BOTH";
@@ -41,7 +43,7 @@ function ImpactDots({ impact }: { impact: number }) {
   );
 }
 
-export function BreakingFlash({ articles, market, label, now }: { articles: ScoredNewsArticle[]; market: Market; label: string; now: number }) {
+export function BreakingFlash({ articles, market, label, now, candles }: { articles: ScoredNewsArticle[]; market: Market; label: string; now: number; candles?: Candle[] | null }) {
   const big = articles
     .filter((a) => relevantTo(a, market) && Math.abs(a.impactScale) >= 3 && ageMin(a, now) <= 60)
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || Math.abs(b.impactScale) - Math.abs(a.impactScale));
@@ -60,6 +62,7 @@ export function BreakingFlash({ articles, market, label, now }: { articles: Scor
   const why = whyHeadlineMatters(top.matchedRules);
   const m = ageMin(top, now);
   const fresh = m <= 15;
+  const reaction = candles ? newsReaction(candles, top.publishedAt, top.impactScale > 0 ? 1 : -1) : null;
   return (
     <div className="space-y-2">
       <a
@@ -84,6 +87,11 @@ export function BreakingFlash({ articles, market, label, now }: { articles: Scor
           <ExternalLink size={12} className="opacity-80" />
         </div>
         {why && <p className="relative text-[12px] leading-snug mt-2 rounded-xl px-2.5 py-1.5" style={{ background: "rgba(255,255,255,.16)" }}>{why.effect}</p>}
+        {reaction && (
+          <p className="relative text-[12.5px] font-bold leading-snug mt-2 rounded-xl px-2.5 py-1.5 bg-white" style={{ color: s.ink }}>
+            Since {reaction.sinceAt}: {reaction.movePts >= 0 ? "+" : "−"}₹{Math.abs(reaction.movePts)} ({reaction.movePct >= 0 ? "+" : "−"}{Math.abs(reaction.movePct)}%). {reaction.text}
+          </p>
+        )}
       </a>
       {big.slice(1, 4).map((a) => {
         const t = strength(a.impactScale);

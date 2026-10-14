@@ -20,7 +20,7 @@ import {
   Newspaper, RefreshCw, Radio, Activity, Server, ChevronDown, ChevronUp,
   ExternalLink, Target,
 } from "lucide-react";
-import { useNewsFeed, useNewsTrade, useMarketStatus, usePullback } from "../api/hooks";
+import { useCandles, useNewsFeed, useNewsTrade, useMarketStatus, usePullback } from "../api/hooks";
 import {
   computeTilt, rankMovers, bucketThemes, summariseSourceHealth, readFreshness, relativeAge,
   type NewsCommodity,
@@ -106,6 +106,9 @@ export function AiNews() {
   // liquidity combined into one weighted score. Reuses the candle, options and
   // depth queries other pages already open rather than adding its own.
   const decision = useNewsTradeAI(symbolKey as NewsTradeSymbol);
+  // 5-minute candles for "how far has price moved since the headline".
+  const c5 = useCandles(symbolKey, "5");
+  const c5Candles = c5.data && "candles" in c5.data ? c5.data.candles : null;
 
   const articles = useMemo(() => feed.data?.articles ?? [], [feed.data]);
   const now = useMemo(() => Date.now(), [feed.dataUpdatedAt]);
@@ -191,7 +194,7 @@ export function AiNews() {
           moves price within seconds, so the newest big story leads the page. */}
       {feed.data?.available && (
         <>
-          <BreakingFlash articles={articles} market={active.news === "CRUDE" ? "CRUDE" : "NG"} label={active.label} now={now} />
+          <BreakingFlash articles={articles} market={active.news === "CRUDE" ? "CRUDE" : "NG"} label={active.label} now={now} candles={c5Candles} />
           <NewsVerdict tilt={active.news === "CRUDE" ? crudeTilt : ngTilt} label={active.label} />
           <ImpactFeed articles={articles} market={active.news === "CRUDE" ? "CRUDE" : "NG"} now={now} />
         </>
