@@ -19,6 +19,9 @@ export interface RawNewsArticle {
   source: string;
   publishedAt: string;
   url: string;
+  /** False when the feed gave no usable publish time: publishedAt is then
+   *  when the app FIRST saw the story, and the page says "first seen". */
+  dateKnown?: boolean;
 }
 
 // Four-tier source-quality ranking (spec: "Never allow a Tier 4 source

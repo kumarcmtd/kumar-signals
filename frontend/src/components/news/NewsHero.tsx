@@ -20,6 +20,8 @@ type Market = "CRUDE" | "NG";
 const relevantTo = (a: ScoredNewsArticle, m: Market) => a.affectedMarket === m || a.affectedMarket === "BOTH";
 const ageMin = (a: ScoredNewsArticle, now: number) => Math.max(0, Math.round((now - Date.parse(a.publishedAt)) / 60_000));
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
+/** "4:52 am", or "first seen 4:52 am" when no feed gave the story a time. */
+const when = (a: ScoredNewsArticle) => `${a.dateKnown === false ? "first seen " : ""}${clock(a.publishedAt)}`;
 const ago = (m: number) => (m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 24 * 60 ? `${Math.floor(m / 60)}h ${m % 60}m ago` : `${Math.floor(m / 1440)}d ago`);
 
 function strength(impact: number) {
@@ -82,7 +84,7 @@ export function BreakingFlash({ articles, market, label, now, candles }: { artic
         <p className="relative text-[18px] leading-snug font-extrabold mt-2">{top.headline}</p>
         <div className="relative flex items-center gap-2 mt-2 text-[12px] font-bold opacity-95 flex-wrap">
           <Clock size={13} />
-          <span>{clock(top.publishedAt)} · {ago(m)}</span>
+          <span>{when(top)} · {ago(m)}</span>
           <span className="opacity-80">· {top.source}</span>
           <ExternalLink size={12} className="opacity-80" />
         </div>
@@ -98,7 +100,7 @@ export function BreakingFlash({ articles, market, label, now, candles }: { artic
         return (
           <a key={`${a.url}-${a.headline}`} href={a.url || undefined} target="_blank" rel="noopener noreferrer" className="flex items-start gap-2 rounded-2xl px-3 py-2.5 bg-white" style={{ borderLeft: `6px solid ${t.ink}`, boxShadow: "0 1px 3px rgba(15,23,42,.08)" }}>
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-black" style={{ color: t.ink }}>{t.word} · {clock(a.publishedAt)} · {ago(ageMin(a, now))}</p>
+              <p className="text-[11px] font-black" style={{ color: t.ink }}>{t.word} · {when(a)} · {ago(ageMin(a, now))}</p>
               <p className="text-[14px] font-bold text-slate-900 leading-snug mt-0.5">{a.headline}</p>
             </div>
           </a>
@@ -154,7 +156,7 @@ export function ImpactFeed({ articles, market, now }: { articles: ScoredNewsArti
             <div className="flex items-center gap-2">
               <span className="text-[11.5px] font-black px-2 py-0.5 rounded-md" style={{ background: t.soft, color: t.ink }}>{t.word}</span>
               <ImpactDots impact={a.impactScale} />
-              <span className="ml-auto text-[11.5px] font-bold text-slate-500 tabular-nums">{clock(a.publishedAt)} · {ago(m)}</span>
+              <span className="ml-auto text-[11.5px] font-bold text-slate-500 tabular-nums">{when(a)} · {ago(m)}</span>
             </div>
             <p className="text-[15px] font-bold text-slate-900 leading-snug mt-1.5">{a.headline}</p>
             <p className="text-[11.5px] text-slate-500 mt-1">{a.source}</p>

@@ -39,7 +39,7 @@ export function flashText(a: ScoredNewsArticle, now: number): { title: string; b
     title: `NEWS FLASH: ${dir} ${market}`,
     body: [
       a.headline,
-      `${at} (${mins} min ago) -- ${a.source}`,
+      `${a.dateKnown === false ? "First seen " : ""}${at} (${mins} min ago) -- ${a.source}`,
       why ? `\n${why.effect}` : "",
       "",
       "Protect any running trade on the other side. Don't chase the first spike --",

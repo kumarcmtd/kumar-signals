@@ -213,15 +213,24 @@ export function parseRssFeed(xml: string, sourceName: string, stripSuffix = fals
       block.match(/<link\b[^>]*>([\s\S]*?)<\/link>/i)?.[1] ??
       block.match(/<link\b[^>]*href="([^"]+)"/i)?.[1] ??
       "";
-    const pubDate = block.match(/<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1] ?? block.match(/<(?:published|updated)\b[^>]*>([\s\S]*?)<\/(?:published|updated)>/i)?.[1] ?? "";
-    const parsedDate = pubDate ? new Date(pubDate) : new Date();
+    const pubDate =
+      block.match(/<pubDate\b[^>]*>([\s\S]*?)<\/pubDate>/i)?.[1] ??
+      block.match(/<(?:published|updated)\b[^>]*>([\s\S]*?)<\/(?:published|updated)>/i)?.[1] ??
+      block.match(/<dc:date\b[^>]*>([\s\S]*?)<\/dc:date>/i)?.[1] ??
+      "";
+    const parsedDate = pubDate ? new Date(pubDate.trim()) : new Date(NaN);
+    // No usable date: never pretend the story is brand new. It is stamped
+    // with the scan time only as a placeholder and flagged, so the build can
+    // replace it with when the story was first seen (or a dated copy's time).
+    const dateKnown = Number.isFinite(parsedDate.getTime());
     const cleanTitle = xmlUnescape(title);
     items.push({
       headline: stripSuffix ? stripPublisherSuffix(cleanTitle) : cleanTitle,
       summary: xmlUnescape(desc).slice(0, 400),
       source: sourceName,
-      publishedAt: Number.isFinite(parsedDate.getTime()) ? parsedDate.toISOString() : new Date().toISOString(),
+      publishedAt: dateKnown ? parsedDate.toISOString() : new Date().toISOString(),
       url: xmlUnescape(link),
+      ...(dateKnown ? {} : { dateKnown: false }),
     });
   }
   return items;
@@ -327,6 +336,55 @@ const RSS_SOURCE_ORDER = new Map(TRUSTED_RSS_FEEDS.map((f, i) => [f.source, i] a
  * free plan's 10, so it never runs in one go. Without `batch` it is a full
  * rebuild (kept for tools and tests).
  */
+/** Headline as one story: case, quotes, punctuation and spacing ignored. */
+export function storyKey(headline: string): string {
+  return headline.toLowerCase().replace(/[\u2018\u2019\u201c\u201d'"`]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+async function readCachedArticles(env: Env): Promise<RawNewsArticle[]> {
+  try {
+    const raw = await env.COMMODITY_KV.get(NEWS_CACHE_KV_KEY);
+    return raw ? ((JSON.parse(raw) as NewsFetchResult).articles ?? []) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * An honest time for every story.
+ *  - Every copy of the same headline (several feeds carry the same story)
+ *    gets the EARLIEST real publish time any dated copy has. All copies are
+ *    kept -- they are what "reported by more than one source" counts.
+ *  - A story no feed dated keeps the time the app first saw it (from the
+ *    previous scan), flagged dateKnown:false, so a re-scan never makes an old
+ *    story look brand new.
+ */
+export function settlePublishTimes(articles: RawNewsArticle[], previous: RawNewsArticle[]): RawNewsArticle[] {
+  const firstSeen = new Map<string, string>();
+  for (const p of previous) {
+    const k = storyKey(p.headline);
+    const cur = firstSeen.get(k);
+    if (!cur || Date.parse(p.publishedAt) < Date.parse(cur)) firstSeen.set(k, p.publishedAt);
+  }
+  const settled = new Map<string, { at: string; known: boolean }>();
+  for (const a of articles) {
+    const k = storyKey(a.headline);
+    const known = a.dateKnown !== false;
+    const cur = settled.get(k);
+    if (!cur || (known && !cur.known) || (known === cur.known && Date.parse(a.publishedAt) < Date.parse(cur.at))) settled.set(k, { at: a.publishedAt, known });
+  }
+  return articles.map((a) => {
+    const k = storyKey(a.headline);
+    const s = settled.get(k)!;
+    if (s.known) {
+      const { dateKnown: _drop, ...rest } = a;
+      return { ...rest, publishedAt: s.at };
+    }
+    const seen = firstSeen.get(k);
+    return { ...a, publishedAt: seen && Date.parse(seen) < Date.parse(s.at) ? seen : s.at, dateKnown: false };
+  });
+}
+
 async function buildEnergyNews(env: Env, batch?: { index: number; count: number }): Promise<NewsFetchResult> {
   let previous: NewsFetchResult | null = null;
   if (batch) {
@@ -382,12 +440,13 @@ async function buildEnergyNews(env: Env, batch?: { index: number; count: number 
   // De-dupe identical URLs (the same wire story often appears verbatim
   // across two of our own RSS feeds) before scoring/clustering.
   const seenUrls = new Set<string>();
-  const deduped = rawArticles.filter((a) => {
+  const byUrl = rawArticles.filter((a) => {
     const key = a.url || a.headline;
     if (seenUrls.has(key)) return false;
     seenUrls.add(key);
     return true;
   });
+  const deduped = settlePublishTimes(byUrl, previous?.articles ?? (await readCachedArticles(env)));
 
   const now = Date.now();
   const scored = scoreArticles(deduped, now).filter((a) => now - new Date(a.publishedAt).getTime() < 48 * 60 * 60 * 1000);

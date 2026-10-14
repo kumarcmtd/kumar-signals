@@ -79,7 +79,7 @@ function MarketRow({ sym, keyName, label, articles, now }: { sym: Sym; keyName: 
       {story ? (
         <>
           <p className="text-[11px] font-black mt-1.5 flex items-center gap-1" style={{ color: story.impactScale > 0 ? "#047857" : "#BE123C" }}>
-            {s} <Clock size={11} className="ml-1" /> {clock(story.publishedAt)} · {ago(ageMin(story, now))}
+            {s} <Clock size={11} className="ml-1" /> {story.dateKnown === false ? "first seen " : ""}{clock(story.publishedAt)} · {ago(ageMin(story, now))}
           </p>
           <p className="text-[14px] font-bold text-slate-900 leading-snug mt-0.5">{story.headline}</p>
           {reaction ? <Reaction r={reaction} /> : <p className="text-[11px] text-slate-500 mt-1">Price reaction shows when MCX is open and candles are in.</p>}
