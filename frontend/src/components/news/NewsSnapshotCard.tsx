@@ -11,6 +11,36 @@ import { useCandles, useNewsFeed } from "../../api/hooks";
 import { computeTilt } from "../../utils/claudeNewsAnalytics";
 import { newsReaction, type NewsReaction, type RoomRead } from "../../utils/newsReaction";
 import { NewsScanBar } from "./NewsScanBar";
+import { useNewsTradeAI } from "../../hooks/useNewsTradeAI";
+import type { NewsTradeResult } from "../../utils/newsTradeEngine";
+
+const MOVE_LOOK: Record<NewsTradeResult["expectedMove"], { label: string; ink: string; bg: string }> = {
+  very_strong_bullish: { label: "Very Strong Bullish", ink: "#047857", bg: "#D1FAE5" },
+  bullish: { label: "Bullish", ink: "#047857", bg: "#ECFDF5" },
+  neutral: { label: "Neutral", ink: "#92400E", bg: "#FEF3C7" },
+  bearish: { label: "Bearish", ink: "#BE123C", bg: "#FFF1F2" },
+  very_strong_bearish: { label: "Very Strong Bearish", ink: "#BE123C", bg: "#FFE4E6" },
+};
+
+/** The Ai-News "Final Decision" net score (news + technical + momentum + options + liquidity), same engine. */
+function FinalDecision({ sym }: { sym: Sym }) {
+  const { result } = useNewsTradeAI(sym);
+  const look = MOVE_LOOK[result.expectedMove];
+  const score = Math.round((result.finalNet + 100) / 2);
+  const newsOnly = result.weightsUsed.technical === 0 && result.weightsUsed.momentum === 0;
+  return (
+    <div className="rounded-xl px-2.5 py-1.5 mt-1.5 flex items-center gap-2" style={{ background: look.bg, color: look.ink }}>
+      <span className="text-[22px] font-black leading-none tabular-nums">{score}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[12px] font-black leading-tight">Final Decision · {look.label}</p>
+        <p className="text-[10.5px] font-bold leading-snug opacity-90">
+          Net {result.finalNet > 0 ? "+" : ""}{result.finalNet}
+          {newsOnly ? " · news only — wait for technical confirmation" : ` · news ${result.weightsUsed.news}% of the weight`}
+        </p>
+      </div>
+    </div>
+  );
+}
 import type { ScoredNewsArticle } from "../../utils/newsScoring";
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
@@ -76,6 +106,7 @@ function MarketRow({ sym, keyName, label, articles, now }: { sym: Sym; keyName: 
         </span>
         <span className="ml-auto text-[11px] font-bold text-slate-500">▲{tilt.bullishCount} ▼{tilt.bearishCount}</span>
       </div>
+      <FinalDecision sym={sym} />
       {story ? (
         <>
           <p className="text-[11px] font-black mt-1.5 flex items-center gap-1" style={{ color: story.impactScale > 0 ? "#047857" : "#BE123C" }}>
