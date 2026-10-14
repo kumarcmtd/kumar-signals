@@ -181,7 +181,12 @@ export async function getCandlesForTF(env: Env, token: string, fut: FutureInfo, 
   }
   const tfMinutes = parseInt(tf, 10);
   const oneMinToday = await getIntradayCandles(token, fut.instrument_key);
-  if (!oneMinToday || oneMinToday.length < 20) return { error: "Not enough intraday data yet — market may be closed" };
+  // Today must have started (at least one minute traded) -- otherwise the
+  // market is shut and nothing here should look live. But it no longer has
+  // to wait 20 minutes: the prior days below give every timeframe its
+  // history, so the first minutes after 9:00 are not blank (they used to be,
+  // on every page, until 9:20).
+  if (!oneMinToday || oneMinToday.length === 0) return { error: "Not enough intraday data yet — market may be closed" };
 
   // Higher timeframes (30m/60m/240m especially) can't accumulate 30 bars
   // from a single session alone -- 30 bars of 4-hour candles would need 5

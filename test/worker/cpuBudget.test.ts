@@ -153,6 +153,32 @@ test("pre-bucketed history produces exactly the bars a full re-bucket would", as
   }
 });
 
+test("charts work from the first minutes after 9:00 (prior days fill the history)", async () => {
+  vi.useFakeTimers({ now: new Date("2026-09-23T09:14:00+05:30"), toFake: ["Date"] });
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const day = (d: number, toMin: number, start: number) => {
+    const rows: unknown[][] = [];
+    let p = start;
+    for (let m = 540; m < toMin; m++) { const o = p; p += Math.sin(m + d) * 3; rows.push([`2026-09-${pad(d)}T${pad(Math.floor(m / 60))}:${pad(m % 60)}:00+05:30`, o, Math.max(o, p) + 1, Math.min(o, p) - 1, p, 10, 5000 + m]); }
+    return rows;
+  };
+  const prior = [...day(17, 1410, 9000), ...day(18, 1410, 9050), ...day(21, 1410, 9100), ...day(22, 1410, 9080)];
+  let today = day(23, 554, 9120); // 9:00-9:13: fourteen minutes
+  globalThis.fetch = (async (u: RequestInfo | URL) => {
+    const rows = String(u).includes("/intraday/") ? today : prior;
+    return new Response(JSON.stringify({ status: "success", data: { candles: [...rows].reverse() } }));
+  }) as typeof fetch;
+  const { getCandlesForTF } = await import("../../src/signals");
+  const fut = { instrument_key: `MCX_FO|EQ-${Math.random()}`, expiry: "2026-10-19", trading_symbol: "X" };
+  const got = await getCandlesForTF(envWith(makeKv()), "tok", fut, "15");
+  expect("error" in got).toBe(false);
+  expect((got as unknown[]).length).toBeGreaterThan(15);
+  // No minute traded today (holiday / before the open): still refused.
+  today = [];
+  const fut2 = { ...fut, instrument_key: `MCX_FO|EQ-${Math.random()}` };
+  expect("error" in (await getCandlesForTF(envWith(makeKv()), "tok", fut2, "15"))).toBe(true);
+});
+
 // ---------------------------------------------------------------------------
 // The split cron
 // ---------------------------------------------------------------------------
