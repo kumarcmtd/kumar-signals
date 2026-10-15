@@ -9,6 +9,7 @@ import { useTradeVerdict } from "../../hooks/useTradeVerdict";
 import { trustGrade, type TrustGrade } from "../../utils/trustGrade";
 import { mcxSessionAt } from "../../utils/mcxSession";
 import type { TradeVerdict } from "../../utils/tradeVerdict";
+import { ChecklistPanel, useChecklist } from "./ChecklistPanel";
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
 const NAME: Record<Sym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
@@ -28,22 +29,6 @@ function Ring({ score, outOf, color }: { score: number; outOf: number; color: st
         <span className="text-[20px] font-black leading-none">{score}</span>
         <span className="text-[9px] font-bold opacity-80">of {outOf}</span>
       </div>
-    </div>
-  );
-}
-
-function Points({ v, g }: { v: TradeVerdict; g: TrustGrade }) {
-  const items = [...v.checks.map((c) => ({ key: `c-${c.key}`, label: c.label, ok: c.state !== "fail", text: c.text })), ...g.rules.map((r) => ({ key: `r-${r.key}`, label: r.label, ok: r.ok, text: r.text }))];
-  return (
-    <div className="mt-3 grid grid-cols-1 gap-1">
-      {items.map((p) => (
-        <div key={p.key} className="flex items-start gap-2 rounded-lg px-2 py-1 text-[11px] leading-snug" style={{ background: p.ok ? "rgba(255,255,255,.14)" : "rgba(0,0,0,.18)" }}>
-          <span className={`mt-[1px] shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black ${p.ok ? "bg-white text-emerald-600" : "bg-white/25 text-white"}`}>{p.ok ? "✓" : "✗"}</span>
-          <span className="text-white/95">
-            <b>{p.label}</b> <span className="text-white/75">· {p.text}</span>
-          </span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -69,7 +54,12 @@ function Track({ v, live }: { v: TradeVerdict; live: number | null }) {
 export function TrustMarketCard({ symbol }: { symbol: Sym }) {
   const { verdict: v, pick, livePrice, optionDays, error, loading } = useTradeVerdict(symbol);
   const s = mcxSessionAt();
-  const g = trustGrade(v, { minutesToClose: s.isOpen ? s.closeMin - s.minutes : null, optionDaysToExpiry: optionDays ?? null });
+  const g0 = trustGrade(v, { minutesToClose: s.isOpen ? s.closeMin - s.minutes : null, optionDaysToExpiry: optionDays ?? null });
+  const call = useChecklist(symbol, v, g0, pick, livePrice);
+  // 💎 only when the Trade Card, the trust rules AND the full checklist agree.
+  const items = call.sections.flatMap((x) => x.items).filter((i) => i.state === "pass" || i.state === "fail");
+  const g: TrustGrade = { ...g0, trusted: call.trade, score: items.filter((i) => i.state === "pass").length, outOf: items.length || g0.outOf };
+  const plan = call.mc?.plan ?? null;
   const ce = v.side === "CE";
   const opt = pick && v.side && pick.side === v.side ? pick : null;
 
@@ -128,20 +118,27 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
             {opt ? `${opt.strike} ${opt.side}` : `ATM ${v.side}`}
             {opt?.ltp != null && <span className="text-white/90"> @ ~₹{opt.ltp.toFixed(2)}</span>}
           </p>
-          <p className="text-[12px] font-bold text-white/90 mt-0.5">
-            Futures stop {rs(v.stop)} · target {rs(v.t1)}
-            {v.rr !== null && ` · ${v.rr}× reward`}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] font-bold text-white/95 mt-1">
+            <span>Entry {rs(plan?.entry ?? livePrice)}</span>
+            <span>Stop {rs(plan?.stop ?? v.stop)}{call.premStop !== null && <span className="text-white/75"> (~₹{call.premStop.toFixed(1)})</span>}</span>
+            <span>Target 1 {rs(plan?.t1 ?? v.t1)}{call.premT1 !== null && <span className="text-white/75"> (~₹{call.premT1.toFixed(1)})</span>}</span>
+            <span>Target 2 {rs(plan?.t2 ?? null)}</span>
+          </div>
+          <p className="text-[12.5px] font-black mt-1">
+            {call.lots !== null ? `Lots: ${call.lots} · ` : ""}
+            {plan ? `R:R 1:${plan.rr}` : ""}
+            {call.riskRs !== null ? ` · risk ≈ ₹${Math.round(call.riskRs)}/lot` : ""}
           </p>
           <p className="text-[11px] text-white/80 mt-1 leading-snug">{v.reason}</p>
         </div>
       ) : (
         <p className="relative text-[12.5px] font-semibold text-white/90 mt-2 leading-snug">
-          {g.isTrade ? `Trade Card says ${v.headline}, but ${g.rules.filter((r) => !r.ok).map((r) => r.label.toLowerCase()).join(", ")} ${g.rules.filter((r) => !r.ok).length > 1 ? "are" : "is"} missing.` : `${v.headline}. ${v.reason}`}
+          {g.isTrade ? `Trade Card says ${v.headline}, but the full checklist is not complete.` : `${v.headline}. ${v.reason}`}
         </p>
       )}
 
       {(g.trusted || g.isTrade) && <Track v={v} live={livePrice} />}
-      <Points v={v} g={g} />
+      <ChecklistPanel call={call} />
       <p className="relative text-[10px] font-bold text-white/70 mt-2">
         {v.basedOn ? `Based on the ${v.basedOn} candle` : ""}
         {v.nextAt ? ` · next update ${v.nextAt}` : ""}

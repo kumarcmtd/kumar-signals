@@ -16,6 +16,7 @@ import { tradeVerdict } from "../frontend/src/utils/tradeVerdict";
 import { newsPulseFor } from "../frontend/src/utils/newsPulse";
 import { advanceCall, maybeOpen, type CardCall } from "../frontend/src/utils/tradeCardLog";
 import { trustGrade } from "../frontend/src/utils/trustGrade";
+import { marketChecklist } from "../frontend/src/utils/checklist";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
@@ -159,7 +160,11 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
             const opened = next[next.length - 1];
             const opt = await optionHint(env, token, symbol as Symbol, opened);
             // The stricter Ai-Trust grade, fixed at the moment of the call.
-            const trust = trustGrade(v, { minutesToClose: session.closeMin - session.minutes, optionDaysToExpiry: opt?.daysToExpiry ?? null }).trusted;
+            // ...plus the market part of the trader's full checklist (RSI, MACD,
+            // 1H EMA stack, pivots, EIA window, 1:2 on a 1.5x ATR stop).
+            const trust =
+              trustGrade(v, { minutesToClose: session.closeMin - session.minutes, optionDaysToExpiry: opt?.daysToExpiry ?? null }).trusted &&
+              marketChecklist({ symbol: sym, v, c15, c60, now }).ok;
             next = [...next.slice(0, -1), { ...opened, trust }];
             say(`new ${v.side} call logged${trust ? " (AI-TRUST grade)" : ""}.`);
             pushes.push({ ...cardTradeText(next[next.length - 1], opt), priority: "urgent" });

@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Gem, RefreshCw } from "lucide-react";
 import { TrustMarketCard } from "../components/trust/TrustMarketCard";
 import { TrustRecord } from "../components/trust/TrustRecord";
+import { TradeCounter } from "../components/trust/ChecklistPanel";
 
 const RULES = [
   ["🧭", "Trend confirmed on 15m · 1h · 4h"],
@@ -23,6 +24,14 @@ const RULES = [
   ["🏦", "Fresh OI money confirmed"],
   ["⚖️", "2× reward or more"],
   ["⏱️", "Not near close, not expiry day"],
+  ["📈", "1H: price · EMA20 · EMA50 stacked"],
+  ["🌡️", "RSI 40–70 rising (no chasing 70/30)"],
+  ["〽️", "MACD cross + no divergence"],
+  ["🧱", "Pivot / R1 / prev-day high not in the way"],
+  ["🛢️", "No EIA within 2h · API Tuesday care"],
+  ["🛡️", "1.5× ATR stop · 1:2 or better"],
+  ["✋", "Max 3 trades · stop at 3% day loss"],
+  ["🧮", "Lots sized to 2% risk"],
 ];
 
 export function AiTrust() {
@@ -55,7 +64,7 @@ export function AiTrust() {
             >
               Ai-Trust
             </h1>
-            <p className="text-[12px] font-semibold text-white/90 mt-1">Only the strongest calls. 11 checks must all agree.</p>
+            <p className="text-[12px] font-semibold text-white/90 mt-1">Only the strongest calls. Your full checklist must agree.</p>
           </div>
           <button onClick={refresh} className="shrink-0 rounded-xl bg-white/20 px-2.5 py-2 text-[11px] font-black flex items-center gap-1">
             <RefreshCw size={12} className={spin ? "animate-spin" : ""} /> Refresh
@@ -66,22 +75,24 @@ export function AiTrust() {
         </p>
       </section>
 
+      <TradeCounter />
+
       <TrustMarketCard symbol="CRUDEOIL" />
       <TrustMarketCard symbol="NATURALGAS" />
 
       <TrustRecord />
 
       <section className="rounded-3xl bg-white p-4 shadow-lg border border-violet-100">
-        <p className="text-[13px] font-black text-slate-900">The 11 trust checks</p>
+        <p className="text-[13px] font-black text-slate-900">Everything that must agree</p>
         <div className="grid grid-cols-2 gap-1.5 mt-2">
           {RULES.map(([icon, text], i) => (
-            <div key={text} className="rounded-xl px-2 py-1.5 text-[11px] font-bold flex items-center gap-1.5" style={{ background: i < 6 ? "#ECFDF5" : "#F5F3FF", color: i < 6 ? "#065F46" : "#5B21B6" }}>
+            <div key={text} className="rounded-xl px-2 py-1.5 text-[11px] font-bold flex items-center gap-1.5" style={{ background: i < 6 ? "#ECFDF5" : i < 11 ? "#F5F3FF" : "#FFF7ED", color: i < 6 ? "#065F46" : i < 11 ? "#5B21B6" : "#9A3412" }}>
               <span>{icon}</span> {text}
             </div>
           ))}
         </div>
         <p className="text-[10px] text-slate-500 mt-2 leading-snug">
-          Green = the Trade Card's six checks. Violet = the five extra trust rules. A 💎 call means the evidence lines up strongly — it is still not a guarantee. Keep the stop, and size so one loss stays small (max 2% of capital).
+          Green = the Trade Card's six checks. Violet = the five trust rules. Orange = your own checklist (tap "Full checklist" on a card to see every item ticked live). Tap "Took one" each time you enter a trade — the app can't see your broker orders. A 💎 call means the evidence lines up strongly — it is still not a guarantee. Keep the stop, and size so one loss stays small (max 2% of capital).
         </p>
       </section>
     </div>

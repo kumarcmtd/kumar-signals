@@ -141,6 +141,10 @@ interface AppState {
   removeGuardPosition: (id: string) => void;
   guardDay: { date: string; realised: number };
   setGuardRealised: (date: string, realised: number) => void;
+  // Ai-Trust checklist: trades the trader says they took today (max 3 rule).
+  // The app cannot see broker orders, so this is a tap counter.
+  tradesToday: { date: string; count: number };
+  bumpTradesToday: (date: string, delta: number) => void;
 
   tradeLogs: Record<string, TradeLogEntry[]>;
   setTradeLog: (key: string, entries: TradeLogEntry[]) => void;
@@ -208,6 +212,9 @@ export const useAppStore = create<AppState>()(
       removeGuardPosition: (id) => set((s) => ({ guardPositions: s.guardPositions.filter((p) => p.id !== id) })),
       guardDay: { date: "", realised: 0 },
       setGuardRealised: (date, realised) => set({ guardDay: { date, realised } }),
+      tradesToday: { date: "", count: 0 },
+      bumpTradesToday: (date, delta) =>
+        set((s) => ({ tradesToday: { date, count: Math.max(0, (s.tradesToday.date === date ? s.tradesToday.count : 0) + delta) } })),
 
       tradeLogs: {},
       setTradeLog: (key, entries) => set((s) => ({ tradeLogs: { ...s.tradeLogs, [key]: entries } })),
