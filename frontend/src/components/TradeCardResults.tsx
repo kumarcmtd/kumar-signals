@@ -36,7 +36,7 @@ function Market({ sym, log }: { sym: Sym; log: CardCall[] }) {
         </p>
       </div>
       {s.closed === 0 ? (
-        <p className="text-[11.5px] text-slate-500 mt-1">No finished Trade Card call yet. It only says TRADE when all 5 checks pass, so expect few calls.</p>
+        <p className="text-[11.5px] text-slate-500 mt-1">No finished Trade Card call yet. It only says TRADE when all 6 checks pass, so expect few calls.</p>
       ) : (
         <div className="grid grid-cols-3 gap-1.5 mt-2 text-center">
           <Stat big={s.winRate === null ? "—" : `${s.winRate}%`} small={`win rate · ${s.wins}W ${s.losses}L`} tone={s.winRate !== null && s.winRate >= 50 ? "good" : "bad"} />

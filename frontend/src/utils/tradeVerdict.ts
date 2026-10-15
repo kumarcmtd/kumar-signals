@@ -3,14 +3,15 @@
 // Separate engines read different time frames, so they can disagree (Ai20-20
 // reads 5-minute moves; AI Verify Pro reads 15m/1h/4h; news reads headlines).
 // This card is the referee. It says exactly one of:
-//   TRADE CE / TRADE PE  -- all five checks pass (full green / full red)
+//   TRADE CE / TRADE PE  -- all six checks pass (full green / full red)
 //   WAIT CE / WAIT PE    -- right side, wrong moment: wait for price to come
 //                           back to the buyer (seller) zone and bounce
 //   AVOID                -- sideways, conflicting, or news against the chart
-// The five checks: 1 trend (15m/1h/4h confirmed), 2 five-minute candles
+// The six checks: 1 trend (15m/1h/4h confirmed), 2 five-minute candles
 // steady (not choppy, not against), 3 the last candle strong with volume,
 // 4 news not against, 5 entry location (near a zone, not stretched, room to
-// the next opposite zone at least 1.5x the risk).
+// the next opposite zone at least 1.5x the risk), 6 open interest: fresh
+// buyers for CE (long build-up), fresh sellers for PE (short build-up).
 //
 // Built ONLY from finished candles and the news reading, so it changes at
 // most once per 5-minute candle -- the live tick does not flip it. The one
@@ -24,12 +25,13 @@ import { sessionBucketStart } from "./candleResample";
 import { trendPulse, type TrendPulse } from "./trendPulse";
 import { newsVsSide, type NewsPulse } from "./newsPulse";
 import { findZones, type Zone } from "./zones";
+import { classifyBuildup, HOUR_BANDS, pctChange, type BuildupKind } from "./oiBuildup";
 
 export type TradeAction = "TRADE_CE" | "TRADE_PE" | "WAIT_CE" | "WAIT_PE" | "AVOID" | "CLOSED" | "NO_DATA";
 export type CheckState = "pass" | "fail" | "na";
 
 export interface TradeCheck {
-  key: "trend" | "candles" | "strength" | "news" | "zone";
+  key: "trend" | "candles" | "strength" | "news" | "zone" | "oi";
   label: string;
   state: CheckState;
   text: string;
@@ -89,6 +91,31 @@ const NEED: Record<TradeCheck["key"], (up: boolean) => string> = {
   strength: (up) => `a strong ${up ? "green" : "red"} candle with volume`,
   news: () => "news to stop going against it",
   zone: () => "a better entry price",
+  oi: (up) => `fresh ${up ? "buying (long build-up)" : "selling (short build-up)"} in open interest`,
+};
+
+/**
+ * Price + open interest over the last hour of finished 15-minute futures
+ * candles. Zero OI is Upstox's "not reported", never a real reading.
+ */
+export function readOi(closed15: Candle[]): { kind: BuildupKind; priceChangePct: number | null; oiChangePct: number | null } {
+  const win = closed15.slice(-5); // 4 changes = 1 hour
+  const withOi = win.filter((c) => (c.oi ?? 0) > 0);
+  if (withOi.length < 2) return { kind: "no-data", priceChangePct: null, oiChangePct: null };
+  const first = withOi[0];
+  const last = withOi[withOi.length - 1];
+  const r = classifyBuildup(pctChange(first.close, last.close), pctChange(first.oi, last.oi), HOUR_BANDS);
+  const round = (n: number | null) => (n === null ? null : Math.round(n * 100) / 100);
+  return { kind: r.kind, priceChangePct: round(r.priceChangePct), oiChangePct: round(r.oiChangePct) };
+}
+
+const OI_WORDS: Record<BuildupKind, string> = {
+  "long-buildup": "Long build-up (price ↑, OI ↑) — new buyers",
+  "short-buildup": "Short build-up (price ↓, OI ↑) — new sellers",
+  "short-covering": "Short covering (price ↑, OI ↓) — sellers exiting, rally can fade",
+  "long-unwinding": "Long unwinding (price ↓, OI ↓) — buyers exiting, fall can fade",
+  "no-clear-signal": "No clear OI move in the last hour",
+  "no-data": "OI not reported — check skipped",
 };
 
 export interface VerdictInput {
@@ -196,7 +223,24 @@ export function tradeVerdict({ result, c5, c15, news, now, marketOpen }: Verdict
             : `${touchedZone ? `Bounced from the ${up ? "buyer" : "seller"} zone · ` : ""}room to ${rs(t1)} (${rr}× the risk)`,
   };
 
-  const checks = [trend, candles, strength, newsCheck, zone];
+  // 6. Open interest -- is fresh money behind the side? CE wants new buyers
+  // (long build-up), PE new sellers (short build-up). A move made only of the
+  // other side exiting (short covering / long unwinding) often fades. On a
+  // bounce off a zone the last hour still holds the pullback, so there it is
+  // enough that no fresh positions are being built AGAINST the side.
+  const oiRead = readOi(closed15);
+  const fresh = up ? "long-buildup" : "short-buildup";
+  const pullbackOk = up ? ["long-unwinding", "no-clear-signal"] : ["short-covering", "no-clear-signal"];
+  const oiCheck: TradeCheck = {
+    key: "oi",
+    label: "Open interest (1h)",
+    state: oiRead.kind === "no-data" ? "na" : oiRead.kind === fresh || (touchedZone && pullbackOk.includes(oiRead.kind)) ? "pass" : "fail",
+    text:
+      OI_WORDS[oiRead.kind] +
+      (oiRead.oiChangePct !== null && oiRead.priceChangePct !== null ? ` · price ${oiRead.priceChangePct > 0 ? "+" : ""}${oiRead.priceChangePct}%, OI ${oiRead.oiChangePct > 0 ? "+" : ""}${oiRead.oiChangePct}%` : ""),
+  };
+
+  const checks = [trend, candles, strength, newsCheck, zone, oiCheck];
   const passed = checks.filter((c) => c.state !== "fail").length;
   const plan = { checks, passed, stop: side ? stop : null, t1: side ? r2(t1) : null, rr: side ? rr : null, pulse };
   const ownBand = own ? { low: own.low, high: own.high } : pulse.stretched ? { low: r2(pulse.stretched.pullbackTo - 0.25 * A), high: r2(pulse.stretched.pullbackTo + 0.25 * A) } : null;
@@ -218,13 +262,13 @@ export function tradeVerdict({ result, c5, c15, news, now, marketOpen }: Verdict
       side,
       entryZone: null,
       headline: `TRADE ${side} NOW`,
-      reason: `All 5 checks pass${touchedZone ? ` — bounced from the ${up ? "buyer" : "seller"} zone` : ""}. Exit if a 5-min candle closes beyond ${rs(stop)}.`,
+      reason: `All ${checks.length} checks pass${touchedZone ? ` — bounced from the ${up ? "buyer" : "seller"} zone` : ""}. Exit if a 5-min candle closes beyond ${rs(stop)}.`,
     };
   }
   // A bounce from the zone can come while the 30-minute read still shows the
   // pullback -- that is the entry the user is waiting for, so allow it when
   // every other check passes.
-  const bounce = confirmed && touchedZone && strengthOk && newsCheck.state !== "fail" && locOk;
+  const bounce = confirmed && touchedZone && strengthOk && newsCheck.state !== "fail" && locOk && oiCheck.state !== "fail";
   if (bounce) {
     return { ...base, ...plan, action: up ? "TRADE_CE" : "TRADE_PE", side, entryZone: null, headline: `TRADE ${side} NOW`, reason: `Pullback to the ${up ? "buyer" : "seller"} zone and a strong ${up ? "green" : "red"} candle off it. Exit if a 5-min candle closes beyond ${rs(stop)}.` };
   }

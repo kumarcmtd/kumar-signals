@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { findZones } from "../utils/zones";
-import { readCandle, tradeVerdict, type TradeVerdict } from "../utils/tradeVerdict";
+import { readCandle, readOi, tradeVerdict, type TradeVerdict } from "../utils/tradeVerdict";
 import { holdVerdict } from "../hooks/useTradeVerdict";
 import type { NewsPulse } from "../utils/newsPulse";
 import type { Candle } from "../types";
@@ -46,13 +46,40 @@ test("readCandle: body, close near the high, volume vs average", () => {
   expect(r).toMatchObject({ dir: "up", strong: true, volumeRatio: 2 });
 });
 
-test("all five checks pass on a steady up run with a strong, high-volume candle -> TRADE CE", () => {
-  const c5 = bars("2026-10-13", 5, 36, (i) => (i < 30 ? flat(i) : 0.2), close(c15Trend), (i) => (i < 35 ? 1000 : 2000));
-  const v = tradeVerdict({ result: BUY_CE, c5, c15: c15Trend, news: news(40), now: after5(36), marketOpen: true });
+// The same 15-minute history, but the last hour rising, with open interest.
+const c15Rising = (oi: (i: number) => number) =>
+  bars("2026-10-12", 15, 60, (i) => (i < 20 ? flat(i) : i < 25 ? -1 : i < 31 ? 1.5 : i < 41 ? flat(i) : i < 46 ? 1.2 : i < 51 ? -1.5 : i < 56 ? flat(i) : 0.3), 100).map((c, i) => ({ ...c, oi: oi(i) }));
+const upRun = (c15: Candle[]) => bars("2026-10-13", 5, 36, (i) => (i < 30 ? flat(i) : 0.2), close(c15), (i) => (i < 35 ? 1000 : 2000));
+
+test("readOi: price + OI over the last hour; zero OI is 'not reported'", () => {
+  expect(readOi(c15Rising((i) => 10000 + i * 100)).kind).toBe("long-buildup");
+  expect(readOi(c15Rising((i) => 20000 - i * 100)).kind).toBe("short-covering");
+  expect(readOi(c15Rising(() => 0)).kind).toBe("no-data");
+});
+
+test("all six checks pass on a steady up run, strong high-volume candle and long build-up -> TRADE CE", () => {
+  const c15 = c15Rising((i) => 10000 + i * 100);
+  const c5 = upRun(c15);
+  const v = tradeVerdict({ result: BUY_CE, c5, c15, news: news(40), now: after5(36), marketOpen: true });
   expect(v.action).toBe("TRADE_CE");
-  expect(v.passed).toBe(5);
+  expect(v.checks).toHaveLength(6);
+  expect(v.passed).toBe(6);
   expect(v.stop!).toBeLessThan(close(c5));
   expect(v.t1!).toBeGreaterThan(109);
+});
+
+test("same run but the rise is only short covering (OI falling) -> not a TRADE", () => {
+  const c15 = c15Rising((i) => 20000 - i * 100);
+  const v = tradeVerdict({ result: BUY_CE, c5: upRun(c15), c15, news: news(40), now: after5(36), marketOpen: true });
+  expect(v.action).toBe("WAIT_CE");
+  expect(v.checks.find((c) => c.key === "oi")!.state).toBe("fail");
+  expect(v.reason).toMatch(/long build-up/);
+});
+
+test("no OI reported -> the OI check is skipped, not failed", () => {
+  const v = tradeVerdict({ result: BUY_CE, c5: upRun(c15Trend), c15: c15Trend, news: news(40), now: after5(36), marketOpen: true });
+  expect(v.checks.find((c) => c.key === "oi")!.state).toBe("na");
+  expect(v.action).toBe("TRADE_CE");
 });
 
 test("trend up but the 5-min candles are falling -> WAIT for the pullback, not TRADE", () => {

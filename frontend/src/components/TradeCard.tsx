@@ -1,7 +1,7 @@
 // THE TRADE CARD -- one glance, one answer, for Crude Oil and Natural Gas.
 //
-//   full GREEN  TRADE CE NOW   all 5 checks pass
-//   full RED    TRADE PE NOW   all 5 checks pass
+//   full GREEN  TRADE CE NOW   all 6 checks pass
+//   full RED    TRADE PE NOW   all 6 checks pass
 //   light tint  WAIT           right side, wrong moment -- the buyer/seller
 //                              zone to wait for is shown in big numbers
 //   grey        AVOID          sideways, conflicting, or news vs chart
@@ -90,7 +90,7 @@ function Row({ symbol }: { symbol: Sym }) {
           <p className={`font-black leading-tight ${trade ? "text-[24px]" : "text-[19px]"}`}>{v.headline}</p>
         </div>
         <div className="text-center shrink-0 rounded-xl px-2 py-1" style={{ background: L.sub }}>
-          <p className="text-[18px] font-black leading-none">{v.passed}/5</p>
+          <p className="text-[18px] font-black leading-none">{v.passed}/{v.checks.length || 6}</p>
           <p className="text-[8px] font-bold uppercase tracking-wide opacity-85">checks</p>
         </div>
       </div>
@@ -172,7 +172,7 @@ export function TradeCard() {
       <Row symbol="CRUDEOIL" />
       <Row symbol="NATURALGAS" />
       <p className="text-[9.5px] text-slate-500 leading-snug px-1">
-        Full green / red only when all 5 pass: trend (15m·1h·4h), steady 5-min candles, a strong candle with volume, news not against, and a good entry spot with room. Buyer/seller zones are where price turned hard before (15-min candles, last 2 days). Changes only when a 5-min candle closes; it says EXIT at once if the stop breaks. Not a guarantee —{" "}
+        Full green / red only when all 6 pass: trend (15m·1h·4h), steady 5-min candles, a strong candle with volume, news not against, a good entry spot with room, and open interest showing fresh buyers (CE) or sellers (PE). Buyer/seller zones are where price turned hard before (15-min candles, last 2 days). Changes only when a 5-min candle closes; it says EXIT at once if the stop breaks. Not a guarantee —{" "}
         <Link to="/ai-verify-pro" className="underline">
           full reasons
         </Link>

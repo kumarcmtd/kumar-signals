@@ -342,7 +342,7 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         liveHeadline: live?.headline ?? null,
         pulseTitle: pulse?.title ?? null,
         newsText: news ? `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${news.top ? ` -- ${news.top.headline}` : ""}` : null,
-        cardText: `${card.headline}: all 5 checks pass. Futures stop ${card.stop ?? "-"}, target ${card.t1 ?? "-"}.`,
+        cardText: `${card.headline}: all ${card.checks.length} checks pass. Futures stop ${card.stop ?? "-"}, target ${card.t1 ?? "-"}.`,
       });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);
