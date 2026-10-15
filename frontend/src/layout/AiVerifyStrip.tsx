@@ -1,4 +1,4 @@
-// The AI Verify Pro quick-look card on the first five bottom-bar tabs.
+// The Trade Card (one answer per market) on the first five bottom-bar tabs.
 //
 // Rendered once here in the shell, like PullbackStrip, so the pages
 // themselves stay untouched. Ai20-20 already shows the card inside its own
@@ -7,7 +7,7 @@
 
 import { useLocation } from "react-router-dom";
 import { LIVE_PAGE_PATHS } from "../config/livePages";
-import { AiVerifyQuickCard } from "../components/AiVerifyQuickCard";
+import { TradeCard } from "../components/TradeCard";
 
 const SHOWN_ON = new Set<string>(LIVE_PAGE_PATHS.slice(0, 5).filter((p) => p !== "/ai-20-20"));
 
@@ -17,7 +17,7 @@ export function AiVerifyStrip() {
   if (!SHOWN_ON.has(clean)) return null;
   return (
     <div className="mb-4">
-      <AiVerifyQuickCard />
+      <TradeCard />
     </div>
   );
 }

@@ -27,7 +27,8 @@ import { CanIBuyNowButton } from "../components/CanIBuyNowButton";
 import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
-import { AiVerifyQuickCard } from "../components/AiVerifyQuickCard";
+import { TradeCard } from "../components/TradeCard";
+import { useTradeVerdict } from "../hooks/useTradeVerdict";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
 import type { OptionsAnalytics, Candle } from "../types";
@@ -206,6 +207,11 @@ function TwentyCandidateCard({
   const rebound = inBetween ? checkReboundStrength(candles, direction) : null;
   const volumeSupport = openTrade ? checkVolumeSupport(candles, direction) : null;
   const potential = latest && heroNextTarget !== null ? calculatePotentialLeft(latest.entry, latest.stop, heroNextTarget, liveLtp ?? latest.entry) : null;
+  // A fresh Ai20-20 entry needs the Trade Card to say TRADE on the same side.
+  // On its own this fast 5-minute scan fired PE calls into a bullish trend.
+  const master = useTradeVerdict(symbolKey).verdict;
+  const masterOk = master.action === `TRADE_${candidate.analysis.optSide}`;
+  const newEntry = scanState === "qualifying" && masterOk;
   const tradeLight = heroEntryTiming && heroLegFloor !== null && heroNextTarget !== null && latest ? computeTradeLight(heroEntryTiming, rebound, heroLegFloor, heroNextTarget, effectiveStopFor(latest)) : null;
 
   // "Can I Buy Now?" inputs. Gathered by the shared hook all five pages use,
@@ -307,7 +313,18 @@ function TwentyCandidateCard({
         </div>
       )}
 
-      {tradeLight && (
+      {scanState === "qualifying" && !masterOk && (
+        <div className="px-4 pt-4">
+          <div className="rounded-xl px-3 py-2.5 bg-slate-100 border border-slate-300">
+            <p className="text-[11.5px] font-black text-slate-800">Trade Card says: {master.headline}</p>
+            <p className="text-[10.5px] text-slate-600 leading-snug mt-0.5">
+              This {candidate.analysis.optSide} is a fast 5-minute signal only. No new entry until the Trade Card turns {candidate.analysis.optSide === "CE" ? "full green" : "full red"}.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {tradeLight && newEntry && (
         <div className="px-4 pt-4">
           <TradeLightSignal verdict={tradeLight} />
         </div>
@@ -328,7 +345,7 @@ function TwentyCandidateCard({
         </div>
       )}
 
-      {buyInput && scanState === "qualifying" && (
+      {buyInput && newEntry && (
         <div className="px-4 pt-4">
           <CanIBuyNowButton {...buyInput} />
         </div>
@@ -375,7 +392,7 @@ function TwentyCandidateCard({
               <Copy size={13} />
               {copiedKey === tradeLogKey ? "Copied ✓" : "Copy"}
             </button>
-            {openTrade && scanState === "qualifying" && (
+            {openTrade && newEntry && (
               <button
                 disabled={loggedKey === tradeLogKey}
                 onClick={() =>
@@ -846,8 +863,8 @@ export function AiTwentyTwenty() {
         <VolatilityMeter symbol="NATURALGAS" />
       </div>
 
-      {/* The strict, closed-candle read from AI Verify Pro, at a glance. */}
-      <AiVerifyQuickCard />
+      {/* The referee: one answer from trend, 5-min candles, volume, news and zones. */}
+      <TradeCard />
 
       {anyLiveDataUnavailable && (
         <div className="rounded-2xl bg-white border border-rose-200 p-4 text-center shadow-sm">

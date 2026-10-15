@@ -7,7 +7,7 @@ import { findEliteSignal } from "../frontend/src/utils/eliteSignal";
 import { scanAllSetups } from "../frontend/src/utils/kimiScanner";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
-import { callMatch } from "../frontend/src/utils/callMatch";
+import { tradeVerdict } from "../frontend/src/utils/tradeVerdict";
 import { liveMomentum } from "../frontend/src/utils/liveMomentum";
 import { trendPulse } from "../frontend/src/utils/trendPulse";
 import { newsPulseFor } from "../frontend/src/utils/newsPulse";
@@ -160,6 +160,7 @@ export function matchedPushText(p: {
   liveHeadline: string | null;
   pulseTitle?: string | null;
   newsText?: string | null;
+  cardText?: string | null;
 }): { title: string; body: string } {
   return {
     title: `MATCHED: ${p.displayName} ${p.strike} ${p.optSide}`,
@@ -169,6 +170,7 @@ export function matchedPushText(p: {
       p.liveHeadline ? `Right now: ${p.liveHeadline}` : "",
       p.pulseTitle ? `5-min trend: ${p.pulseTitle}` : "",
       p.newsText ? `News: ${p.newsText}` : "",
+      p.cardText ? `Trade Card: ${p.cardText}` : "",
       "",
       `Entry: Rs ${p.entry}`,
       `Target 1: Rs ${p.t1}`,
@@ -298,9 +300,17 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
       const sym = symbol === "NATURALGAS" ? "NATURALGAS" : "CRUDEOIL";
       const eia = sym === "CRUDEOIL" ? (eiaData?.crude ?? null) : (eiaData?.ngStorage ?? null);
       const news = newsFeed?.available ? newsPulseFor(sym, newsFeed.articles, eia, newsFeed.builtAt ?? null, now) : null;
-      const match = callMatch(verify, live, projection.optSide, { pulse, news });
-      if (!match.ok) {
-        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: ${match.text}.`);
+      // The Trade Card is the referee: push only when it is full green (CE) or
+      // full red (PE) on the SAME side as the Ai20-20 call -- trend, steady or
+      // bouncing 5-min candles, a strong candle with volume, news not against,
+      // and a good entry spot. Plus the live candle must not be turning on it.
+      const card = tradeVerdict({ result: verify, c5: fast, c15, news, now, marketOpen: true });
+      if (card.action !== `TRADE_${projection.optSide}`) {
+        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: Trade Card says ${card.headline} (${card.reason}).`);
+        continue;
+      }
+      if (live && live.tone === "bad") {
+        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: the live candle is turning against it.`);
         continue;
       }
 
@@ -332,6 +342,7 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         liveHeadline: live?.headline ?? null,
         pulseTitle: pulse?.title ?? null,
         newsText: news ? `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${news.top ? ` -- ${news.top.headline}` : ""}` : null,
+        cardText: `${card.headline}: all 5 checks pass. Futures stop ${card.stop ?? "-"}, target ${card.t1 ?? "-"}.`,
       });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);
