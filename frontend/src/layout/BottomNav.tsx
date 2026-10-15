@@ -36,19 +36,16 @@ const PRIMARY: NavItem[] = [
   { to: LIVE_PAGE_PATHS[0], label: "AI-Shoot", icon: Rocket, end: true },
   { to: LIVE_PAGE_PATHS[1], label: "Best Call", icon: Crosshair },
   { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
-  { to: LIVE_PAGE_PATHS[3], label: "Level Cross", icon: Waypoints },
+  { to: LIVE_PAGE_PATHS[3], label: "Ai-Trust", icon: Gem },
   { to: LIVE_PAGE_PATHS[4], label: "AI-Up", icon: Repeat },
   { to: LIVE_PAGE_PATHS[5], label: "Ai-News", icon: Rss },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "💎 Best calls only",
-    items: [{ to: "/ai-trust", label: "Ai-Trust", icon: Gem }],
-  },
-  {
     title: "Signals",
     items: [
+      { to: "/level-cross-scan", label: "Level Cross", icon: Waypoints },
       { to: "/ai-supertrend-pro", label: "SuperTrend", icon: Zap },
       { to: "/ai-pullback", label: "AI Pullback", icon: ActivityIcon },
       { to: "/ai-backtest-lab", label: "Backtest Lab", icon: Microscope },

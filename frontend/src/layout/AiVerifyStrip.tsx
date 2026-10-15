@@ -9,7 +9,8 @@ import { useLocation } from "react-router-dom";
 import { LIVE_PAGE_PATHS } from "../config/livePages";
 import { TradeCard } from "../components/TradeCard";
 
-const SHOWN_ON = new Set<string>(LIVE_PAGE_PATHS.slice(0, 5).filter((p) => p !== "/ai-20-20"));
+// Ai-20-20 and Ai-Trust carry their own Trade Card views.
+const SHOWN_ON = new Set<string>(LIVE_PAGE_PATHS.slice(0, 5).filter((p) => p !== "/ai-20-20" && p !== "/ai-trust"));
 
 export function AiVerifyStrip() {
   const { pathname } = useLocation();
