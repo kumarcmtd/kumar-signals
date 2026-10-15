@@ -38,6 +38,7 @@ import { AiPullback } from "./pages/AiPullback";
 import { AiBacktestLab } from "./pages/AiBacktestLab";
 import { ClaudeNews } from "./pages/ClaudeNews";
 import { AiNews } from "./pages/AiNews";
+import { AiTrust } from "./pages/AiTrust";
 
 function App() {
   return (
@@ -82,6 +83,7 @@ function App() {
           <Route path="/ai-backtest-lab" element={<AiBacktestLab />} />
           <Route path="/claude-news" element={<ClaudeNews />} />
           <Route path="/ai-news" element={<AiNews />} />
+          <Route path="/ai-trust" element={<AiTrust />} />
         </Routes>
       </ErrorBoundary>
     </AppShell>

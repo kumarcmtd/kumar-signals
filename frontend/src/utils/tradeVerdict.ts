@@ -53,6 +53,11 @@ export interface TradeVerdict {
   basedOn: string | null; // the last finished 5-minute candle, IST HH:MM
   nextAt: string | null; // when the card can next change
   pulse: TrendPulse | null;
+  /** Extra facts the Ai-Trust grade reads (utils/trustGrade). */
+  strength: number | null; // AI Verify agreement, max 94
+  newsSide: "with" | "against" | "strongly_against" | "neutral" | "none";
+  oiKind: BuildupKind | null;
+  bounce: boolean; // entry off a buyer/seller zone
 }
 
 export interface CandleRead {
@@ -138,7 +143,7 @@ export function tradeVerdict({ result, c5, c15, news, now, marketOpen }: Verdict
   const a5 = atr(closed5.slice(-60), 14);
   const basedOn = last5 ? hhmm(Date.parse(last5.date)) : null;
   const nextAt = hhmm(forming + 5 * 60_000);
-  const base = { checks: [] as TradeCheck[], passed: 0, entryZone: null, stop: null, t1: null, rr: null, buyerZone: zones?.buyer[0] ?? null, sellerZone: zones?.seller[0] ?? null, basedOn, nextAt, pulse };
+  const base = { checks: [] as TradeCheck[], passed: 0, entryZone: null, stop: null, t1: null, rr: null, buyerZone: zones?.buyer[0] ?? null, sellerZone: zones?.seller[0] ?? null, basedOn, nextAt, pulse, strength: result?.strength ?? null, newsSide: "none" as TradeVerdict["newsSide"], oiKind: null as BuildupKind | null, bounce: false };
 
   if (!marketOpen) return { ...base, action: "CLOSED", side: result?.side ?? null, headline: "MARKET CLOSED", reason: "No trade. Zones below are for the next open.", nextAt: null };
   if (!result || !pulse || !zones || price === null || !a5) {
@@ -242,7 +247,17 @@ export function tradeVerdict({ result, c5, c15, news, now, marketOpen }: Verdict
 
   const checks = [trend, candles, strength, newsCheck, zone, oiCheck];
   const passed = checks.filter((c) => c.state !== "fail").length;
-  const plan = { checks, passed, stop: side ? stop : null, t1: side ? r2(t1) : null, rr: side ? rr : null, pulse };
+  const plan = {
+    checks,
+    passed,
+    stop: side ? stop : null,
+    t1: side ? r2(t1) : null,
+    rr: side ? rr : null,
+    pulse,
+    newsSide: (!news?.available ? "none" : nv) as TradeVerdict["newsSide"],
+    oiKind: oiRead.kind,
+    bounce: touchedZone,
+  };
   const ownBand = own ? { low: own.low, high: own.high } : pulse.stretched ? { low: r2(pulse.stretched.pullbackTo - 0.25 * A), high: r2(pulse.stretched.pullbackTo + 0.25 * A) } : null;
 
   // ---- the one answer ----

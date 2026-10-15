@@ -15,6 +15,8 @@ import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
 import { tradeVerdict } from "../frontend/src/utils/tradeVerdict";
 import { newsPulseFor } from "../frontend/src/utils/newsPulse";
 import { advanceCall, maybeOpen, type CardCall } from "../frontend/src/utils/tradeCardLog";
+import { trustGrade } from "../frontend/src/utils/trustGrade";
+import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
 import { sessionBucketStart } from "../frontend/src/utils/candleResample";
@@ -26,6 +28,7 @@ const NAME = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" } as const;
 const istTime = (iso: string) => new Date(Date.parse(iso) + 5.5 * 3600_000).toISOString().slice(11, 16);
 
 export interface OptionHint {
+  daysToExpiry?: number | null;
   strike: number;
   ltp: number;
   atStop: number | null;
@@ -38,9 +41,10 @@ export function cardTradeText(c: CardCall, opt: OptionHint | null): { title: str
   const risk = Math.abs(c.entry - c.stop);
   const rr = risk > 0 ? Math.round((Math.abs(c.t1 - c.entry) / risk) * 10) / 10 : null;
   return {
-    title: `${c.side === "CE" ? "🟢" : "🔴"} TRADE ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`,
+    title: `${c.trust ? "💎 AI-TRUST · " : ""}${c.side === "CE" ? "🟢" : "🔴"} TRADE ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`,
     body: [
       `Trade Card is FULL ${c.side === "CE" ? "GREEN" : "RED"} -- all checks pass (${istTime(c.openedAt)} candle).`,
+      c.trust ? "AI-TRUST grade: strong trend, news with it, fresh OI money, 2x+ reward, safe timing." : null,
       c.reason,
       "",
       opt ? `Option: ${name} ${opt.strike} ${c.side} @ ~Rs ${opt.ltp}` : `Option: ATM ${c.side}`,
@@ -49,6 +53,7 @@ export function cardTradeText(c: CardCall, opt: OptionHint | null): { title: str
       "",
       "Exit if a 5-min candle closes beyond the stop. Check the card before entering -- price may have moved.",
     ]
+      .filter((l): l is string => l !== null)
       .filter((l, i, a) => l !== "" || a[i - 1] !== "")
       .join("\n"),
   };
@@ -148,11 +153,16 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
           const eia = sym === "CRUDEOIL" ? (eiaCache?.crude ?? null) : (eiaCache?.ngStorage ?? null);
           const news = newsCache?.available ? newsPulseFor(sym, newsCache.articles, eia, newsCache.builtAt ?? null, now) : null;
           const v = tradeVerdict({ result, c5, c15, news, now, marketOpen: true });
-          const next = maybeOpen(log, sym, v, closed5[closed5.length - 1] ?? null);
+          let next = maybeOpen(log, sym, v, closed5[closed5.length - 1] ?? null);
           if (next !== log) {
             changed = true;
-            say(`new ${v.side} call logged.`);
-            pushes.push({ ...cardTradeText(next[next.length - 1], await optionHint(env, token, symbol as Symbol, next[next.length - 1])), priority: "urgent" });
+            const opened = next[next.length - 1];
+            const opt = await optionHint(env, token, symbol as Symbol, opened);
+            // The stricter Ai-Trust grade, fixed at the moment of the call.
+            const trust = trustGrade(v, { minutesToClose: session.closeMin - session.minutes, optionDaysToExpiry: opt?.daysToExpiry ?? null }).trusted;
+            next = [...next.slice(0, -1), { ...opened, trust }];
+            say(`new ${v.side} call logged${trust ? " (AI-TRUST grade)" : ""}.`);
+            pushes.push({ ...cardTradeText(next[next.length - 1], opt), priority: "urgent" });
           } else say(`card says ${v.headline}.`);
           log = next;
         }
@@ -187,7 +197,7 @@ async function optionHint(env: Env, token: string, symbol: Symbol, c: CardCall):
     if (!row || !leg || typeof leg.ltp !== "number") return null;
     const d = typeof leg.delta === "number" && Number.isFinite(leg.delta) ? leg.delta : null;
     const at = (level: number) => (d === null ? null : Math.max(0.05, Math.round((leg.ltp! + d * (level - o.spot)) * 10) / 10));
-    return { strike: row.strike, ltp: leg.ltp, atStop: at(c.stop), atT1: at(c.t1) };
+    return { strike: row.strike, ltp: leg.ltp, atStop: at(c.stop), atT1: at(c.t1), daysToExpiry: daysToExpiry(o.expiry) };
   } catch {
     return null;
   }

@@ -31,6 +31,7 @@ export interface CardCall {
   pnlPts: number | null; // in the call's favour, futures points
   r: number | null; // pnlPts / risk
   bestPts: number; // furthest in the call's favour while open
+  trust?: boolean; // passed the stricter Ai-Trust rules too (utils/trustGrade)
 }
 
 export const LOG_CAP = 150;

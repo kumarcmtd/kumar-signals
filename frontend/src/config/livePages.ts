@@ -26,7 +26,11 @@ export const LIVE_PAGE_PATHS = [
 
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 
-const ALWAYS_LIVE = new Set<string>(LIVE_PAGE_PATHS);
+// Live but NOT a bottom-bar tab: Ai-Trust (More menu) only re-reads the same
+// candle / option queries the tabs already poll, so it adds no new load.
+export const EXTRA_LIVE_PATHS = ["/ai-trust"] as const;
+
+const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 
 /** True when this route is one of the six that always keep updating. */
 export function isAlwaysLivePage(pathname: string): boolean {

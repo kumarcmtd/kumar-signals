@@ -151,5 +151,5 @@ export function useBuyDecision(symbol: InstrumentSymbol) {
   const updatedAt = Math.max(c15.dataUpdatedAt, c5.dataUpdatedAt, c60.dataUpdatedAt, c240.dataUpdatedAt);
   const refetch = () => Promise.all([c15.refetch(), c5.refetch(), c60.refetch(), c240.refetch(), optionsQ.refetch()]);
 
-  return { result, pick, entry, entryGate, live, pulse, news, livePrice, running, marketOpen, loading, error, updatedAt, refetch };
+  return { result, pick, entry, entryGate, live, pulse, news, livePrice, running, marketOpen, optionDays, loading, error, updatedAt, refetch };
 }

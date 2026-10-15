@@ -165,7 +165,10 @@ export function TradeCard() {
       <div className="flex items-center gap-1.5 px-1">
         <ShieldCheck size={16} className="text-indigo-600" />
         <p className="text-[13.5px] font-black text-slate-900">Trade Card — one answer</p>
-        <button onClick={refresh} className="ml-auto text-[10.5px] font-black text-indigo-700 bg-indigo-50 rounded-lg px-2 py-1 flex items-center gap-1">
+        <Link to="/ai-trust" className="ml-auto text-[10.5px] font-black text-white rounded-lg px-2 py-1" style={{ background: "linear-gradient(135deg,#7C3AED,#DB2777)" }}>
+          💎 Ai-Trust
+        </Link>
+        <button onClick={refresh} className="text-[10.5px] font-black text-indigo-700 bg-indigo-50 rounded-lg px-2 py-1 flex items-center gap-1">
           <RefreshCw size={11} className={spinning ? "animate-spin" : ""} /> Refresh
         </button>
       </div>
