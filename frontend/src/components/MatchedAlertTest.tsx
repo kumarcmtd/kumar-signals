@@ -3,16 +3,17 @@
 // market saying why it did or did not match.
 
 import { BellRing, Search } from "lucide-react";
-import { useCheckMatchedNow, useSendTestMatched } from "../api/hooks";
+import { useCheckMatchedNow, useSendTestAlert, useSendTestMatched } from "../api/hooks";
 
 export function MatchedAlertTest({ hasTopic }: { hasTopic: boolean }) {
   const sample = useSendTestMatched();
   const check = useCheckMatchedNow();
+  const other = useSendTestAlert();
   return (
     <div className="rounded-xl p-3 space-y-2 bg-emerald-50 border border-emerald-200">
       <p className="text-[12px] font-black text-emerald-800">Test the MATCHED alert</p>
       <p className="text-[10.5px] text-slate-600 leading-snug">
-        A MATCHED push comes only when an Ai20-20 call and AI Verify Pro's confirmed BUY agree on the same side, and the live candle is not turning against it.
+        A MATCHED push comes only when an Ai20-20 call agrees with a full green / full red Trade Card on the same side. The Trade Card also pushes on its own: TRADE, target hit, stop hit, day end. Plus a warning 30 min before each EIA report, and one if live data fails at the open.
       </p>
       <button
         disabled={!hasTopic || sample.isPending}
@@ -40,6 +41,16 @@ export function MatchedAlertTest({ hasTopic }: { hasTopic: boolean }) {
         </ul>
       )}
       {check.isError && <p className="text-[11px] font-bold text-rose-700">{(check.error as Error).message}</p>}
+      <div className="grid grid-cols-2 gap-1.5">
+        <button disabled={!hasTopic || other.isPending} onClick={() => other.mutate("card")} className="text-[11px] font-bold py-2 rounded-lg bg-white border border-emerald-300 text-emerald-800 disabled:opacity-40">
+          Test Trade Card alert
+        </button>
+        <button disabled={!hasTopic || other.isPending} onClick={() => other.mutate("event")} className="text-[11px] font-bold py-2 rounded-lg bg-white border border-emerald-300 text-emerald-800 disabled:opacity-40">
+          Test EIA warning
+        </button>
+      </div>
+      {other.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — a push marked TEST should ring now. Its numbers are samples.</p>}
+      {other.isError && <p className="text-[11px] font-bold text-rose-700">{(other.error as Error).message}</p>}
       {!hasTopic && <p className="text-[10.5px] font-bold text-rose-700">Save your ntfy topic above first.</p>}
     </div>
   );

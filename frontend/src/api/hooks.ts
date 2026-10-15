@@ -459,6 +459,11 @@ export function useSendTestMatched() {
   return useMutation({ mutationFn: () => api.sendTestMatched() });
 }
 
+/** Sample Trade Card / EIA-warning push, in the real format, marked TEST. */
+export function useSendTestAlert() {
+  return useMutation({ mutationFn: (kind: "card" | "event") => api.sendTestAlert(kind) });
+}
+
 export function useCheckMatchedNow() {
   return useMutation({ mutationFn: () => api.checkMatchedNow() });
 }

@@ -1,6 +1,7 @@
 // The /api/* router and SPA fallback. Access-key check first, then routes.
 
-import { readCardLogs, runTradeCardTracker } from "./tradeCardTracker";
+import { cardTradeText, readCardLogs, runTradeCardTracker } from "./tradeCardTracker";
+import { eventWarningText } from "./importantAlerts";
 import { ACCESS_KEY_HEADER, keyMatches, requiresKey } from "../frontend/src/utils/apiGuard";
 import type { AffectedMarket } from "../frontend/src/utils/newsScoring";
 import { computeMarketDepth } from "./depth";
@@ -293,14 +294,22 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           // Sent at the same "urgent" priority as real trade calls, so the test
           // sounds exactly like a real alert would. ?kind=matched sends a sample
           // MATCHED alert in exactly the real format, marked TEST.
+          const kind = url.searchParams.get("kind");
           const sample =
-            url.searchParams.get("kind") === "matched"
+            kind === "card"
+              ? cardTradeText(
+                  { id: "test", symbol: "CRUDEOIL", side: "CE", candleAt: "", openedAt: new Date().toISOString(), entry: 8912, stop: 8885, t1: 8968, reason: "All 6 checks pass — bounced from the buyer zone. Exit if a 5-min candle closes beyond ₹8885.00.", closed: false, result: null, exit: null, closedAt: null, pnlPts: null, r: null, bestPts: 0 },
+                  { strike: 8900, ltp: 182.4, atStop: 168.9, atT1: 210.4 },
+                )
+              : kind === "event"
+                ? eventWarningText({ name: "EIA Weekly Crude Inventories", affects: "CRUDEOIL", istLabel: "8:00 PM", minutesAway: 30 })
+                : kind === "matched"
               ? matchedPushText({ displayName: "Crude Oil", strike: 8850, optSide: "CE", entry: 263.2, t1: 283.2, stop: 251.2, lot: 100, strength: 72, since: "21:15", liveHeadline: "HOLDING — still bullish right now", pulseTitle: "STEADY UP", newsText: "+38 bullish -- sample headline" })
               : null;
           const result = await sendNtfyNotification(
             topic,
             sample ? `TEST — ${sample.title}` : "Kumar Signals Pro test",
-            sample ? `TEST ONLY -- sample numbers, not a real call. A real MATCHED alert looks exactly like this:\n\n${sample.body}` : "If you hear this with the phone locked, trade alerts will reach you the same way.",
+            sample ? `TEST ONLY -- sample numbers, not a real call. The real alert looks exactly like this:\n\n${sample.body}` : "If you hear this with the phone locked, trade alerts will reach you the same way.",
             "urgent",
             { token: env.NTFY_TOKEN }
           );
@@ -308,13 +317,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           return json({ ok: true });
         }
 
-        // Runs the real MATCHED check on live data right now (it pushes if a
-        // matched call is found, exactly like the Cron) and says why per market.
         if (url.pathname === "/api/trade-card/log") {
           if (request.method === "POST") return json({ report: await runTradeCardTracker(env) });
           return json(await readCardLogs(env));
         }
 
+        // Runs the real MATCHED check on live data right now (it pushes if a
+        // matched call is found, exactly like the Cron) and says why per market.
         if (url.pathname === "/api/notify/check-matched") {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
           return json({ report: await runTwentyTwentyNotificationCheck(env) });

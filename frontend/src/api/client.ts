@@ -183,6 +183,7 @@ export const api = {
   sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
   checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
   sendTestMatched: () => sendJSON<{ ok: true }>("/notify/test?kind=matched", "POST"),
+  sendTestAlert: (kind: "card" | "event") => sendJSON<{ ok: true }>(`/notify/test?kind=${kind}`, "POST"),
   checkMatchedNow: () => sendJSON<{ report: string[] }>("/notify/check-matched", "POST"),
   getTradeLogs: () => getJSON<Record<string, TradeLogEntry[]>>("/trade-logs"),
   saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => saveTradeLogsInChunks(logs),

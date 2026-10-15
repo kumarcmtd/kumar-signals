@@ -31,6 +31,7 @@ import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
+import { runImportantAlerts } from "./importantAlerts";
 import { bindSharedCache } from "./upstox";
 
 export const CRON_FAST = "*/5 * * * *";
@@ -64,11 +65,17 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
 
   // FAST, and the fallback for any unrecognised schedule.
   // Ai20-20 -- the page actually traded, pushed with the app closed.
-  ctx.waitUntil(runTwentyTwentyNotificationCheck(env));
   ctx.waitUntil(runBestCallNotificationCheck(env));
   ctx.waitUntil(runExpiryAlertCheck(env));
-  // The Trade Card's own scorecard: log its TRADE calls, settle them on target / stop / day end.
-  ctx.waitUntil(runTradeCardTracker(env).catch(() => undefined));
+  // The Trade Card's own scorecard: log its TRADE calls, settle them on target / stop / day end,
+  // and push each. Then Ai20-20's MATCHED check, which skips a trade the card already pushed.
+  ctx.waitUntil(
+    runTradeCardTracker(env)
+      .catch(() => undefined)
+      .then(() => runTwentyTwentyNotificationCheck(env))
+  );
+  // EIA release in ~30 min; live data failing at the open.
+  ctx.waitUntil(runImportantAlerts(env).catch(() => undefined));
   // One snapshot per trading day, just after MCX shuts, so tomorrow morning
   // "moved since MCX closed" is a measured figure rather than an estimate.
   ctx.waitUntil(captureOvernightAnchor(env));

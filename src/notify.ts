@@ -313,6 +313,17 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: the live candle is turning against it.`);
         continue;
       }
+      // The Trade Card tracker (run just before this) already pushed "TRADE"
+      // for this market and side -- one alert per trade, not two.
+      try {
+        const cardLogs = JSON.parse((await env.COMMODITY_KV.get("tradecard:log:v1")) ?? "{}") as Record<string, { side: string; closed: boolean }[]>;
+        if ((cardLogs[sym] ?? []).some((c) => !c.closed && c.side === projection.optSide)) {
+          say(`MATCHED ${projection.strike} ${projection.optSide} -- already alerted by the Trade Card.`);
+          continue;
+        }
+      } catch {
+        // unreadable log -> fall through and push as before
+      }
 
       // One push per confirmed AI Verify setup -- not one per premium tick.
       const sig = `${twentySignature(symbol, projection.strike, projection.optSide, 0)}-${verify.since ?? verify.lastClosedAt ?? ""}`;
