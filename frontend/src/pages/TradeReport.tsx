@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { TrendingUp, TrendingDown, Target, Wallet, Trophy, Sparkles } from "lucide-react";
 import { usePortfolio } from "../api/hooks";
+import { TradeCardResults } from "../components/TradeCardResults";
 import { useTimeframeSuite, TIMEFRAMES } from "../hooks/useTimeframeSuite";
 import { useTradeLog } from "../hooks/useTradeLog";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
@@ -178,6 +179,9 @@ export function TradeReport() {
         <h1 className="text-2xl font-black tracking-tight bg-gradient-to-r from-indigo-600 via-fuchsia-500 to-orange-500 bg-clip-text text-transparent">Trade Report</h1>
         <p className="text-xs text-slate-500 px-4">Crude Oil &amp; Natural Gas, every timeframe — how many signals hit target vs stop-loss, and what that means in real rupees.</p>
       </section>
+
+      {/* The strict Trade Card first: its own calls and how they ended. */}
+      <TradeCardResults />
 
       {/* CAPITAL INPUT */}
       <section className="rounded-2xl bg-white shadow-md border border-slate-100 p-4">

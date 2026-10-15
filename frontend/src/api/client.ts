@@ -1,3 +1,4 @@
+import type { CardCall } from "../utils/tradeCardLog";
 import type { MarketStatus, PriceCard, SignalCard, InstrumentSymbol, Candle, OptionsAnalytics, MarketDepthSnapshot, GlobalQuote, OvernightTrackerResponse, PortfolioTrade, KumarAiAnalyzeRequest, KumarAiAnalyzeResult, NewsTradeApiResponse, NewsFetchResponse, ExpiryAlert } from "../types";
 import type { OiBuildupResponse } from "../utils/oiBuildup";
 import type { WeekBar } from "../utils/seasonalCompare";
@@ -148,6 +149,7 @@ export const api = {
   // /news-trade -- the flash page needs only headlines, not the EIA and
   // economic-calendar payloads, and it polls far more often than that page.
   newsFeed: () => getJSON<NewsFeedResponse>("/news"),
+  tradeCardLog: () => getJSON<Partial<Record<"CRUDEOIL" | "NATURALGAS", CardCall[]>>>("/trade-card/log"),
   scanNewsNow: () => sendJSON<NewsFeedResponse>("/news/refresh", "POST"),
   globalMarkets: () => getJSON<GlobalQuote[]>("/global-markets"),
   overnightTracker: () => getJSON<OvernightTrackerResponse>("/overnight-tracker"),

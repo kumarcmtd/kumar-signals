@@ -30,6 +30,7 @@ import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "./notify";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
+import { runTradeCardTracker } from "./tradeCardTracker";
 import { bindSharedCache } from "./upstox";
 
 export const CRON_FAST = "*/5 * * * *";
@@ -66,6 +67,8 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   ctx.waitUntil(runTwentyTwentyNotificationCheck(env));
   ctx.waitUntil(runBestCallNotificationCheck(env));
   ctx.waitUntil(runExpiryAlertCheck(env));
+  // The Trade Card's own scorecard: log its TRADE calls, settle them on target / stop / day end.
+  ctx.waitUntil(runTradeCardTracker(env).catch(() => undefined));
   // One snapshot per trading day, just after MCX shuts, so tomorrow morning
   // "moved since MCX closed" is a measured figure rather than an estimate.
   ctx.waitUntil(captureOvernightAnchor(env));

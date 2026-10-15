@@ -197,6 +197,15 @@ export function useScanNewsNow() {
   });
 }
 
+/** The Trade Card's logged calls and how each ended (server-side, every 5 min). */
+export function useTradeCardLog() {
+  return useQuery({
+    queryKey: ["trade-card-log"],
+    queryFn: api.tradeCardLog,
+    refetchInterval: usePollInterval(60_000),
+  });
+}
+
 export function useNewsFeed() {
   return useQuery({
     queryKey: ["news-feed"],

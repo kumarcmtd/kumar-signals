@@ -1,5 +1,6 @@
 // The /api/* router and SPA fallback. Access-key check first, then routes.
 
+import { readCardLogs, runTradeCardTracker } from "./tradeCardTracker";
 import { ACCESS_KEY_HEADER, keyMatches, requiresKey } from "../frontend/src/utils/apiGuard";
 import type { AffectedMarket } from "../frontend/src/utils/newsScoring";
 import { computeMarketDepth } from "./depth";
@@ -309,6 +310,11 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
         // Runs the real MATCHED check on live data right now (it pushes if a
         // matched call is found, exactly like the Cron) and says why per market.
+        if (url.pathname === "/api/trade-card/log") {
+          if (request.method === "POST") return json({ report: await runTradeCardTracker(env) });
+          return json(await readCardLogs(env));
+        }
+
         if (url.pathname === "/api/notify/check-matched") {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
           return json({ report: await runTwentyTwentyNotificationCheck(env) });
