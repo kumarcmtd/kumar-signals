@@ -296,7 +296,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           // MATCHED alert in exactly the real format, marked TEST.
           const kind = url.searchParams.get("kind");
           const sample =
-            kind === "card"
+            kind === "quick"
+              ? cardTradeText(
+                  { id: "test", symbol: "CRUDEOIL", side: "CE", candleAt: "", openedAt: new Date().toISOString(), entry: 9312, stop: 9296, t1: 9336, t2: 9352, reason: "Strong 5-min push.", closed: false, result: null, exit: null, closedAt: null, pnlPts: null, r: null, bestPts: 0, tier: "quick", exitByIso: new Date(Date.now() + 30 * 60_000).toISOString() },
+                  { strike: 9300, ltp: 141.6, atStop: 133.8, atT1: 153.6 },
+                )
+              : kind === "card"
               ? cardTradeText(
                   { id: "test", symbol: "CRUDEOIL", side: "CE", candleAt: "", openedAt: new Date().toISOString(), entry: 8912, stop: 8885, t1: 8968, reason: "All 6 checks pass — bounced from the buyer zone. Exit if a 5-min candle closes beyond ₹8885.00.", closed: false, result: null, exit: null, closedAt: null, pnlPts: null, r: null, bestPts: 0 },
                   { strike: 8900, ltp: 182.4, atStop: 168.9, atT1: 210.4 },

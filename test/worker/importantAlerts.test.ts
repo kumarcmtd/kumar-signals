@@ -21,6 +21,14 @@ test("Trade Card push: side, strike, levels, premium estimate, real newlines", (
   expect(cardTradeText({ ...call, side: "PE" }, null).title).toBe("🔴 TRADE PE: Crude Oil");
 });
 
+test("quick push: QUICK title, half size, exit-by time, T2", () => {
+  const m = cardTradeText({ ...call, tier: "quick", t2: 9000, exitByIso: "2026-10-15T15:05:00.000Z" }, { strike: 8900, ltp: 182.4, atStop: 168.9, atT1: 210.4 });
+  expect(m.title).toBe("⚡ QUICK CE: Crude Oil 8900 CE (half size)");
+  expect(m.body).toContain("HALF size. Exit by 20:35 if no target.");
+  expect(m.body).toContain("target 8968 / 9000");
+  expect(cardCloseText({ ...call, tier: "quick", closed: true, result: "time_exit", exit: 8915, pnlPts: 3, r: 0.1 }).title).toContain("Time up");
+});
+
 test("close pushes say what to do", () => {
   expect(cardCloseText({ ...call, closed: true, result: "target", exit: 8968, pnlPts: 56, r: 2.07 }).title).toContain("TARGET hit");
   const stop = cardCloseText({ ...call, closed: true, result: "stop", exit: 8885, pnlPts: -27, r: -1 });

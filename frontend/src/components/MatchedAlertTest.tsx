@@ -48,6 +48,9 @@ export function MatchedAlertTest({ hasTopic }: { hasTopic: boolean }) {
         <button disabled={!hasTopic || other.isPending} onClick={() => other.mutate("event")} className="text-[11px] font-bold py-2 rounded-lg bg-white border border-emerald-300 text-emerald-800 disabled:opacity-40">
           Test EIA warning
         </button>
+        <button disabled={!hasTopic || other.isPending} onClick={() => other.mutate("quick")} className="col-span-2 text-[11px] font-bold py-2 rounded-lg text-white disabled:opacity-40" style={{ background: "linear-gradient(135deg,#0284C7,#7C3AED)" }}>
+          ⚡ Test Quick trade alert
+        </button>
       </div>
       {other.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — a push marked TEST should ring now. Its numbers are samples.</p>}
       {other.isError && <p className="text-[11px] font-bold text-rose-700">{(other.error as Error).message}</p>}
