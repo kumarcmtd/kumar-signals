@@ -17,6 +17,7 @@ import { newsPulseFor } from "../frontend/src/utils/newsPulse";
 import { advanceCall, maybeOpen, type CardCall } from "../frontend/src/utils/tradeCardLog";
 import { trustGrade } from "../frontend/src/utils/trustGrade";
 import { marketChecklist } from "../frontend/src/utils/checklist";
+import { gradeTiers, quickTier, trustTier } from "../frontend/src/utils/tradeTiers";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
@@ -42,14 +43,20 @@ export function cardTradeText(c: CardCall, opt: OptionHint | null): { title: str
   const risk = Math.abs(c.entry - c.stop);
   const rr = risk > 0 ? Math.round((Math.abs(c.t1 - c.entry) / risk) * 10) / 10 : null;
   return {
-    title: `${c.trust ? "💎 AI-TRUST · " : ""}${c.side === "CE" ? "🟢" : "🔴"} TRADE ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`,
+    title:
+      c.tier === "quick"
+        ? `⚡ QUICK ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""} (half size)`
+        : `${c.trust ? "💎 AI-TRUST · " : ""}${c.side === "CE" ? "🟢" : "🔴"} TRADE ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`,
     body: [
-      `Trade Card is FULL ${c.side === "CE" ? "GREEN" : "RED"} -- all checks pass (${istTime(c.openedAt)} candle).`,
-      c.trust ? "AI-TRUST grade: strong trend, news with it, fresh OI money, 2x+ reward, safe timing." : null,
+      c.tier === "quick"
+        ? `QUICK TRADE -- strong one-sided 5-min push (${istTime(c.openedAt)}). HALF size.${c.exitByIso ? ` Exit by ${istTime(c.exitByIso)} if no target.` : ""}`
+        : c.tier === "trust"
+          ? `AI-TRUST call -- all core checks pass (${istTime(c.openedAt)} candle). Full size.`
+          : `Trade Card is FULL ${c.side === "CE" ? "GREEN" : "RED"} -- all checks pass (${istTime(c.openedAt)} candle).`,
       c.reason,
       "",
       opt ? `Option: ${name} ${opt.strike} ${c.side} @ ~Rs ${opt.ltp}` : `Option: ATM ${c.side}`,
-      `Futures entry ${c.entry} | stop ${c.stop} | target ${c.t1}${rr ? ` (${rr}x reward)` : ""}`,
+      `Futures entry ${c.entry} | stop ${c.stop} | target ${c.t1}${c.t2 ? ` / ${c.t2}` : ""}${rr ? ` (${rr}x reward)` : ""}`,
       opt && opt.atStop !== null && opt.atT1 !== null ? `Premium estimate: stop ~Rs ${opt.atStop} | target ~Rs ${opt.atT1}` : "",
       "",
       "Exit if a 5-min candle closes beyond the stop. Check the card before entering -- price may have moved.",
@@ -66,13 +73,21 @@ export function cardCloseText(c: CardCall): { title: string; body: string } {
   const pts = c.pnlPts ?? 0;
   const r = c.r ?? 0;
   const head =
-    c.result === "target" ? `✅ TARGET hit: ${name} ${c.side}` : c.result === "stop" ? `🛑 STOP hit: ${name} ${c.side} -- exit` : `🔔 Day end: ${name} ${c.side} -- close it`;
+    c.result === "target"
+      ? `✅ TARGET hit: ${name} ${c.side}`
+      : c.result === "stop"
+        ? `🛑 STOP hit: ${name} ${c.side} -- exit`
+        : c.result === "time_exit"
+          ? `⏱ Time up: ${name} ${c.side} quick trade -- close it`
+          : `🔔 Day end: ${name} ${c.side} -- close it`;
   const what =
     c.result === "target"
       ? "Book profit now, or at least move your stop to cost."
       : c.result === "stop"
         ? "The setup failed. Exit now -- don't average, don't hope."
-        : "MCX is closing and neither target nor stop was hit. Close the trade; don't carry an option overnight.";
+        : c.result === "time_exit"
+          ? "30 minutes and no target: the quick move has stalled. Close it -- quick trades are not held."
+          : "MCX is closing and neither target nor stop was hit. Close the trade; don't carry an option overnight.";
   return {
     title: head,
     body: [`Futures ${c.entry} -> ${c.exit} (${pts >= 0 ? "+" : ""}${pts} pts, ${r >= 0 ? "+" : ""}${r}R).`, what, "", "Results: More -> Trade Report -> Trade Card."].join("\n"),
@@ -154,21 +169,36 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
           const eia = sym === "CRUDEOIL" ? (eiaCache?.crude ?? null) : (eiaCache?.ngStorage ?? null);
           const news = newsCache?.available ? newsPulseFor(sym, newsCache.articles, eia, newsCache.builtAt ?? null, now) : null;
           const v = tradeVerdict({ result, c5, c15, news, now, marketOpen: true });
-          let next = maybeOpen(log, sym, v, closed5[closed5.length - 1] ?? null);
+          // The same tiers as the Ai-Trust page (utils/tradeTiers):
+          // 💎 trust (core + 70% supporting) > Trade Card TRADE > ⚡ quick.
+          const mtc = session.closeMin - session.minutes;
+          const mc = marketChecklist({ symbol: sym, v, c15, c60, now });
+          const g = trustGrade(v, { minutesToClose: mtc, optionDaysToExpiry: null });
+          const tiers = gradeTiers(trustTier(v, mc, g, mtc), quickTier({ symbol: sym, c5, c15, v, mc, news, now, minutesToClose: mtc }));
+          const lastClosed = closed5[closed5.length - 1] ?? null;
+          const qp = tiers.quick.plan;
+          let next = log;
+          if (tiers.tier === "trust" && mc.plan) {
+            const p = mc.plan;
+            next = maybeOpen(log, sym, { action: `TRADE_${p.side}`, side: p.side, stop: p.stop, t1: p.t1, reason: `All core checks pass, supporting ${tiers.trust.supportPct}%.` }, lastClosed, { tier: "trust", trust: true, t2: p.t2 });
+          } else if (v.action === "TRADE_CE" || v.action === "TRADE_PE") {
+            next = maybeOpen(log, sym, v, lastClosed, { tier: "card", trust: false });
+          } else if (tiers.tier === "quick" && qp) {
+            next = maybeOpen(
+              log,
+              sym,
+              { action: `TRADE_${qp.side}`, side: qp.side, stop: qp.stop, t1: qp.t1, reason: `Strong 5-min push${tiers.quick.counterTrend ? ", news-led against the 1-hour trend" : ""}.` },
+              lastClosed,
+              { tier: "quick", trust: false, t2: qp.t2, exitByIso: qp.exitByIso },
+            );
+          }
           if (next !== log) {
             changed = true;
             const opened = next[next.length - 1];
             const opt = await optionHint(env, token, symbol as Symbol, opened);
-            // The stricter Ai-Trust grade, fixed at the moment of the call.
-            // ...plus the market part of the trader's full checklist (RSI, MACD,
-            // 1H EMA stack, pivots, EIA window, 1:2 on a 1.5x ATR stop).
-            const trust =
-              trustGrade(v, { minutesToClose: session.closeMin - session.minutes, optionDaysToExpiry: opt?.daysToExpiry ?? null }).trusted &&
-              marketChecklist({ symbol: sym, v, c15, c60, now }).ok;
-            next = [...next.slice(0, -1), { ...opened, trust }];
-            say(`new ${v.side} call logged${trust ? " (AI-TRUST grade)" : ""}.`);
-            pushes.push({ ...cardTradeText(next[next.length - 1], opt), priority: "urgent" });
-          } else say(`card says ${v.headline}.`);
+            say(`new ${opened.tier} ${opened.side} call logged.`);
+            pushes.push({ ...cardTradeText(opened, opt), priority: "urgent" });
+          } else say(`card says ${v.headline}; tier ${tiers.tier}.`);
           log = next;
         }
       }

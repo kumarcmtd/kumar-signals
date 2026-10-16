@@ -1,14 +1,15 @@
-// One market on Ai-Trust. Three looks, one glance:
-//   💎 TRUST CALL   glowing emerald (CE) / ruby (PE) with a spinning rim
-//   GOOD, NOT TRUST amber: the Trade Card says TRADE, a trust rule is missing
-//   SIT TIGHT       deep night-blue glass: nothing trusted -- no trade
-// The ring is how much of the 11-point evidence lines up right now.
+// One market on Ai-Trust. Three looks, one glance (utils/tradeTiers):
+//   💎 TRUST CALL   glowing emerald (CE) / ruby (PE): all core checks + 70% of
+//                   the supporting ones -- full size
+//   ⚡ QUICK TRADE  electric blue / violet: a strong 5-15 min push -- half
+//                   size, tight stop, 30-minute time stop
+//   SIT TIGHT       deep night-blue glass: no call
+// The ring counts the core checks; "support" is the supporting-check share.
 
-import { Gem, Moon, ShieldAlert } from "lucide-react";
+import { Gem, Moon, Zap } from "lucide-react";
 import { useTradeVerdict } from "../../hooks/useTradeVerdict";
-import { trustGrade, type TrustGrade } from "../../utils/trustGrade";
+import { trustGrade } from "../../utils/trustGrade";
 import { mcxSessionAt } from "../../utils/mcxSession";
-import type { TradeVerdict } from "../../utils/tradeVerdict";
 import { ChecklistPanel, useChecklist } from "./ChecklistPanel";
 
 type Sym = "CRUDEOIL" | "NATURALGAS";
@@ -34,50 +35,54 @@ function Ring({ score, outOf, color }: { score: number; outOf: number; color: st
 }
 
 /** Live price between the stop and the target. */
-function Track({ v, live }: { v: TradeVerdict; live: number | null }) {
-  if (v.stop === null || v.t1 === null || live === null) return null;
-  const pct = Math.max(0, Math.min(100, ((live - v.stop) / (v.t1 - v.stop)) * 100));
+function Track({ stop, t1, live }: { stop: number | null; t1: number | null; live: number | null }) {
+  if (stop === null || t1 === null || live === null) return null;
+  const pct = Math.max(0, Math.min(100, ((live - stop) / (t1 - stop)) * 100));
   return (
     <div className="mt-3">
       <div className="h-2.5 rounded-full bg-black/25 overflow-hidden">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#FDE68A,#FFFFFF)" }} />
       </div>
       <div className="flex justify-between text-[10px] font-bold text-white/85 mt-1">
-        <span>Stop {rs(v.stop)}</span>
+        <span>Stop {rs(stop)}</span>
         <span>Now {rs(live)}</span>
-        <span>Target {rs(v.t1)}</span>
+        <span>Target {rs(t1)}</span>
       </div>
     </div>
   );
 }
 
 export function TrustMarketCard({ symbol }: { symbol: Sym }) {
-  const { verdict: v, pick, livePrice, optionDays, error, loading } = useTradeVerdict(symbol);
+  const { verdict: v, pick, livePrice, optionDays, news, error, loading } = useTradeVerdict(symbol);
   const s = mcxSessionAt();
-  const g0 = trustGrade(v, { minutesToClose: s.isOpen ? s.closeMin - s.minutes : null, optionDaysToExpiry: optionDays ?? null });
-  const call = useChecklist(symbol, v, g0, pick, livePrice);
-  // 💎 only when the Trade Card, the trust rules AND the full checklist agree.
-  const items = call.sections.flatMap((x) => x.items).filter((i) => i.state === "pass" || i.state === "fail");
-  const g: TrustGrade = { ...g0, trusted: call.trade, score: items.filter((i) => i.state === "pass").length, outOf: items.length || g0.outOf };
+  const minutesToClose = s.isOpen ? s.closeMin - s.minutes : null;
+  const g = trustGrade(v, { minutesToClose, optionDaysToExpiry: optionDays ?? null });
+  const call = useChecklist(symbol, v, g, pick, livePrice, news ?? null, minutesToClose);
   const plan = call.mc?.plan ?? null;
-  const ce = v.side === "CE";
+  const qp = call.quick?.plan ?? null;
+  const tier = call.tier;
+  const side = tier === "quick" ? qp?.side ?? null : v.side;
+  const ce = side === "CE";
   const opt = pick && v.side && pick.side === v.side ? pick : null;
+  const tt = call.trustTier;
+  const coreOk = tt ? tt.core.filter((i) => i.state === "pass").length : 0;
 
   if (v.action === "NO_DATA" || v.action === "CLOSED") {
     return (
       <div className="rounded-3xl p-4 text-white" style={{ background: "linear-gradient(135deg,#1E1B4B,#312E81)" }}>
         <p className="text-[11px] font-bold uppercase tracking-[.18em] text-indigo-200">{NAME[symbol]}</p>
         <p className="text-[20px] font-black mt-0.5">{v.action === "CLOSED" ? "Market closed" : loading ? "Reading the charts…" : "No live data"}</p>
-        <p className="text-[11.5px] text-indigo-100/90 mt-1">{error && !loading ? error : v.action === "CLOSED" ? "Trust calls only come during MCX hours." : "Waiting for finished candles."}</p>
+        <p className="text-[11.5px] text-indigo-100/90 mt-1">{error && !loading ? error : v.action === "CLOSED" ? "Calls only come during MCX hours." : "Waiting for finished candles."}</p>
       </div>
     );
   }
 
-  const look = g.trusted
-    ? { bg: ce ? "linear-gradient(140deg,#064E3B,#059669 45%,#10B981 75%,#6EE7B7)" : "linear-gradient(140deg,#4C0519,#BE123C 45%,#F43F5E 75%,#FDA4AF)", ring: "#FFFFFF", rim: ce ? "conic-gradient(from var(--a),#34D399,#FDE68A,#22D3EE,#34D399)" : "conic-gradient(from var(--a),#FB7185,#FDE68A,#F472B6,#FB7185)" }
-    : g.isTrade
-      ? { bg: "linear-gradient(140deg,#78350F,#D97706 55%,#FBBF24)", ring: "#FEF3C7", rim: null }
-      : { bg: "linear-gradient(140deg,#0F172A,#1E1B4B 55%,#3B0764)", ring: "#A78BFA", rim: null };
+  const look =
+    tier === "trust"
+      ? { bg: ce ? "linear-gradient(140deg,#064E3B,#059669 45%,#10B981 75%,#6EE7B7)" : "linear-gradient(140deg,#4C0519,#BE123C 45%,#F43F5E 75%,#FDA4AF)", ring: "#FFFFFF", rim: ce ? "conic-gradient(from var(--a),#34D399,#FDE68A,#22D3EE,#34D399)" : "conic-gradient(from var(--a),#FB7185,#FDE68A,#F472B6,#FB7185)", glow: ce ? "#10B981AA" : "#F43F5EAA" }
+      : tier === "quick"
+        ? { bg: ce ? "linear-gradient(140deg,#0C4A6E,#0284C7 45%,#06B6D4 75%,#5EEAD4)" : "linear-gradient(140deg,#3B0764,#9333EA 45%,#DB2777 75%,#F9A8D4)", ring: "#FFFFFF", rim: "conic-gradient(from var(--a),#22D3EE,#FDE047,#A78BFA,#22D3EE)", glow: "#06B6D4AA" }
+        : { bg: "linear-gradient(140deg,#0F172A,#1E1B4B 55%,#3B0764)", ring: "#A78BFA", rim: null, glow: "" };
 
   const body = (
     <div className="relative rounded-[22px] p-4 text-white overflow-hidden" style={{ background: look.bg }}>
@@ -86,36 +91,40 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
       <div className="relative flex items-center gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-[11px] font-bold uppercase tracking-[.18em] text-white/80">{NAME[symbol]}</p>
-          {g.trusted ? (
+          {tier === "trust" ? (
             <>
               <p className="text-[13px] font-black flex items-center gap-1 text-white/95">
-                <Gem size={14} /> AI-TRUST CALL
+                <Gem size={14} /> AI-TRUST CALL · full size
               </p>
-              <p className="text-[30px] font-black leading-none tracking-tight">BUY {v.side}</p>
+              <p className="text-[30px] font-black leading-none tracking-tight">BUY {side}</p>
             </>
-          ) : g.isTrade ? (
+          ) : tier === "quick" ? (
             <>
               <p className="text-[13px] font-black flex items-center gap-1 text-white/95">
-                <ShieldAlert size={14} /> GOOD — NOT TRUST GRADE
+                <Zap size={14} /> QUICK TRADE · half size{call.quick?.counterTrend ? " · news-led" : ""}
               </p>
-              <p className="text-[24px] font-black leading-tight">Skip, or small size</p>
+              <p className="text-[30px] font-black leading-none tracking-tight">BUY {side}</p>
+              <p className="text-[11.5px] font-black text-yellow-200 mt-0.5">Exit by {qp?.exitBy} if no target</p>
             </>
           ) : (
             <>
               <p className="text-[13px] font-black flex items-center gap-1 text-violet-200">
-                <Moon size={14} /> NO TRUSTED CALL
+                <Moon size={14} /> NO CALL RIGHT NOW
               </p>
               <p className="text-[26px] font-black leading-tight">SIT TIGHT</p>
             </>
           )}
         </div>
-        <Ring score={g.score} outOf={g.outOf} color={look.ring} />
+        <div className="text-center">
+          <Ring score={coreOk} outOf={tt?.core.length ?? 0} color={look.ring} />
+          <p className="text-[9px] font-bold text-white/80 mt-0.5">core · support {tt?.supportPct ?? 0}%</p>
+        </div>
       </div>
 
-      {g.trusted ? (
+      {tier === "trust" && (
         <div className="relative mt-3 rounded-2xl bg-white/15 backdrop-blur px-3 py-2.5">
           <p className="text-[17px] font-black">
-            {opt ? `${opt.strike} ${opt.side}` : `ATM ${v.side}`}
+            {opt ? `${opt.strike} ${opt.side}` : `ATM ${side}`}
             {opt?.ltp != null && <span className="text-white/90"> @ ~₹{opt.ltp.toFixed(2)}</span>}
           </p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] font-bold text-white/95 mt-1">
@@ -129,15 +138,28 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
             {plan ? `R:R 1:${plan.rr}` : ""}
             {call.riskRs !== null ? ` · risk ≈ ₹${Math.round(call.riskRs)}/lot` : ""}
           </p>
-          <p className="text-[11px] text-white/80 mt-1 leading-snug">{v.reason}</p>
         </div>
-      ) : (
-        <p className="relative text-[12.5px] font-semibold text-white/90 mt-2 leading-snug">
-          {g.isTrade ? `Trade Card says ${v.headline}, but the full checklist is not complete.` : `${v.headline}. ${v.reason}`}
-        </p>
       )}
+      {tier === "quick" && qp && (
+        <div className="relative mt-3 rounded-2xl bg-white/15 backdrop-blur px-3 py-2.5">
+          <p className="text-[17px] font-black">{call.quickStrike}</p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[12px] font-bold text-white/95 mt-1">
+            <span>Entry {rs(qp.entry)}</span>
+            <span>Stop {rs(qp.stop)}</span>
+            <span>Target 1 {rs(qp.t1)}</span>
+            <span>Target 2 {rs(qp.t2)}</span>
+          </div>
+          <p className="text-[12.5px] font-black mt-1">
+            {call.quickLots !== null ? `Lots: ${call.quickLots} (half risk) · ` : ""}
+            {call.quickRiskRs !== null ? `risk ≈ ₹${Math.round(call.quickRiskRs)}/lot` : ""}
+          </p>
+          <p className="text-[11px] text-white/85 mt-1 leading-snug">Fast move — book at T1, trail to T2. Out at the stop, or at {qp.exitBy} if it stalls. Don't hold a quick trade longer.</p>
+        </div>
+      )}
+      {tier === "none" && <p className="relative text-[12.5px] font-semibold text-white/90 mt-2 leading-snug">{`${v.headline}. ${v.reason}`}</p>}
 
-      {(g.trusted || g.isTrade) && <Track v={v} live={livePrice} />}
+      {tier === "trust" && <Track stop={plan?.stop ?? v.stop} t1={plan?.t1 ?? v.t1} live={livePrice} />}
+      {tier === "quick" && qp && <Track stop={qp.stop} t1={qp.t1} live={livePrice} />}
       <ChecklistPanel call={call} />
       <p className="relative text-[10px] font-bold text-white/70 mt-2">
         {v.basedOn ? `Based on the ${v.basedOn} candle` : ""}
@@ -148,7 +170,7 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
 
   if (!look.rim) return <div className="rounded-3xl shadow-xl">{body}</div>;
   return (
-    <div className="trust-rim rounded-3xl p-[3px] shadow-2xl" style={{ background: look.rim, boxShadow: ce ? "0 10px 40px -8px #10B981AA" : "0 10px 40px -8px #F43F5EAA" }}>
+    <div className="trust-rim rounded-3xl p-[3px] shadow-2xl" style={{ background: look.rim, boxShadow: `0 10px 40px -8px ${look.glow}` }}>
       {body}
     </div>
   );

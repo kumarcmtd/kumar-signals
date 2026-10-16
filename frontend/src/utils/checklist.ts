@@ -64,6 +64,8 @@ export interface MarketChecklist {
   ok: boolean; // no fail
   levels: KeyLevels | null;
   plan: TradePlan | null;
+  bias: "long" | "short" | null; // 1-hour EMA stack
+  atr15: number | null;
   ngFade: NgFade | null;
 }
 
@@ -237,11 +239,15 @@ export function marketChecklist({ symbol, v, c15: raw15, c60: raw60, now }: Chec
     ],
   };
 
-  // ---- 6. Entry & risk plan (the trader's 1.5x ATR stop) ----
+  // ---- 6. Entry & risk plan ----
+  // Stop: beyond the zone / swing (the card's stop), but never closer than
+  // 1x ATR(15m) -- a tighter stop is hit by ordinary noise. The full 1.5x ATR
+  // level is shown for reference; forcing it made 1:2 almost impossible.
   let plan: TradePlan | null = null;
   if (side && entry !== null && a15 && v.t1 !== null) {
     const atrStop = r2(up ? entry - 1.5 * a15 : entry + 1.5 * a15);
-    const stop = v.stop === null ? atrStop : up ? Math.min(atrStop, v.stop) : Math.max(atrStop, v.stop);
+    const minStop = up ? entry - a15 : entry + a15;
+    const stop = v.stop === null ? minStop : up ? Math.min(minStop, v.stop) : Math.max(minStop, v.stop);
     const risk = Math.abs(entry - stop);
     const t1 = v.t1;
     const rrv = risk > 0 ? Math.round((Math.abs(t1 - entry) / risk) * 10) / 10 : 0;
@@ -251,7 +257,7 @@ export function marketChecklist({ symbol, v, c15: raw15, c60: raw60, now }: Chec
     title: "Entry & risk",
     items: [
       fromCheck("pull", "Pulled back to a level, reversal candle, volume spike", "zone"),
-      { id: "atr", label: "Stop = 1.5× ATR (or beyond the zone)", state: plan ? "pass" : "na", text: plan && a15 ? `ATR(15m) ${a15.toFixed(2)} → stop ${rs(plan.stop)}` : "—" },
+      { id: "atr", label: "Stop beyond the zone, at least 1× ATR", state: plan ? "pass" : "na", text: plan && a15 ? `ATR(15m) ${a15.toFixed(2)} → stop ${rs(plan.stop)} (1.5× ATR would be ${rs(plan.atrStop)})` : "—" },
       { id: "rr", label: "Risk : reward at least 1 : 2", state: !plan ? "na" : plan.rr >= 2 ? "pass" : "fail", text: plan ? `1 : ${plan.rr} to T1 ${rs(plan.t1)}${plan.rr >= 3 ? " (1:3+ — ideal)" : ""}` : "—" },
     ],
   };
@@ -283,5 +289,5 @@ export function marketChecklist({ symbol, v, c15: raw15, c60: raw60, now }: Chec
 
   const sections = [trend, momentum, volOi, levels, news, entryRisk, instrument];
   const blocking = sections.flatMap((s) => s.items).filter((i) => i.state === "fail");
-  return { sections, blocking, ok: blocking.length === 0 && !!side, levels: lv, plan, ngFade };
+  return { sections, blocking, ok: blocking.length === 0 && !!side, levels: lv, plan, ngFade, bias: longBias ? "long" : shortBias ? "short" : null, atr15: a15 };
 }

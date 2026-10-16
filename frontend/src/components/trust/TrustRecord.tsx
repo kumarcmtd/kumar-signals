@@ -1,6 +1,7 @@
 // Ai-Trust's track record: ONLY the calls that were trust grade when they
 // fired, from the server's Trade Card log, with how each one ended.
 
+import { useState } from "react";
 import { Trophy } from "lucide-react";
 import { useTradeCardLog } from "../../api/hooks";
 import { cardStats, type CardCall } from "../../utils/tradeCardLog";
@@ -11,13 +12,15 @@ const END: Record<NonNullable<CardCall["result"]> | "open", { t: string; bg: str
   target: { t: "TARGET ✓", bg: "#D1FAE5", fg: "#065F46" },
   stop: { t: "STOP ✗", bg: "#FFE4E6", fg: "#9F1239" },
   day_end: { t: "DAY END", bg: "#E0E7FF", fg: "#3730A3" },
+  time_exit: { t: "TIME EXIT", bg: "#E0E7FF", fg: "#3730A3" },
   open: { t: "RUNNING", bg: "#FEF3C7", fg: "#92400E" },
 };
 
 export function TrustRecord() {
   const q = useTradeCardLog();
   const all = [...(q.data?.CRUDEOIL ?? []), ...(q.data?.NATURALGAS ?? [])];
-  const trusted = all.filter((c) => c.trust).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+  const [tab, setTab] = useState<"trust" | "quick">("trust");
+  const trusted = all.filter((c) => (tab === "quick" ? c.tier === "quick" : c.trust && c.tier !== "quick")).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
   const s = cardStats(trusted);
   const tiles = [
     { big: s.winRate === null ? "—" : `${s.winRate}%`, small: "win rate", bg: "linear-gradient(135deg,#10B981,#059669)" },
@@ -27,8 +30,20 @@ export function TrustRecord() {
   return (
     <section className="rounded-3xl bg-white p-4 shadow-lg border border-violet-100 space-y-3">
       <p className="text-[13px] font-black text-slate-900 flex items-center gap-1.5">
-        <Trophy size={16} className="text-amber-500" /> Trust calls — track record
+        <Trophy size={16} className="text-amber-500" /> Track record
       </p>
+      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+        {(["trust", "quick"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`rounded-xl py-1.5 text-[12px] font-black ${tab === k ? "text-white shadow" : "text-slate-500"}`}
+            style={tab === k ? { background: k === "trust" ? "linear-gradient(135deg,#7C3AED,#DB2777)" : "linear-gradient(135deg,#0EA5E9,#6366F1)" } : undefined}
+          >
+            {k === "trust" ? "💎 Trust calls" : "⚡ Quick trades"}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-3 gap-2">
         {tiles.map((t) => (
           <div key={t.small} className="rounded-2xl py-2.5 text-center text-white shadow" style={{ background: t.bg }}>
@@ -39,7 +54,7 @@ export function TrustRecord() {
       </div>
       {trusted.length === 0 ? (
         <p className="text-[12px] text-slate-500 leading-snug">
-          No trust call yet. That is normal — they are rare by design. Every one will be listed here with how it ended, wins and losses alike.
+          {tab === "quick" ? "No quick trade yet." : "No trust call yet. That is normal — they are rare by design."} Every one will be listed here with how it ended, wins and losses alike.
         </p>
       ) : (
         <div className="space-y-1.5">

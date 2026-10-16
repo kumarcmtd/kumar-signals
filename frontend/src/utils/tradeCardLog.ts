@@ -25,13 +25,16 @@ export interface CardCall {
   t1: number;
   reason: string;
   closed: boolean;
-  result: "target" | "stop" | "day_end" | null;
+  result: "target" | "stop" | "day_end" | "time_exit" | null;
   exit: number | null;
   closedAt: string | null;
   pnlPts: number | null; // in the call's favour, futures points
   r: number | null; // pnlPts / risk
   bestPts: number; // furthest in the call's favour while open
   trust?: boolean; // passed the stricter Ai-Trust rules too (utils/trustGrade)
+  tier?: "card" | "trust" | "quick"; // which call it was (missing on old entries = "card")
+  t2?: number;
+  exitByIso?: string; // quick trades: time stop -- closed at market if still open then
 }
 
 export const LOG_CAP = 150;
@@ -58,6 +61,7 @@ export function advanceCall(call: CardCall, closed5: Candle[], dayOver: boolean)
     const hitTarget = up ? k.high >= c.t1 : k.low <= c.t1;
     if (hitStop) return finish(c, "stop", c.stop, end);
     if (hitTarget) return finish(c, "target", c.t1, end);
+    if (c.exitByIso && Date.parse(end) >= Date.parse(c.exitByIso)) return finish(c, "time_exit", k.close, end);
   }
   if (dayOver) {
     const last = after[after.length - 1];
@@ -72,6 +76,7 @@ export function maybeOpen(
   symbol: CardCall["symbol"],
   v: { action: string; side: "CE" | "PE" | null; stop: number | null; t1: number | null; reason: string },
   lastClosed: Candle | null,
+  extra: Partial<Pick<CardCall, "tier" | "trust" | "t2" | "exitByIso">> = {},
 ): CardCall[] {
   if (!lastClosed || !v.side || v.stop === null || v.t1 === null) return log;
   if (v.action !== `TRADE_${v.side}`) return log;
@@ -95,6 +100,7 @@ export function maybeOpen(
     pnlPts: null,
     r: null,
     bestPts: 0,
+    ...extra,
   };
   return [...log, call].slice(-LOG_CAP);
 }

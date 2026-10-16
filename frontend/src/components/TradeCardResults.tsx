@@ -20,10 +20,13 @@ const RESULT: Record<NonNullable<CardCall["result"]> | "open", { label: string; 
   target: { label: "TARGET ✓", cls: "bg-emerald-100 text-emerald-800" },
   stop: { label: "STOP ✗", cls: "bg-rose-100 text-rose-700" },
   day_end: { label: "DAY END", cls: "bg-slate-100 text-slate-700" },
+  time_exit: { label: "TIME EXIT", cls: "bg-slate-100 text-slate-700" },
   open: { label: "RUNNING", cls: "bg-amber-100 text-amber-800" },
 };
 
-function Market({ sym, log }: { sym: Sym; log: CardCall[] }) {
+function Market({ sym, log: all }: { sym: Sym; log: CardCall[] }) {
+  // Quick trades have their own record on Ai-Trust.
+  const log = all.filter((c) => (c.tier ?? "card") !== "quick");
   const s = cardStats(log);
   const rupees = Math.round(s.totalPts * ATM_DELTA * LOT_SIZE[sym]);
   const recent = [...log].reverse().slice(0, 8);
@@ -62,7 +65,7 @@ function Market({ sym, log }: { sym: Sym; log: CardCall[] }) {
                 </span>
                 <span className={`font-black rounded px-1.5 py-[1px] shrink-0 ${look.cls}`}>
                   {look.label}
-                  {c.r !== null && c.result === "day_end" ? ` ${sign(c.r)}${Math.abs(c.r)}R` : ""}
+                  {c.r !== null && (c.result === "day_end" || c.result === "time_exit") ? ` ${sign(c.r)}${Math.abs(c.r)}R` : ""}
                 </span>
               </div>
             );

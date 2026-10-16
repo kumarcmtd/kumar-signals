@@ -65,5 +65,5 @@ export function useTradeVerdict(symbol: Sym) {
     ? { ...v, action: "AVOID", headline: "EXIT — STOP BROKEN", reason: `Live price ₹${live!.toFixed(2)} is through the stop ₹${v.stop!.toFixed(2)}. Exit; no new entry this candle.` }
     : v;
 
-  return { verdict, since: shown.since, pick: d.pick, livePrice: live, optionDays: d.optionDays, error: d.error, loading: d.loading, refetch: d.refetch };
+  return { verdict, since: shown.since, pick: d.pick, livePrice: live, optionDays: d.optionDays, news: d.news, error: d.error, loading: d.loading, refetch: d.refetch };
 }

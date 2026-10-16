@@ -52,12 +52,14 @@ test("RSI above 70 blocks a CE (don't chase); 1-hour EMA stack is read", () => {
   expect(mc.ok).toBe(false);
 });
 
-test("EIA within 2 hours fails the news filter; the plan's stop is at least 1.5x ATR", () => {
+test("EIA within 2 hours fails the news filter; the plan's stop is at least 1x ATR", () => {
   const c15 = days(3, 40, (i) => (i % 2 ? 0.3 : -0.3));
   // Wed 14 Oct 2026 19:00 IST -- crude EIA at 20:00 IST
   const now = Date.parse("2026-10-14T19:00:00+05:30");
   const c = c15.map((x) => ({ ...x, date: x.date.replace("2026-10-12", "2026-10-14").replace("2026-10-11", "2026-10-13").replace("2026-10-10", "2026-10-12") }));
   const mc = marketChecklist({ symbol: "CRUDEOIL", v: verdict({ stop: 99.9, t1: 104 }), c15: c, c60: hourly(c), now });
   expect(mc.sections[4].items.find((i) => i.id === "eia")!.state).toBe("fail");
-  expect(mc.plan!.stop).toBeLessThanOrEqual(mc.plan!.atrStop);
+  // stop at least 1x ATR(15m) away (the 1.5x level is shown for reference)
+  expect(mc.plan!.entry - mc.plan!.stop).toBeGreaterThanOrEqual(mc.atr15! - 0.01);
+  expect(mc.plan!.stop).toBeGreaterThanOrEqual(mc.plan!.atrStop);
 });

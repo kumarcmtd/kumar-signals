@@ -64,14 +64,14 @@ export function AiTrust() {
             >
               Ai-Trust
             </h1>
-            <p className="text-[12px] font-semibold text-white/90 mt-1">Only the strongest calls. Your full checklist must agree.</p>
+            <p className="text-[12px] font-semibold text-white/90 mt-1">Strong calls, and quick ones when the candles are clearly one-sided.</p>
           </div>
           <button onClick={refresh} className="shrink-0 rounded-xl bg-white/20 px-2.5 py-2 text-[11px] font-black flex items-center gap-1">
             <RefreshCw size={12} className={spin ? "animate-spin" : ""} /> Refresh
           </button>
         </div>
         <p className="relative text-[11.5px] text-white/85 mt-3 leading-snug">
-          Most of the time this page says <b>SIT TIGHT</b>. That is how it avoids the junk calls that hit stop-losses. When a 💎 call shows, you also get a push.
+          <b>💎 Trust</b> = the strong setup, full size. <b>⚡ Quick</b> = a fast 5–15 min push, half size, out in 30 min. Otherwise <b>SIT TIGHT</b>. Both send a push.
         </p>
       </section>
 
