@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Gem, RefreshCw } from "lucide-react";
 import { TrustMarketCard } from "../components/trust/TrustMarketCard";
 import { TrustRecord } from "../components/trust/TrustRecord";
+import { TrustLiveCalls } from "../components/trust/TrustLiveCalls";
 import { TradeCounter } from "../components/trust/ChecklistPanel";
 
 const RULES = [
@@ -79,6 +80,8 @@ export function AiTrust() {
 
       <TrustMarketCard symbol="CRUDEOIL" />
       <TrustMarketCard symbol="NATURALGAS" />
+
+      <TrustLiveCalls />
 
       <TrustRecord />
 

@@ -31,6 +31,8 @@ const istTime = (iso: string) => new Date(Date.parse(iso) + 5.5 * 3600_000).toIS
 
 export interface OptionHint {
   daysToExpiry?: number | null;
+  atT2?: number | null;
+  delta?: number | null;
   strike: number;
   ltp: number;
   atStop: number | null;
@@ -194,8 +196,13 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
           }
           if (next !== log) {
             changed = true;
-            const opened = next[next.length - 1];
+            let opened = next[next.length - 1];
             const opt = await optionHint(env, token, symbol as Symbol, opened);
+            // Keep the option plan with the call, for the live call card.
+            if (opt) {
+              opened = { ...opened, opt: { strike: opt.strike, entry: opt.ltp, stop: opt.atStop, t1: opt.atT1, t2: opt.atT2 ?? null, delta: opt.delta ?? null } };
+              next = [...next.slice(0, -1), opened];
+            }
             say(`new ${opened.tier} ${opened.side} call logged.`);
             pushes.push({ ...cardTradeText(opened, opt), priority: "urgent" });
           } else say(`card says ${v.headline}; tier ${tiers.tier}.`);
@@ -232,7 +239,7 @@ async function optionHint(env: Env, token: string, symbol: Symbol, c: CardCall):
     if (!row || !leg || typeof leg.ltp !== "number") return null;
     const d = typeof leg.delta === "number" && Number.isFinite(leg.delta) ? leg.delta : null;
     const at = (level: number) => (d === null ? null : Math.max(0.05, Math.round((leg.ltp! + d * (level - o.spot)) * 10) / 10));
-    return { strike: row.strike, ltp: leg.ltp, atStop: at(c.stop), atT1: at(c.t1), daysToExpiry: daysToExpiry(o.expiry) };
+    return { strike: row.strike, ltp: leg.ltp, atStop: at(c.stop), atT1: at(c.t1), atT2: c.t2 != null ? at(c.t2) : null, delta: d, daysToExpiry: daysToExpiry(o.expiry) };
   } catch {
     return null;
   }

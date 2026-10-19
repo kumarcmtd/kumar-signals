@@ -35,6 +35,9 @@ export interface CardCall {
   tier?: "card" | "trust" | "quick"; // which call it was (missing on old entries = "card")
   t2?: number;
   exitByIso?: string; // quick trades: time stop -- closed at market if still open then
+  /** The ATM option at the moment of the call: entry premium and the premium
+   *  estimated (delta) at the stop / targets -- for the live call card. */
+  opt?: { strike: number; entry: number; stop: number | null; t1: number | null; t2: number | null; delta: number | null };
 }
 
 export const LOG_CAP = 150;
