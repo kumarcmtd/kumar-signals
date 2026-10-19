@@ -9,7 +9,9 @@
 // itself is settled on the futures, so the badge can differ slightly from
 // the premium scale.
 
+import { useState } from "react";
 import { Gem, Zap, ShieldCheck } from "lucide-react";
+import { AiChart } from "./AiChart";
 import { useOptionsAnalytics, useTradeCardLog } from "../../api/hooks";
 import { liveLtpFor } from "../../hooks/useTradeLog";
 import { PriceScale, ProfitEstimate } from "../CallCardKit";
@@ -71,6 +73,7 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
         : { Icon: ShieldCheck, label: "TRADE CARD CALL", bar: c.side === "CE" ? "#10B981" : "#F43F5E" };
   const res = RESULT[c.result ?? "open"];
   const pnlPct = current !== null && c.opt ? ((current - c.opt.entry) / c.opt.entry) * 100 : null;
+  const [chart, setChart] = useState(false);
 
   return (
     <div className="relative rounded-3xl bg-white shadow-lg overflow-hidden border border-slate-100">
@@ -114,6 +117,12 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
           {c.t2 ? ` · T2 ${c.t2}` : ""}
           {c.r !== null ? ` · result ${c.r >= 0 ? "+" : ""}${c.r}R` : ""}
         </p>
+      </div>
+      <div className="px-4 pb-2">
+        <button onClick={() => setChart((x) => !x)} className="w-full rounded-xl bg-violet-50 text-violet-800 py-2 text-[12px] font-black">
+          {chart ? "Hide chart" : "📈 View this call on the AI chart"}
+        </button>
+        {chart && <AiChart symbol={sym} plan={{ side: c.side, entry: c.entry, stop: c.stop, t1: c.t1, t2: c.t2 ?? null, zone: null, label: c.closed ? "Plan at entry" : "Plan: T1 → T2" }} levels={null} />}
       </div>
       {entry && <PriceScale entry={entry} current={current} />}
       {entry && <ProfitEstimate trade={entry} current={current} lotSize={LOT_SIZE[sym]} />}

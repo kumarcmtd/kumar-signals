@@ -6,7 +6,9 @@
 //   SIT TIGHT       deep night-blue glass: no call
 // The ring counts the core checks; "support" is the supporting-check share.
 
-import { Gem, Moon, Zap } from "lucide-react";
+import { useState } from "react";
+import { Gem, Moon, Zap, LineChart } from "lucide-react";
+import { AiChart, type ChartPlan } from "./AiChart";
 import { useTradeVerdict } from "../../hooks/useTradeVerdict";
 import { trustGrade } from "../../utils/trustGrade";
 import { mcxSessionAt } from "../../utils/mcxSession";
@@ -66,6 +68,15 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
   const opt = pick && v.side && pick.side === v.side ? pick : null;
   const tt = call.trustTier;
   const coreOk = tt ? tt.core.filter((i) => i.state === "pass").length : 0;
+  const [showChart, setShowChart] = useState(false);
+  const chartPlan: ChartPlan | null =
+    tier === "trust" && plan
+      ? { side: plan.side, entry: plan.entry, stop: plan.stop, t1: plan.t1, t2: plan.t2, zone: null, label: "Plan: T1 → T2" }
+      : tier === "quick" && qp
+        ? { side: qp.side, entry: qp.entry, stop: qp.stop, t1: qp.t1, t2: qp.t2, zone: null, label: `Quick: T1 → T2 by ${qp.exitBy}` }
+        : (v.action === "WAIT_CE" || v.action === "WAIT_PE") && v.side && v.t1 !== null
+          ? { side: v.side, entry: null, stop: null, t1: v.t1, t2: null, zone: v.entryZone, label: "If it pulls back and holds" }
+          : null;
 
   if (v.action === "NO_DATA" || v.action === "CLOSED") {
     return (
@@ -160,6 +171,10 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
 
       {tier === "trust" && <Track stop={plan?.stop ?? v.stop} t1={plan?.t1 ?? v.t1} live={livePrice} />}
       {tier === "quick" && qp && <Track stop={qp.stop} t1={qp.t1} live={livePrice} />}
+      <button onClick={() => setShowChart((x) => !x)} className="relative w-full mt-3 rounded-xl bg-white/90 text-violet-800 px-3 py-2 flex items-center justify-center gap-1.5 text-[12px] font-black">
+        <LineChart size={14} /> {showChart ? "Hide AI chart" : "📈 View AI chart — zones, FVG, channel, plan"}
+      </button>
+      {showChart && <AiChart symbol={symbol} plan={chartPlan} levels={call.mc?.levels ?? null} />}
       <ChecklistPanel call={call} />
       <p className="relative text-[10px] font-bold text-white/70 mt-2">
         {v.basedOn ? `Based on the ${v.basedOn} candle` : ""}
