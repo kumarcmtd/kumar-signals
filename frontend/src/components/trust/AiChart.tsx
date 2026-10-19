@@ -87,7 +87,6 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
     );
 
   const path = plan && plan.t1 != null ? plannedPath(plan.side, last.close, plan.t1, plan.t2, plan.zone) : null;
-  const up = plan?.side === "CE";
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-xl" style={{ background: "#F8FAFC" }}>
@@ -159,11 +158,6 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
           markerEnd="url(#arrow)"
         />
       )}
-      {plan && path && (
-        <text x={x(n + 1)} y={up ? P_TOP + P_H - 4 : P_TOP + 10} fontSize={7.5} fontWeight={800} fill="#0F766E">
-          {plan.label}
-        </text>
-      )}
       {/* time axis */}
       {candles.map((c, i) =>
         i % Math.ceil(n / 5) === 0 ? (
@@ -197,7 +191,7 @@ export function AiChart({ symbol, plan, levels }: { symbol: "CRUDEOIL" | "NATURA
         <span className="text-indigo-700">■ FVG gap</span>
         <span className="text-amber-700">■ wait zone</span>
         <span>— channel</span>
-        <span className="text-teal-700">- - ➜ planned path</span>
+        <span className="text-teal-700">- - ➜ planned path{plan ? `: ${plan.label}` : ""}</span>
       </div>
       <p className="text-[9px] text-slate-400 px-1 mt-0.5 leading-snug">The dashed path is the plan IF the setup works (pullback to the zone, then targets) — not a prediction. Price can break the zone instead; that is what the stop is for.</p>
     </div>

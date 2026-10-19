@@ -154,7 +154,8 @@ function CategoryBar({ label, score }: { label: string; score: number }) {
 function twentyChartPlan(t: TradeLogEntry, options: OptionsAnalytics | undefined, candles: Candle[]): ChartPlan | null {
   const row = options && !options.error ? options.rows.find((r) => r.strike === t.strike) : undefined;
   const leg = row ? (t.optSide === "CE" ? row.call : row.put) : undefined;
-  const delta = typeof leg?.delta === "number" ? leg.delta : null;
+  // Live delta when the chain has this strike; else a typical at-the-money 0.5.
+  const delta = typeof leg?.delta === "number" && Math.abs(leg.delta) >= 0.05 ? leg.delta : t.optSide === "CE" ? 0.5 : -0.5;
   const before = candles.filter((c) => Date.parse(c.date) <= t.openedAt);
   const fut = before.length ? before[before.length - 1].close : null;
   const lv = premiumToFutures(t, delta, fut);
