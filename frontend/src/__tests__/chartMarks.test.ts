@@ -31,3 +31,14 @@ test("planned path: pullback to the zone first, then T1, a dip, then T2", () => 
   expect(p.map((x) => x.dx)).toEqual([0, 4, 10, 13, 19]);
   expect(plannedPath("PE", 100, 98, null, null).at(-1)!.price).toBeLessThan(98);
 });
+
+test("Ai20-20 premium levels map to futures levels by delta (CE up, PE mirrored)", async () => {
+  const { premiumToFutures } = await import("../utils/chartMarks");
+  // CE: entry 13.25, SL 12.29, T1 14.25 at delta 0.5, futures 300 at entry
+  expect(premiumToFutures({ entry: 13.25, stop: 12.29, targets: [14.25, 15.25, 16.25] }, 0.5, 300)).toEqual({ entry: 300, stop: 298.08, t1: 302, t2: 304 });
+  // PE: delta negative -> the stop sits ABOVE the futures entry
+  const pe = premiumToFutures({ entry: 10, stop: 9, targets: [11, 12, 13] }, -0.5, 300)!;
+  expect(pe.stop).toBe(302);
+  expect(pe.t1).toBe(298);
+  expect(premiumToFutures({ entry: 10, stop: 9, targets: [11, 12, 13] }, null, 300)).toBeNull();
+});

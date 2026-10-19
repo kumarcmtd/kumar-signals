@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { useCandles } from "../../api/hooks";
 import { findZones } from "../../utils/zones";
 import { findFvgs, plannedPath, trendChannel } from "../../utils/chartMarks";
-import type { KeyLevels } from "../../utils/checklist";
+import { keyLevels, type KeyLevels } from "../../utils/checklist";
 import type { Candle } from "../../types";
 
 export interface ChartPlan {
@@ -37,6 +37,8 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
   const n = candles.length;
   const last = candles[n - 1];
   const zones = useMemo(() => findZones(candles, last.close), [candles, last.close]);
+  // Pivots / previous day from these candles when the caller has none.
+  const lv = useMemo(() => levels ?? keyLevels(candles), [levels, candles]);
   const fvgs = useMemo(() => findFvgs(candles), [candles]);
   const ch = useMemo(() => trendChannel(candles), [candles]);
 
@@ -123,11 +125,11 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
           />
         ))}
       {/* key levels */}
-      {levels && hLine(levels.pivot, "#94A3B8", "P", "2 3")}
-      {levels && hLine(levels.r1, "#FB7185", "R1", "2 3")}
-      {levels && hLine(levels.s1, "#34D399", "S1", "2 3")}
-      {levels && hLine(levels.pdh, "#64748B", "PDH", "1 2")}
-      {levels && hLine(levels.pdl, "#64748B", "PDL", "1 2")}
+      {lv && hLine(lv.pivot, "#94A3B8", "P", "2 3")}
+      {lv && hLine(lv.r1, "#FB7185", "R1", "2 3")}
+      {lv && hLine(lv.s1, "#34D399", "S1", "2 3")}
+      {lv && hLine(lv.pdh, "#64748B", "PDH", "1 2")}
+      {lv && hLine(lv.pdl, "#64748B", "PDL", "1 2")}
       {/* candles + volume */}
       {candles.map((c, i) => {
         const green = c.close >= c.open;

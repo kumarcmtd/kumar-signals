@@ -28,6 +28,8 @@ import { useBuyCheckInput } from "../hooks/useBuyCheckInput";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { TradeCard } from "../components/TradeCard";
+import { AiChart, type ChartPlan } from "../components/trust/AiChart";
+import { premiumToFutures } from "../utils/chartMarks";
 import { useTradeVerdict } from "../hooks/useTradeVerdict";
 import { useAppStore, type TradeLogEntry, type TradeLogStatus } from "../store/appStore";
 import type { Decision6 } from "../utils/timeframeEngine";
@@ -148,6 +150,17 @@ function CategoryBar({ label, score }: { label: string; score: number }) {
   );
 }
 
+/** This call's premium levels as approximate futures levels, for the AI chart. */
+function twentyChartPlan(t: TradeLogEntry, options: OptionsAnalytics | undefined, candles: Candle[]): ChartPlan | null {
+  const row = options && !options.error ? options.rows.find((r) => r.strike === t.strike) : undefined;
+  const leg = row ? (t.optSide === "CE" ? row.call : row.put) : undefined;
+  const delta = typeof leg?.delta === "number" ? leg.delta : null;
+  const before = candles.filter((c) => Date.parse(c.date) <= t.openedAt);
+  const fut = before.length ? before[before.length - 1].close : null;
+  const lv = premiumToFutures(t, delta, fut);
+  return lv ? { side: t.optSide, entry: lv.entry, stop: lv.stop, t1: lv.t1, t2: lv.t2, zone: null, label: t.closed ? "Plan at entry (approx.)" : "Ai20-20 plan (approx. futures)" } : null;
+}
+
 function TwentyCandidateCard({
   candidate,
   tradeLogs,
@@ -180,6 +193,7 @@ function TwentyCandidateCard({
   const forceCloseTradeLog = useAppStore((s) => s.forceCloseTradeLog);
   const [chatOpen, setChatOpen] = useState(false);
   const [chartOpen, setChartOpen] = useState(false);
+  const [aiChartOpen, setAiChartOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const bullish = candidate.analysis.bias === "bullish";
   const accent = bullish ? "#0EA5E9" : "#F43F5E";
@@ -503,6 +517,18 @@ function TwentyCandidateCard({
 
         {latest && (
           <>
+            <button
+              onClick={() => setAiChartOpen((v) => !v)}
+              className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-black mb-2 text-white"
+              style={{ background: "linear-gradient(135deg,#7C3AED,#DB2777)" }}
+            >
+              📈 {aiChartOpen ? "Hide AI chart" : "AI chart — zones, FVG, channel, this call's levels"}
+            </button>
+            {aiChartOpen && (
+              <div className="mb-2">
+                <AiChart symbol={symbolKey} plan={twentyChartPlan(latest, options, candles)} levels={null} />
+              </div>
+            )}
             <button
               onClick={() => setChartOpen((v) => !v)}
               className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold border mb-2 border-slate-200 bg-slate-50 text-sky-600"

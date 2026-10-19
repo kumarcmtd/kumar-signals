@@ -90,3 +90,19 @@ export function plannedPath(side: "CE" | "PE", now: number, t1: number, t2: numb
   pts.push({ dx: x + 15, price: second });
   return pts;
 }
+
+/**
+ * Ai20-20 calls are set in option premium. To draw them on the futures
+ * chart, each premium level is moved by the option's delta:
+ *   futures at a level = futures at entry + (premium level - entry premium) / delta
+ * An estimate (delta changes as price moves), labelled as such on the chart.
+ */
+export function premiumToFutures(
+  call: { entry: number; stop: number; targets: number[] },
+  delta: number | null,
+  futAtEntry: number | null,
+): { entry: number; stop: number; t1: number; t2: number | null } | null {
+  if (delta === null || !Number.isFinite(delta) || Math.abs(delta) < 0.05 || futAtEntry === null) return null;
+  const f = (p: number) => Math.round((futAtEntry + (p - call.entry) / delta) * 100) / 100;
+  return { entry: futAtEntry, stop: f(call.stop), t1: f(call.targets[0]), t2: call.targets[1] != null ? f(call.targets[1]) : null };
+}
