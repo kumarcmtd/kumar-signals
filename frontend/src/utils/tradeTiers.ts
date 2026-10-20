@@ -117,26 +117,45 @@ export function quickTier({ symbol, c5, c15, v, mc, news, now, minutesToClose }:
   const a5 = atr(closed5, 14);
   if (!a5) return none;
 
-  // 1. The push: 2 of the last 3 candles strong one way, the last one too, and real distance covered.
-  const reads = [3, 2, 1].map((k) => readCandle(closed5.slice(0, closed5.length - k + 1))!);
-  const last = closed5[closed5.length - 1];
-  const net = last.close - closed5[closed5.length - 4].close;
+  // 1. The push: 2 of the 3 candles BEFORE the last strong one way, >= 1 ATR.
+  // 2'. The pause: the last candle rests and holds above half of the push.
+  // Buying the third spike candle itself bought the top -- the first small
+  // pullback then hit the tight stop. Entering after the pause, with the
+  // stop under the push's halfway point, is the "comes back a bit, then
+  // goes" entry.
+  const L = closed5.length;
+  const reads = [4, 3, 2].map((k) => readCandle(closed5.slice(0, L - k + 1))!);
+  const last = closed5[L - 1];
+  const pushStart = closed5[L - 5].close;
+  const push = closed5.slice(L - 4, L - 1);
+  const net = closed5[L - 2].close - pushStart;
   const strong = (d: "up" | "down") => reads.filter((r) => r.strong && r.dir === d).length;
-  const side: "CE" | "PE" | null =
-    strong("up") >= 2 && reads[2].dir === "up" && net >= a5 ? "CE" : strong("down") >= 2 && reads[2].dir === "down" && -net >= a5 ? "PE" : null;
+  const side: "CE" | "PE" | null = strong("up") >= 2 && net >= a5 ? "CE" : strong("down") >= 2 && -net >= a5 ? "PE" : null;
   const up = side === "CE";
-  const lastRead = reads[2];
   const items: CheckItem[] = [
     {
       id: "push",
       label: "Strong one-sided 5-min push",
       state: side ? "pass" : "fail",
-      text: side ? `${strong(up ? "up" : "down")} of the last 3 candles strong ${up ? "green" : "red"}, ${Math.abs(net / a5).toFixed(1)}× ATR in 15 min` : "No strong one-sided push in the last 15 min",
+      text: side ? `${strong(up ? "up" : "down")} of 3 candles strong ${up ? "green" : "red"}, ${Math.abs(net / a5).toFixed(1)}× ATR` : "No strong one-sided push just before the last candle",
     },
   ];
   if (!side) return { ok: false, side: null, counterTrend: false, items, plan: null, failed: ["No strong 5-min push"] };
 
-  items.push({ id: "qvol", label: "Volume behind it", state: lastRead.volumeRatio === null ? "na" : lastRead.volumeRatio >= 1.3 ? "pass" : "fail", text: lastRead.volumeRatio === null ? "Volume not reported" : `Last candle ${lastRead.volumeRatio}× average (needs 1.3×)` });
+  const extreme = up ? Math.max(...push.map((c) => c.high)) : Math.min(...push.map((c) => c.low));
+  const mid = (pushStart + extreme) / 2;
+  const pauseRead = readCandle(closed5)!;
+  const spiking = pauseRead.strong && pauseRead.dir === (up ? "up" : "down");
+  const held = up ? last.low >= mid : last.high <= mid;
+  items.push({
+    id: "qpause",
+    label: "Paused and held — not chasing the spike",
+    state: !spiking && held ? "pass" : "fail",
+    text: spiking ? "Still spiking — wait for a resting candle" : held ? `Rested above half the push (${rs(mid)})` : `Fell back past half the push (${rs(mid)}) — push failing`,
+  });
+  const vr = Math.max(...reads.map((r) => r.volumeRatio ?? 0));
+  const volKnown = reads.some((r) => r.volumeRatio !== null);
+  items.push({ id: "qvol", label: "Volume behind the push", state: !volKnown ? "na" : vr >= 1.3 ? "pass" : "fail", text: !volKnown ? "Volume not reported" : `Strongest push candle ${vr}× average (needs 1.3×)` });
 
   // 2. The 15-minute agrees.
   const l15 = closed15[closed15.length - 1];
@@ -147,12 +166,14 @@ export function quickTier({ symbol, c5, c15, v, mc, news, now, minutesToClose }:
   // 3. News -- and only WITH news may a quick trade go against the 1-hour trend.
   const counterTrend = (up && mc.bias === "short") || (!up && mc.bias === "long");
   const nv = newsVsSide(news, side);
-  const newsOk = nv !== "against" && nv !== "strongly_against" && (!counterTrend || nv === "with");
+  // Against the 1-hour trend only on STRONG news for the side (net 35+).
+  const strongNews = !!news?.available && (up ? news.net : -news.net) >= 35;
+  const newsOk = nv !== "against" && nv !== "strongly_against" && (!counterTrend || strongNews);
   items.push({
     id: "qnews",
-    label: counterTrend ? "News WITH it (against the 1-hour trend)" : "News not against",
+    label: counterTrend ? "Strong news WITH it (against the 1-hour trend)" : "News not against",
     state: newsOk ? "pass" : "fail",
-    text: !news?.available ? "No news reading" : `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${counterTrend && nv !== "with" ? " — counter-trend needs news support" : ""}`,
+    text: !news?.available ? "No news reading" : `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${counterTrend && !strongNews ? " — counter-trend needs strong news (35+)" : ""}`,
   });
 
   // 4. Not already over-stretched.
@@ -161,9 +182,9 @@ export function quickTier({ symbol, c5, c15, v, mc, news, now, minutesToClose }:
   items.push({ id: "qstretch", label: "Not over-stretched", state: stretch <= 3 ? "pass" : "fail", text: `${stretch.toFixed(1)}× ATR from the 5-min EMA20 (max 3)` });
 
   // 5. Tight stop and room to the next level / zone.
-  const recent = closed5.slice(-3);
   const entry = last.close;
-  const stop = r2(up ? Math.min(...recent.map((c) => c.low)) - 0.1 * a5 : Math.max(...recent.map((c) => c.high)) + 0.1 * a5);
+  // Under the push's halfway point (and the pause candle): if that breaks, the push has failed.
+  const stop = r2(up ? Math.min(mid, last.low) - 0.15 * a5 : Math.max(mid, last.high) + 0.15 * a5);
   const risk = Math.abs(entry - stop);
   const lv = mc.levels;
   const zone = up ? v.sellerZone?.low : v.buyerZone?.high;
@@ -174,8 +195,8 @@ export function quickTier({ symbol, c5, c15, v, mc, news, now, minutesToClose }:
   const riskOk = risk > 0 && risk <= mc.atr15;
   items.push({
     id: "qroom",
-    label: "Tight stop, 1.5× room to the next level",
-    state: riskOk && rr >= 1.5 ? "pass" : "fail",
+    label: "Tight stop, 2× room to the next level",
+    state: riskOk && rr >= 2 ? "pass" : "fail",
     text: !riskOk ? `Stop ${rs(risk)} away — wider than 1× ATR(15m), not a quick trade` : `Stop ${rs(stop)} · ${next !== null ? `next level ${rs(next)}` : "open space"} · ${rr}× room`,
   });
 

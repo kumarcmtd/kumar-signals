@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Trophy } from "lucide-react";
 import { useTradeCardLog } from "../../api/hooks";
 import { cardStats, type CardCall } from "../../utils/tradeCardLog";
+import { lossReview } from "./TrustLiveCalls";
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 const NAME = { CRUDEOIL: "Crude", NATURALGAS: "NG" } as const;
@@ -61,17 +62,20 @@ export function TrustRecord() {
           {trusted.slice(0, 12).map((c) => {
             const e = END[c.result ?? "open"];
             return (
-              <div key={c.id} className="flex items-center gap-2 rounded-xl px-2.5 py-2" style={{ background: "#F8FAFC" }}>
-                <span className={`text-[11px] font-black rounded-md px-1.5 py-0.5 text-white ${c.side === "CE" ? "bg-emerald-600" : "bg-rose-600"}`}>
-                  {NAME[c.symbol]} {c.side}
-                </span>
-                <span className="flex-1 min-w-0 truncate text-[11px] text-slate-600">
-                  {when(c.openedAt)} · in {c.entry} · SL {c.stop} · T {c.t1}
-                </span>
-                <span className="text-[10.5px] font-black rounded-md px-1.5 py-0.5 shrink-0" style={{ background: e.bg, color: e.fg }}>
-                  {e.t}
-                  {c.r !== null ? ` ${c.r >= 0 ? "+" : ""}${c.r}R` : ""}
-                </span>
+              <div key={c.id} className="rounded-xl px-2.5 py-2" style={{ background: "#F8FAFC" }}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[11px] font-black rounded-md px-1.5 py-0.5 text-white ${c.side === "CE" ? "bg-emerald-600" : "bg-rose-600"}`}>
+                    {NAME[c.symbol]} {c.side}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate text-[11px] text-slate-600">
+                    {when(c.openedAt)} · in {c.entry} · SL {c.stop} · T {c.t1}
+                  </span>
+                  <span className="text-[10.5px] font-black rounded-md px-1.5 py-0.5 shrink-0" style={{ background: e.bg, color: e.fg }}>
+                    {e.t}
+                    {c.r !== null ? ` ${c.r >= 0 ? "+" : ""}${c.r}R` : ""}
+                  </span>
+                </div>
+                {c.result === "stop" && <p className="text-[10.5px] text-rose-700 mt-1 leading-snug">{lossReview(c)}</p>}
               </div>
             );
           })}

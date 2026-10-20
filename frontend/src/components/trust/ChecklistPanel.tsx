@@ -7,7 +7,8 @@
 
 import { useMemo, useState } from "react";
 import { ChevronDown, Minus, Plus } from "lucide-react";
-import { useCandles, useOvernightTracker } from "../../api/hooks";
+import { useCandles, useOvernightTracker, useTradeCardLog } from "../../api/hooks";
+import { dayGuard } from "../../utils/tradeCardLog";
 import { useAppStore } from "../../store/appStore";
 import { marketChecklist, type CheckItem, type CheckSection, type ItemState, type MarketChecklist } from "../../utils/checklist";
 import type { TradeVerdict } from "../../utils/tradeVerdict";
@@ -38,6 +39,10 @@ export interface FinalCall {
   quickLots: number | null;
   quickRiskRs: number | null;
   quickStrike: string;
+  /** What to type into the broker's P&L-based exit, for the lots shown. */
+  pnlExit: { profit: number; loss: number; lots: number } | null;
+  quickPnlExit: { profit: number; loss: number; lots: number } | null;
+  guard: { blocked: boolean; reason: string | null };
 }
 
 /** Everything the verdict needs, for one market. */
@@ -88,14 +93,22 @@ export function useChecklist(
   const qOpt = optFor(qp?.side);
   const quickRiskRs = qp ? Math.abs(qp.entry - qp.stop) * Math.abs(qOpt?.delta ?? 0.5) * lot : null;
   const quickLots = quickRiskRs && quickRiskRs > 0 ? Math.floor(maxRisk / 2 / quickRiskRs) : null;
+  // P&L-based exit amounts: (target premium - entry premium) x lot x lots, and
+  // the same to the stop. Without a live premium, the futures move x delta 0.5.
+  const exitFor = (o: OptionPick | null, entryFut: number, stopFut: number, t1Fut: number, nLots: number | null) => {
+    if (!nLots || nLots < 1) return null;
+    const d = o?.delta ?? null;
+    const perUnit = (to: number) => (d !== null ? Math.abs(d) : 0.5) * Math.abs(to - entryFut);
+    return { profit: Math.round(perUnit(t1Fut) * lot * nLots), loss: Math.round(perUnit(stopFut) * lot * nLots), lots: nLots };
+  };
 
   const trades = tradesToday.date === today ? tradesToday.count : 0;
   const realised = guardDay.date === today ? guardDay.realised : 0;
   const lossLimit = (risk.capital * risk.dailyLossPercent) / 100;
   const ist = new Date(Date.now() + 5.5 * 3600_000);
   const morning = ist.getUTCHours() < 10;
-  const move = overnight.data?.moves.find((m) => m.tracksMCX === symbol);
-  const inr = overnight.data?.moves.find((m) => /INR/i.test(m.symbol) || /rupee|INR/i.test(m.name));
+  const move = overnight.data?.moves?.find((m) => m.tracksMCX === symbol);
+  const inr = overnight.data?.moves?.find((m) => /INR/i.test(m.symbol) || /rupee|INR/i.test(m.name));
   const gapAgainst = move?.changePct != null && v.side && Math.abs(move.changePct) >= 1.5 && (v.side === "CE" ? move.changePct < 0 : move.changePct > 0);
 
   const personal: CheckSection = {
@@ -122,7 +135,10 @@ export function useChecklist(
       },
     ],
   };
-  const dayLocked = trades >= MAX_TRADES || realised <= -lossLimit;
+  const cardLog = useTradeCardLog();
+  const guard = dayGuard([...(cardLog.data?.CRUDEOIL ?? []), ...(cardLog.data?.NATURALGAS ?? [])], symbol, Date.now());
+  personal.items.push({ id: "guard", label: "Circuit breaker (cool-off / 2 stops a day)", state: guard.blocked ? "fail" : "pass", text: guard.reason ?? "No recent stop-outs" });
+  const dayLocked = trades >= MAX_TRADES || realised <= -lossLimit || guard.blocked;
   const trade = !!trustT?.ok && !dayLocked && (lots ?? 0) >= 1;
   const quickOk = !trade && !!quick?.ok && !dayLocked && (quickLots ?? 0) >= 1;
 
@@ -154,6 +170,9 @@ export function useChecklist(
     premT1: plan ? prem(plan.t1) : null,
     quickLots,
     quickRiskRs,
+    pnlExit: plan ? exitFor(opt, plan.entry, plan.stop, plan.t1, lots) : null,
+    quickPnlExit: qp ? exitFor(qOpt, qp.entry, qp.stop, qp.t1, quickLots) : null,
+    guard,
     quickStrike: qOpt ? `${qOpt.strike} ${qOpt.side}${qOpt.ltp != null ? ` @ ~₹${qOpt.ltp.toFixed(2)}` : ""}` : `ATM ${qp?.side ?? ""}`,
   };
 }

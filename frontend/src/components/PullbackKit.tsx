@@ -70,7 +70,10 @@ export function PullbackStatusCard({ result, onOpen, loading, error }: {
   }
   if (!result) return null;
 
+  // The Worker can answer 200 with { error } -- no state to show then, rather
+  // than crashing the whole page shell.
   const s = STATE_STYLE[result.state];
+  if (!s) return null;
   const { Icon } = s;
 
   return (
@@ -120,6 +123,7 @@ export function PullbackStatusCard({ result, onOpen, loading, error }: {
 
 export function StateBanner({ result }: { result: PullbackResult }) {
   const s = STATE_STYLE[result.state];
+  if (!s) return null;
   const { Icon } = s;
   return (
     <div className="rounded-2xl px-4 py-4" style={{ background: s.soft, border: `1.5px solid ${s.edge}` }}>

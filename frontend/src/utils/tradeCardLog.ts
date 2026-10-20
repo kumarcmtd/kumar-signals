@@ -139,3 +139,25 @@ export function cardStats(log: CardCall[]): CardStats {
     avgLossR: avg(losses),
   };
 }
+
+export const COOL_OFF_MIN = 60;
+export const MAX_STOPS_PER_DAY = 2;
+
+/**
+ * The circuit breaker. After a stop-out the same market often keeps chopping
+ * against the setup, and two losers in a day are the sign the day does not
+ * suit the system. So: no new call on a market for 60 minutes after it
+ * stopped out, and no new calls at all after 2 stop-outs in a day.
+ */
+export function dayGuard(all: CardCall[], symbol: CardCall["symbol"], now: number): { blocked: boolean; reason: string | null } {
+  const ist = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString();
+  const today = ist(now).slice(0, 10);
+  const stops = all.filter((c) => c.result === "stop" && c.closedAt && ist(Date.parse(c.closedAt)).slice(0, 10) === today);
+  if (stops.length >= MAX_STOPS_PER_DAY) return { blocked: true, reason: `${stops.length} stop-losses today — no new calls until tomorrow. Protect the capital.` };
+  const mine = stops.filter((c) => c.symbol === symbol).sort((a, b) => b.closedAt!.localeCompare(a.closedAt!))[0];
+  if (mine) {
+    const until = Date.parse(mine.closedAt!) + COOL_OFF_MIN * 60_000;
+    if (now < until) return { blocked: true, reason: `Stopped out at ${ist(Date.parse(mine.closedAt!)).slice(11, 16)} — cooling off until ${ist(until).slice(11, 16)}.` };
+  }
+  return { blocked: false, reason: null };
+}

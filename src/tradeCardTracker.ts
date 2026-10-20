@@ -14,7 +14,7 @@ import { fetchEiaData } from "./eiaCalendar";
 import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
 import { tradeVerdict } from "../frontend/src/utils/tradeVerdict";
 import { newsPulseFor } from "../frontend/src/utils/newsPulse";
-import { advanceCall, maybeOpen, type CardCall } from "../frontend/src/utils/tradeCardLog";
+import { advanceCall, dayGuard, maybeOpen, type CardCall } from "../frontend/src/utils/tradeCardLog";
 import { trustGrade } from "../frontend/src/utils/trustGrade";
 import { marketChecklist } from "../frontend/src/utils/checklist";
 import { gradeTiers, quickTier, trustTier } from "../frontend/src/utils/tradeTiers";
@@ -149,8 +149,12 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
       });
       if (JSON.stringify(log) !== before) changed = true;
 
-      // 2. A new call, only while the market is open and not in the last minutes.
-      if (!dayOver && !log.some((c) => !c.closed)) {
+      // 2. A new call, only while the market is open and not in the last minutes,
+      // and not while the circuit breaker is on (cool-off / 2 stops today).
+      const others = Object.entries(logs).filter(([k]) => k !== sym).flatMap(([, l]) => l ?? []);
+      const guard = dayGuard([...log, ...others], sym, now);
+      if (guard.blocked) say(`no new call: ${guard.reason}`);
+      if (!dayOver && !guard.blocked && !log.some((c) => !c.closed)) {
         const [c15, c60, c240] = await Promise.all(["15", "60", "240"].map((tf) => getCandlesForTF(env, token, fut, tf)));
         if ("error" in c15 || "error" in c60 || "error" in c240) {
           say("15m/1h/4h candles did not load.");

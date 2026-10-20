@@ -36,6 +36,21 @@ function Ring({ score, outOf, color }: { score: number; outOf: number; color: st
   );
 }
 
+/** The two numbers for the broker's P&L-based exit. */
+function PnlExit({ x }: { x: { profit: number; loss: number; lots: number } | null }) {
+  if (!x) return null;
+  return (
+    <div className="mt-2 rounded-xl bg-black/25 px-2.5 py-2">
+      <p className="text-[10px] font-black uppercase tracking-wide text-white/80">Upstox P&L exit · {x.lots} lot{x.lots > 1 ? "s" : ""}</p>
+      <div className="grid grid-cols-2 gap-2 mt-1">
+        <p className="rounded-lg bg-emerald-400/30 px-2 py-1 text-[15px] font-black">Profit ≥ +₹{x.profit.toLocaleString("en-IN")}</p>
+        <p className="rounded-lg bg-rose-500/40 px-2 py-1 text-[15px] font-black">Loss ≥ −₹{x.loss.toLocaleString("en-IN")}</p>
+      </div>
+      <p className="text-[9.5px] text-white/70 mt-1">Estimated from the option's delta — set these right after you enter.</p>
+    </div>
+  );
+}
+
 /** Live price between the stop and the target. */
 function Track({ stop, t1, live }: { stop: number | null; t1: number | null; live: number | null }) {
   if (stop === null || t1 === null || live === null) return null;
@@ -149,6 +164,7 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
             {plan ? `R:R 1:${plan.rr}` : ""}
             {call.riskRs !== null ? ` · risk ≈ ₹${Math.round(call.riskRs)}/lot` : ""}
           </p>
+          <PnlExit x={call.pnlExit} />
         </div>
       )}
       {tier === "quick" && qp && (
@@ -164,8 +180,12 @@ export function TrustMarketCard({ symbol }: { symbol: Sym }) {
             {call.quickLots !== null ? `Lots: ${call.quickLots} (half risk) · ` : ""}
             {call.quickRiskRs !== null ? `risk ≈ ₹${Math.round(call.quickRiskRs)}/lot` : ""}
           </p>
+          <PnlExit x={call.quickPnlExit} />
           <p className="text-[11px] text-white/85 mt-1 leading-snug">Fast move — book at T1, trail to T2. Out at the stop, or at {qp.exitBy} if it stalls. Don't hold a quick trade longer.</p>
         </div>
+      )}
+      {tier === "none" && call.guard.blocked && (
+        <p className="relative mt-2 rounded-xl bg-rose-500/30 px-3 py-2 text-[12.5px] font-black leading-snug">🛑 {call.guard.reason}</p>
       )}
       {tier === "none" && <p className="relative text-[12.5px] font-semibold text-white/90 mt-2 leading-snug">{`${v.headline}. ${v.reason}`}</p>}
 

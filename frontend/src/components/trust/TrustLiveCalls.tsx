@@ -112,6 +112,17 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
         ) : (
           <p className="text-[11.5px] text-slate-500 mt-2">This call was logged before option prices were saved with calls — futures levels below.</p>
         )}
+        {c.opt && c.opt.t1 !== null && c.opt.stop !== null && !c.closed && (
+          <div className="mt-2 rounded-xl bg-violet-50 px-3 py-2">
+            <p className="text-[10px] font-black uppercase tracking-wide text-violet-700">Upstox P&L exit — per lot (× your lots)</p>
+            <p className="text-[14px] font-black text-slate-800 mt-0.5">
+              <span className="text-emerald-700">Profit +₹{Math.round((c.opt.t1 - c.opt.entry) * LOT_SIZE[sym]).toLocaleString("en-IN")}</span>
+              {"  ·  "}
+              <span className="text-rose-700">Loss −₹{Math.round((c.opt.entry - c.opt.stop) * LOT_SIZE[sym]).toLocaleString("en-IN")}</span>
+            </p>
+          </div>
+        )}
+        {c.result === "stop" && <p className="mt-2 rounded-xl bg-rose-50 px-3 py-1.5 text-[11px] font-bold text-rose-800">{lossReview(c)}</p>}
         <p className="text-[10.5px] text-slate-500 mt-2">
           Futures: entry {c.entry} · stop {c.stop} · T1 {c.t1}
           {c.t2 ? ` · T2 ${c.t2}` : ""}
@@ -129,6 +140,16 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
       <p className="px-5 pb-3 text-[9.5px] text-slate-400 leading-snug">Stop / target premiums are estimates from the futures levels (option delta). The call is settled on the futures price.</p>
     </div>
   );
+}
+
+/** One line on how a losing call failed -- so losses can be learned from. */
+export function lossReview(c: CardCall): string {
+  const mins = c.closedAt ? Math.round((Date.parse(c.closedAt) - Date.parse(c.openedAt)) / 60_000) : null;
+  const risk = Math.abs(c.entry - c.stop);
+  const went = risk > 0 ? c.bestPts / risk : 0;
+  const how =
+    went >= 0.8 ? `it went ${c.bestPts} pts your way first (${went.toFixed(1)}R) — a trailing stop / partial booking would have saved it` : went >= 0.3 ? `it moved only ${c.bestPts} pts your way before turning` : "it turned against you almost at once — the entry was late or the move was already over";
+  return `Loss review: stopped ${mins !== null ? `after ${mins} min` : ""}; ${how}.`;
 }
 
 function Box({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) {
