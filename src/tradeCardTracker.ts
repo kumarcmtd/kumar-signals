@@ -18,6 +18,9 @@ import { advanceCall, dayGuard, maybeOpen, type CardCall } from "../frontend/src
 import { trustGrade } from "../frontend/src/utils/trustGrade";
 import { marketChecklist } from "../frontend/src/utils/checklist";
 import { gradeTiers, quickTier, trustTier } from "../frontend/src/utils/tradeTiers";
+import { liveSignals, testAll, type StratStats } from "../frontend/src/utils/strategyBacktest";
+import { STRATEGIES } from "../frontend/src/utils/strategies";
+import { getHistorical30mCandles, GAP_STUDY_DAYS } from "./gapStudy";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
@@ -46,11 +49,15 @@ export function cardTradeText(c: CardCall, opt: OptionHint | null): { title: str
   const rr = risk > 0 ? Math.round((Math.abs(c.t1 - c.entry) / risk) * 10) / 10 : null;
   return {
     title:
-      c.tier === "quick"
+      c.tier === "proven"
+        ? `🧪 PROVEN SETUP ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`
+        : c.tier === "quick"
         ? `⚡ QUICK ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""} (half size)`
         : `${c.trust ? "💎 AI-TRUST · " : ""}${c.side === "CE" ? "🟢" : "🔴"} TRADE ${c.side}: ${name}${opt ? ` ${opt.strike} ${c.side}` : ""}`,
     body: [
-      c.tier === "quick"
+      c.tier === "proven"
+        ? `PROVEN SETUP -- a strategy that passed the 90-day test fired on the 30-min candle (${istTime(c.openedAt)}).`
+        : c.tier === "quick"
         ? `QUICK TRADE -- strong one-sided 5-min push (${istTime(c.openedAt)}). HALF size.${c.exitByIso ? ` Exit by ${istTime(c.exitByIso)} if no target.` : ""}`
         : c.tier === "trust"
           ? `AI-TRUST call -- all core checks pass (${istTime(c.openedAt)} candle). Full size.`
@@ -183,8 +190,19 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
           const tiers = gradeTiers(trustTier(v, mc, g, mtc), quickTier({ symbol: sym, c5, c15, v, mc, news, now, minutesToClose: mtc }));
           const lastClosed = closed5[closed5.length - 1] ?? null;
           const qp = tiers.quick.plan;
+          // 🧪 A strategy that PASSED the 90-day test, firing on the 30-min candle that just closed.
+          const proven = session.minutes % 30 < 5 ? await provenSignal(env, token, fut, sym, now).catch(() => null) : null;
           let next = log;
-          if (tiers.tier === "trust" && mc.plan) {
+          if (proven) {
+            const st = proven.stats;
+            next = maybeOpen(
+              log,
+              sym,
+              { action: `TRADE_${proven.side}`, side: proven.side, stop: proven.stop, t1: proven.target, reason: `${STRATEGIES.find((x) => x.id === proven.strategy)!.name} — tested ${st.hitRate}% hit, ${st.avgR}R avg over ${st.trades} trades.` },
+              lastClosed,
+              { tier: "proven", trust: false },
+            );
+          } else if (tiers.tier === "trust" && mc.plan) {
             const p = mc.plan;
             next = maybeOpen(log, sym, { action: `TRADE_${p.side}`, side: p.side, stop: p.stop, t1: p.t1, reason: `All core checks pass, supporting ${tiers.trust.supportPct}%.` }, lastClosed, { tier: "trust", trust: true, t2: p.t2 });
           } else if (v.action === "TRADE_CE" || v.action === "TRADE_PE") {
@@ -231,6 +249,34 @@ export async function runTradeCardTracker(env: Env): Promise<string[]> {
     }
   }
   return report;
+}
+
+/**
+ * The strategies that passed the 90-day test for this market (worked out once
+ * a day and cached), and whether one of them fires on the latest finished
+ * 30-minute candle.
+ */
+async function provenSignal(env: Env, token: string, fut: Parameters<typeof getCandlesForTF>[2], sym: "CRUDEOIL" | "NATURALGAS", now: number) {
+  const day = new Date(now + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const key = `proven:v1:${sym}:${day}`;
+  const history = await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
+  let proven: StratStats[] | null = null;
+  try {
+    proven = JSON.parse((await env.COMMODITY_KV.get(key)) ?? "null");
+  } catch {
+    proven = null;
+  }
+  if (!proven) {
+    proven = history.length > 200 ? testAll(history).best.filter((s) => s.proven) : [];
+    await cachePut(env.COMMODITY_KV, key, JSON.stringify(proven), { expirationTtl: 2 * 86_400 });
+  }
+  if (!proven.length) return null;
+  const today = await getCandlesForTF(env, token, fut, "30");
+  const merged = new Map<string, (typeof history)[number]>();
+  for (const c of [...history, ...("error" in today ? [] : today)]) merged.set(c.date, c);
+  const forming = sessionBucketStart(now, 30);
+  const closed = [...merged.values()].filter((c) => Date.parse(c.date) < forming).sort((a, b) => a.date.localeCompare(b.date));
+  return liveSignals(closed, proven)[0] ?? null;
 }
 
 /** The ATM option for a new call, and its premium at the stop and target (delta estimate). */

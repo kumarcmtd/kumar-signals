@@ -32,7 +32,7 @@ export interface CardCall {
   r: number | null; // pnlPts / risk
   bestPts: number; // furthest in the call's favour while open
   trust?: boolean; // passed the stricter Ai-Trust rules too (utils/trustGrade)
-  tier?: "card" | "trust" | "quick"; // which call it was (missing on old entries = "card")
+  tier?: "card" | "trust" | "quick" | "proven"; // which call it was (missing on old entries = "card")
   t2?: number;
   exitByIso?: string; // quick trades: time stop -- closed at market if still open then
   /** The ATM option at the moment of the call: entry premium and the premium

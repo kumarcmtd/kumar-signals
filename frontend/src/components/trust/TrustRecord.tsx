@@ -20,8 +20,10 @@ const END: Record<NonNullable<CardCall["result"]> | "open", { t: string; bg: str
 export function TrustRecord() {
   const q = useTradeCardLog();
   const all = [...(q.data?.CRUDEOIL ?? []), ...(q.data?.NATURALGAS ?? [])];
-  const [tab, setTab] = useState<"trust" | "quick">("trust");
-  const trusted = all.filter((c) => (tab === "quick" ? c.tier === "quick" : c.trust && c.tier !== "quick")).sort((a, b) => b.openedAt.localeCompare(a.openedAt));
+  const [tab, setTab] = useState<"proven" | "trust" | "quick">("proven");
+  const trusted = all
+    .filter((c) => (tab === "quick" ? c.tier === "quick" : tab === "proven" ? c.tier === "proven" : c.trust && c.tier !== "quick" && c.tier !== "proven"))
+    .sort((a, b) => b.openedAt.localeCompare(a.openedAt));
   const s = cardStats(trusted);
   const tiles = [
     { big: s.winRate === null ? "—" : `${s.winRate}%`, small: "win rate", bg: "linear-gradient(135deg,#10B981,#059669)" },
@@ -33,15 +35,15 @@ export function TrustRecord() {
       <p className="text-[13px] font-black text-slate-900 flex items-center gap-1.5">
         <Trophy size={16} className="text-amber-500" /> Track record
       </p>
-      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
-        {(["trust", "quick"] as const).map((k) => (
+      <div className="grid grid-cols-3 gap-1 rounded-2xl bg-slate-100 p-1">
+        {(["proven", "trust", "quick"] as const).map((k) => (
           <button
             key={k}
             onClick={() => setTab(k)}
             className={`rounded-xl py-1.5 text-[12px] font-black ${tab === k ? "text-white shadow" : "text-slate-500"}`}
-            style={tab === k ? { background: k === "trust" ? "linear-gradient(135deg,#7C3AED,#DB2777)" : "linear-gradient(135deg,#0EA5E9,#6366F1)" } : undefined}
+            style={tab === k ? { background: k === "proven" ? "linear-gradient(135deg,#059669,#0D9488)" : k === "trust" ? "linear-gradient(135deg,#7C3AED,#DB2777)" : "linear-gradient(135deg,#0EA5E9,#6366F1)" } : undefined}
           >
-            {k === "trust" ? "💎 Trust calls" : "⚡ Quick trades"}
+            {k === "proven" ? "🧪 Proven" : k === "trust" ? "💎 Trust" : "⚡ Quick"}
           </button>
         ))}
       </div>
@@ -55,7 +57,7 @@ export function TrustRecord() {
       </div>
       {trusted.length === 0 ? (
         <p className="text-[12px] text-slate-500 leading-snug">
-          {tab === "quick" ? "No quick trade yet." : "No trust call yet. That is normal — they are rare by design."} Every one will be listed here with how it ended, wins and losses alike.
+          {tab === "quick" ? "No quick trade yet." : tab === "proven" ? "No proven-strategy trade yet. They fire only when a strategy that passed the 90-day test triggers." : "No trust call yet. That is normal — they are rare by design."} Every one will be listed here with how it ended, wins and losses alike.
         </p>
       ) : (
         <div className="space-y-1.5">

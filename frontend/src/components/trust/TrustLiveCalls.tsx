@@ -10,7 +10,7 @@
 // the premium scale.
 
 import { useState } from "react";
-import { Gem, Zap, ShieldCheck } from "lucide-react";
+import { Gem, Zap, ShieldCheck, FlaskConical } from "lucide-react";
 import { AiChart } from "./AiChart";
 import { useOptionsAnalytics, useTradeCardLog } from "../../api/hooks";
 import { liveLtpFor } from "../../hooks/useTradeLog";
@@ -66,7 +66,9 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
   const current = c.closed ? (entry?.exitPrice ?? null) : live;
   const tier = c.tier ?? "card";
   const look =
-    tier === "trust"
+    tier === "proven"
+      ? { Icon: FlaskConical, label: "PROVEN STRATEGY", bar: "linear-gradient(180deg,#059669,#0D9488)" }
+      : tier === "trust"
       ? { Icon: Gem, label: "AI-TRUST CALL", bar: "linear-gradient(180deg,#7C3AED,#DB2777)" }
       : tier === "quick"
         ? { Icon: Zap, label: "QUICK TRADE · half size", bar: "linear-gradient(180deg,#0284C7,#7C3AED)" }

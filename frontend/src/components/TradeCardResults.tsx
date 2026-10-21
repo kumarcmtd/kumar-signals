@@ -26,7 +26,7 @@ const RESULT: Record<NonNullable<CardCall["result"]> | "open", { label: string; 
 
 function Market({ sym, log: all }: { sym: Sym; log: CardCall[] }) {
   // Quick trades have their own record on Ai-Trust.
-  const log = all.filter((c) => (c.tier ?? "card") !== "quick");
+  const log = all.filter((c) => (c.tier ?? "card") === "card" || c.tier === "trust");
   const s = cardStats(log);
   const rupees = Math.round(s.totalPts * ATM_DELTA * LOT_SIZE[sym]);
   const recent = [...log].reverse().slice(0, 8);

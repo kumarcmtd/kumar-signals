@@ -11,6 +11,7 @@ import { Gem, RefreshCw } from "lucide-react";
 import { TrustMarketCard } from "../components/trust/TrustMarketCard";
 import { TrustRecord } from "../components/trust/TrustRecord";
 import { TrustLiveCalls } from "../components/trust/TrustLiveCalls";
+import { StrategyLab } from "../components/trust/StrategyLab";
 import { TradeCounter } from "../components/trust/ChecklistPanel";
 
 const RULES = [
@@ -77,6 +78,9 @@ export function AiTrust() {
       </section>
 
       <TradeCounter />
+
+      {/* Evidence first: only strategies that passed a 90-day test call trades here. */}
+      <StrategyLab />
 
       <TrustMarketCard symbol="CRUDEOIL" />
       <TrustMarketCard symbol="NATURALGAS" />
