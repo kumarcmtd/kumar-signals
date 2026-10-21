@@ -58,3 +58,13 @@ test("EIA warning goes once, ~30 min before the release, during market hours", a
   await runImportantAlerts(env);
   expect(fetchMock).toHaveBeenCalledTimes(1); // not repeated
 });
+
+test("session window push: today's move, the measured line, and a 'not a certainty' note", async () => {
+  const { sessionWindowText } = await import("../../src/importantAlerts");
+  const m = sessionWindowText("CRUDEOIL", "US data + pre-open", 18 * 60, 1.24, "FELL on 70% of 23 days (avg -0.31%) — leaning.", true);
+  expect(m.title).toBe("⏰ Crude Oil: US data + pre-open at 6:00 PM");
+  expect(m.body).toContain("+1.24% since 9:00 (already rallied)");
+  expect(m.body).toContain("FELL on 70% of 23 days");
+  expect(m.body).toContain("not a certainty");
+  expect(m.body).not.toContain("\\n");
+});

@@ -12,6 +12,7 @@ import { TrustMarketCard } from "../components/trust/TrustMarketCard";
 import { TrustRecord } from "../components/trust/TrustRecord";
 import { TrustLiveCalls } from "../components/trust/TrustLiveCalls";
 import { StrategyLab } from "../components/trust/StrategyLab";
+import { SessionClock } from "../components/trust/SessionClock";
 import { TradeCounter } from "../components/trust/ChecklistPanel";
 
 const RULES = [
@@ -81,6 +82,8 @@ export function AiTrust() {
 
       {/* Evidence first: only strategies that passed a 90-day test call trades here. */}
       <StrategyLab />
+
+      <SessionClock />
 
       <TrustMarketCard symbol="CRUDEOIL" />
       <TrustMarketCard symbol="NATURALGAS" />
