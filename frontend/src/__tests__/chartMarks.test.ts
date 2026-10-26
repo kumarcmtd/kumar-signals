@@ -42,3 +42,16 @@ test("Ai20-20 premium levels map to futures levels by delta (CE up, PE mirrored)
   expect(pe.t1).toBe(298);
   expect(premiumToFutures({ entry: 10, stop: 9, targets: [11, 12, 13] }, null, 300)).toBeNull();
 });
+
+test("where the price is: at a buy zone, at a sell zone, between, or broken through", async () => {
+  const { whereNow } = await import("../utils/chartMarks");
+  const buy = [{ low: 239, high: 240 }];
+  const sell = [{ low: 247, high: 249 }];
+  expect(whereNow(240.2, buy, sell, 2).state).toBe("at_buy");
+  expect(whereNow(246.8, buy, sell, 2).state).toBe("at_sell");
+  const mid = whereNow(243, buy, sell, 2);
+  expect(mid.state).toBe("between");
+  expect(mid.text).toMatch(/Buy zone ₹240.00 below; sell zone ₹247.00 above/);
+  expect(whereNow(236, buy, sell, 2).state).toBe("broke_buy");
+  expect(whereNow(252, buy, sell, 2).state).toBe("broke_sell");
+});

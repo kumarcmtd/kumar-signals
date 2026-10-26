@@ -106,3 +106,38 @@ export function premiumToFutures(
   const f = (p: number) => Math.round((futAtEntry + (p - call.entry) / delta) * 100) / 100;
   return { entry: futAtEntry, stop: f(call.stop), t1: f(call.targets[0]), t2: call.targets[1] != null ? f(call.targets[1]) : null };
 }
+
+export interface WhereNow {
+  state: "at_buy" | "at_sell" | "between" | "broke_buy" | "broke_sell";
+  short: string; // a label next to the blinking dot
+  text: string; // what to do
+}
+
+/**
+ * Where the live price sits against the buy (green) and sell (red) zones,
+ * and what that means for entering or exiting. "At" a zone = inside it or
+ * within a quarter of an ATR of its edge.
+ */
+export function whereNow(price: number, buy: { low: number; high: number }[], sell: { low: number; high: number }[], atrNow: number): WhereNow {
+  const near = 0.25 * atrNow;
+  const rs = (n: number) => `₹${n.toFixed(2)}`;
+  const atBuy = buy.filter((z) => price >= z.low - near && price <= z.high + near).sort((a, b) => Math.abs(price - a.high) - Math.abs(price - b.high))[0];
+  const atSell = sell.filter((z) => price >= z.low - near && price <= z.high + near).sort((a, b) => Math.abs(price - a.low) - Math.abs(price - b.low))[0];
+  if (atBuy && (!atSell || Math.abs(price - atBuy.high) <= Math.abs(price - atSell.low))) {
+    return { state: "at_buy", short: "AT BUY ZONE", text: `At the buy zone ${rs(atBuy.low)}–${rs(atBuy.high)}: CE entry only on a strong green 5/15-min candle here. Holding PE? Book profit here.` };
+  }
+  if (atSell) {
+    return { state: "at_sell", short: "AT SELL ZONE", text: `At the sell zone ${rs(atSell.low)}–${rs(atSell.high)}: PE entry only on a strong red 5/15-min candle here. Holding CE? Book profit here.` };
+  }
+  const below = buy.filter((z) => z.high < price).sort((a, b) => b.high - a.high)[0];
+  const above = sell.filter((z) => z.low > price).sort((a, b) => a.low - b.low)[0];
+  const brokeBuy = buy.length > 0 && buy.every((z) => price < z.low - near);
+  const brokeSell = sell.length > 0 && sell.every((z) => price > z.high + near);
+  if (brokeBuy) return { state: "broke_buy", short: "BELOW BUY ZONE", text: "Price broke below every buy zone: sellers in control. Exit CE; PE only on a pull-back up into the broken zone." };
+  if (brokeSell) return { state: "broke_sell", short: "ABOVE SELL ZONE", text: "Price broke above every sell zone: buyers in control. Exit PE; CE only on a dip back into the broken zone." };
+  return {
+    state: "between",
+    short: "BETWEEN ZONES",
+    text: `No fresh entry here.${below ? ` Buy zone ${rs(below.high)} below` : ""}${below && above ? ";" : ""}${above ? ` sell zone ${rs(above.low)} above` : ""}.`,
+  };
+}

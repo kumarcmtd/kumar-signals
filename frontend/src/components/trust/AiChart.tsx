@@ -8,7 +8,8 @@
 import { useMemo, useState } from "react";
 import { useCandles } from "../../api/hooks";
 import { findZones } from "../../utils/zones";
-import { findFvgs, plannedPath, trendChannel } from "../../utils/chartMarks";
+import { findFvgs, plannedPath, trendChannel, whereNow } from "../../utils/chartMarks";
+import { atr } from "../../utils/indicators";
 import { keyLevels, type KeyLevels } from "../../utils/checklist";
 import type { Candle } from "../../types";
 
@@ -41,6 +42,10 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
   const lv = useMemo(() => levels ?? keyLevels(candles), [levels, candles]);
   const fvgs = useMemo(() => findFvgs(candles), [candles]);
   const ch = useMemo(() => trendChannel(candles), [candles]);
+  // Green = buy zones (buyers' zones + upward gaps), red = sell zones.
+  const buyZones = [...(zones?.buyer.slice(0, 2) ?? []), ...fvgs.filter((f) => f.kind === "bull")];
+  const sellZones = [...(zones?.seller.slice(0, 2) ?? []), ...fvgs.filter((f) => f.kind === "bear")];
+  const now = whereNow(last.close, buyZones, sellZones, atr(candles, 14) ?? (last.high - last.low || 1));
 
   let lo = Math.min(...candles.map((c) => c.low));
   let hi = Math.max(...candles.map((c) => c.high));
@@ -89,6 +94,13 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
   const path = plan && plan.t1 != null ? plannedPath(plan.side, last.close, plan.t1, plan.t2, plan.zone) : null;
 
   return (
+    <>
+    <p
+      className="mb-1.5 rounded-xl px-2.5 py-1.5 text-[11.5px] font-black leading-snug text-white"
+      style={{ background: now.state === "at_buy" || now.state === "broke_sell" ? "#059669" : now.state === "at_sell" || now.state === "broke_buy" ? "#E11D48" : "#2563EB" }}
+    >
+      ● {now.short}: {now.text}
+    </p>
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto rounded-xl" style={{ background: "#F8FAFC" }}>
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
@@ -104,9 +116,9 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
         </g>
       ))}
       {/* zones and gaps first, under the candles */}
-      {zones?.buyer.slice(0, 2).map((z, i) => <g key={`b${i}`}>{zoneRect(z.low, z.high, 0, "rgba(16,185,129,.16)", "#059669", `BUYERS ${z.at}`)}</g>)}
-      {zones?.seller.slice(0, 2).map((z, i) => <g key={`s${i}`}>{zoneRect(z.low, z.high, 0, "rgba(244,63,94,.16)", "#E11D48", `SELLERS ${z.at}`)}</g>)}
-      {fvgs.map((f, i) => <g key={`f${i}`}>{zoneRect(f.low, f.high, x(f.index), f.kind === "bull" ? "rgba(99,102,241,.14)" : "rgba(234,88,12,.14)", f.kind === "bull" ? "#4F46E5" : "#EA580C", `FVG ${f.kind === "bull" ? "▲" : "▼"}`)}</g>)}
+      {zones?.buyer.slice(0, 2).map((z, i) => <g key={`b${i}`}>{zoneRect(z.low, z.high, 0, "rgba(16,185,129,.22)", "#059669", `BUY ZONE ${z.at}`)}</g>)}
+      {zones?.seller.slice(0, 2).map((z, i) => <g key={`s${i}`}>{zoneRect(z.low, z.high, 0, "rgba(244,63,94,.22)", "#E11D48", `SELL ZONE ${z.at}`)}</g>)}
+      {fvgs.map((f, i) => <g key={`f${i}`}>{zoneRect(f.low, f.high, x(f.index), f.kind === "bull" ? "rgba(16,185,129,.13)" : "rgba(244,63,94,.13)", f.kind === "bull" ? "#059669" : "#E11D48", f.kind === "bull" ? "BUY ZONE · gap" : "SELL ZONE · gap")}</g>)}
       {plan?.zone && zoneRect(plan.zone.low, plan.zone.high, x(n - 1), "rgba(250,204,21,.28)", "#A16207", "WAIT HERE")}
       {/* channel */}
       {ch &&
@@ -148,6 +160,29 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
       {hLine(plan?.t1, "#059669", "T1", undefined, true)}
       {hLine(plan?.t2, "#047857", "T2", "4 2", true)}
       {hLine(last.close, "#0F172A", "NOW", "1 2")}
+      {/* the blinking live-price point, with where it sits */}
+      {(() => {
+        const cx = x(n - 1);
+        const cy = y(last.close);
+        const col = now.state === "at_buy" || now.state === "broke_sell" ? "#059669" : now.state === "at_sell" || now.state === "broke_buy" ? "#E11D48" : "#2563EB";
+        const tw = now.short.length * 4.6 + 8;
+        const above = cy > P_TOP + 22;
+        return (
+          <g>
+            <circle cx={cx} cy={cy} r={4} fill={col} opacity={0.35}>
+              <animate attributeName="r" values="4;11;4" dur="1.4s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.55;0;0.55" dur="1.4s" repeatCount="indefinite" />
+            </circle>
+            <circle cx={cx} cy={cy} r={3.2} fill={col} stroke="#fff" strokeWidth={1.2}>
+              <animate attributeName="opacity" values="1;0.35;1" dur="1.4s" repeatCount="indefinite" />
+            </circle>
+            <rect x={Math.max(2, cx - tw - 8)} y={above ? cy - 20 : cy + 8} width={tw} height={12} rx={3} fill={col} />
+            <text x={Math.max(2, cx - tw - 8) + 4} y={above ? cy - 11 : cy + 17} fontSize={7} fontWeight={900} fill="#fff">
+              {now.short}
+            </text>
+          </g>
+        );
+      })()}
       {path && (
         <polyline
           points={path.map((p) => `${x(n - 1 + p.dx)},${y(Math.min(hi, Math.max(lo, p.price)))}`).join(" ")}
@@ -167,6 +202,7 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
         ) : null,
       )}
     </svg>
+    </>
   );
 }
 
@@ -186,9 +222,9 @@ export function AiChart({ symbol, plan, levels }: { symbol: "CRUDEOIL" | "NATURA
       </div>
       {candles && candles.length >= 20 ? <Chart candles={candles} plan={plan} levels={levels} /> : <p className="text-[11px] text-slate-500 p-4 text-center">{q.isLoading ? "Loading candles…" : "Not enough candles to draw yet."}</p>}
       <div className="flex flex-wrap gap-x-2 gap-y-0.5 px-1 mt-1.5 text-[9px] font-bold text-slate-600">
-        <span className="text-emerald-700">■ buyers</span>
-        <span className="text-rose-700">■ sellers</span>
-        <span className="text-indigo-700">■ FVG gap</span>
+        <span className="text-emerald-700">■ BUY zone (CE side)</span>
+        <span className="text-rose-700">■ SELL zone (PE side)</span>
+        <span className="text-blue-700">● live price</span>
         <span className="text-amber-700">■ wait zone</span>
         <span>— channel</span>
         <span className="text-teal-700">- - ➜ planned path{plan ? `: ${plan.label}` : ""}</span>
