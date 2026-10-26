@@ -6,7 +6,7 @@ import {
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
   GraduationCap, BarChart3, Settings, Sparkles, Repeat, Scale, AlarmClock, Activity as ActivityIcon,
-  Microscope, Rss, Shield, Gem,
+  Microscope, Rss, Shield, Gem, Sun,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
@@ -42,6 +42,10 @@ const PRIMARY: NavItem[] = [
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
+  {
+    title: "🎯 Focus on one market",
+    items: [{ to: "/ai-today", label: "Ai-Today", icon: Sun }],
+  },
   {
     title: "Signals",
     items: [

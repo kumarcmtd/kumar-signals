@@ -86,13 +86,16 @@ function Market({ sym }: { sym: Sym }) {
   );
 }
 
-export function SessionClock() {
-  const [sym, setSym] = useState<Sym>("CRUDEOIL");
+/** With `symbol`, it shows that one market only (Ai-Today); without, a Crude / NG switch. */
+export function SessionClock({ symbol }: { symbol?: Sym } = {}) {
+  const [picked, setSym] = useState<Sym>("CRUDEOIL");
+  const sym = symbol ?? picked;
   return (
     <section className="rounded-3xl bg-white p-4 shadow-lg border border-violet-100 space-y-3">
       <p className="text-[13.5px] font-black text-slate-900 flex items-center gap-1.5">
         <Clock size={16} className="text-violet-600" /> Session clock — when price usually moves (IST)
       </p>
+      {!symbol && (
       <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
         {(["CRUDEOIL", "NATURALGAS"] as const).map((s) => (
           <button key={s} onClick={() => setSym(s)} className={`rounded-xl py-1.5 text-[12px] font-black ${sym === s ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}>
@@ -100,6 +103,7 @@ export function SessionClock() {
           </button>
         ))}
       </div>
+      )}
       <Market key={sym} sym={sym} />
       <p className="text-[9.5px] text-slate-400 leading-snug">
         Measured on the last 90 days of 30-min candles. "After a rally" = the top third of days by the move from 9:00 to the window; "after a fall" = the bottom third. Reliable / leaning only when the count beats chance clearly; otherwise coin flip. Times shift automatically when US / UK clocks change.

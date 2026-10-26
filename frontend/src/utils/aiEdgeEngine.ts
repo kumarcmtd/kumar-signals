@@ -58,6 +58,7 @@ export const ENGINES: EngineDef[] = [
   { id: "best", label: "Best Call", prefix: "BEST", route: "/best-call" },
   { id: "shoot", label: "AI-Shoot", prefix: "SHOOT", route: "/" },
   { id: "twenty20", label: "Ai20-20", prefix: "TWENTY20", route: "/ai-20-20" },
+  { id: "today", label: "Ai-Today", prefix: "TODAY", route: "/ai-today" },
   { id: "levelcross", label: "Level Cross", prefix: "LEVELCROSS", route: "/level-cross-scan" },
   { id: "aiup", label: "AI-Up", prefix: "AIUP", route: "/ai-up" },
   { id: "aiown", label: "AI Own", prefix: "AIOWN", route: "/ai-own" },

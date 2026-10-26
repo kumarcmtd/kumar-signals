@@ -100,13 +100,16 @@ function PagesThatEarned() {
   );
 }
 
-export function StrategyLab() {
-  const [sym, setSym] = useState<Sym>("CRUDEOIL");
+/** With `symbol`, it shows that one market only (Ai-Today); without, a Crude / NG switch. */
+export function StrategyLab({ symbol }: { symbol?: Sym } = {}) {
+  const [picked, setSym] = useState<Sym>("CRUDEOIL");
+  const sym = symbol ?? picked;
   return (
     <section className="rounded-3xl bg-white p-4 shadow-lg border border-emerald-100 space-y-3">
       <p className="text-[13.5px] font-black text-slate-900 flex items-center gap-1.5">
         <FlaskConical size={16} className="text-emerald-600" /> Proven strategies — tested on your last 90 days
       </p>
+      {!symbol && (
       <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
         {(["CRUDEOIL", "NATURALGAS"] as const).map((s) => (
           <button key={s} onClick={() => setSym(s)} className={`rounded-xl py-1.5 text-[12px] font-black ${sym === s ? "bg-white text-slate-900 shadow" : "text-slate-500"}`}>
@@ -114,6 +117,7 @@ export function StrategyLab() {
           </button>
         ))}
       </div>
+      )}
       <Market key={sym} sym={sym} />
       <PagesThatEarned />
       <p className="text-[9.5px] text-slate-400 leading-snug">

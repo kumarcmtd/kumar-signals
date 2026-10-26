@@ -26,7 +26,11 @@ export const LIVE_PAGE_PATHS = [
 
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 
-const ALWAYS_LIVE = new Set<string>(LIVE_PAGE_PATHS);
+// Live but NOT a bottom-bar tab: Ai-Today (More menu) logs its own calls,
+// so it must keep updating while it is open.
+export const EXTRA_LIVE_PATHS = ["/ai-today"] as const;
+
+const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 
 /** True when this route is one of the six that always keep updating. */
 export function isAlwaysLivePage(pathname: string): boolean {
