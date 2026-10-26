@@ -11,7 +11,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Target } from "lucide-react";
 import { useTodayFocus, TODAY_TFS, tfRecord, type FocusSym } from "../hooks/useTodayFocus";
 import { marketPicture } from "../utils/marketPicture";
-import { pickBest, type TfCall } from "../utils/todayPick";
+import type { TfCall } from "../utils/todayPick";
+import { PLAN, planVerdict, actionable } from "../utils/playbook";
 import { TodayCallCard } from "../components/today/TodayCallCard";
 import { SessionClock } from "../components/trust/SessionClock";
 import { StrategyLab } from "../components/trust/StrategyLab";
@@ -68,8 +69,13 @@ function Focus({ sym, setSym }: { sym: FocusSym; setSym: (s: FocusSym) => void }
     const higher = tf === "240" ? [f.analyses[3].optSide] : tf === "60" ? [f.analyses[4].optSide] : [f.analyses[3].optSide, f.analyses[4].optSide];
     return { tf, short, entry, record: tfRecord(f.logs, sym, tf), higherSides: higher, i };
   });
-  const pick = pickBest(calls, pic?.favour ?? null);
-  const ordered = [...calls].sort((a, b) => Number(b.tf === pick?.tf) - Number(a.tf === pick?.tf));
+  // The trader's plan for this market decides; other timeframes are background.
+  const plan = PLAN[sym];
+  const reads = TODAY_TFS.map(({ tf }, i) => ({ tf, optSide: f.analyses[i].optSide, decision: f.analyses[i].decision }));
+  const verdict = planVerdict(sym, reads, calls.find((c) => c.tf === plan.lead)?.record);
+  const planCalls = plan.tfs.map((tf) => calls.find((c) => c.tf === tf)!).reverse();
+  const otherCalls = calls.filter((c) => !plan.tfs.includes(c.tf));
+  const [showOthers, setShowOthers] = useState(false);
   const last = f.candles["5"].at(-1);
 
   const refresh = async () => {
@@ -137,22 +143,37 @@ function Focus({ sym, setSym }: { sym: FocusSym; setSym: (s: FocusSym) => void }
         </p>
       )}
 
-      <section className="space-y-3">
-        <p className="text-[14px] font-black text-slate-900 flex items-center gap-1.5 px-1">
-          <Target size={16} className="text-violet-600" /> Calls by timeframe
+      {/* YOUR PLAN -- the one answer for this market */}
+      <section
+        className="rounded-3xl p-4 shadow-xl text-white"
+        style={{ background: verdict.trade ? (verdict.side === "CE" ? "linear-gradient(135deg,#065F46,#10B981)" : "linear-gradient(135deg,#9F1239,#F43F5E)") : "linear-gradient(135deg,#1E293B,#475569)" }}
+      >
+        <p className="text-[11px] font-black uppercase tracking-[.16em] text-white/80 flex items-center gap-1.5">
+          <Target size={13} /> Your plan · {plan.rule}
         </p>
-        {pick ? (
-          <p className="text-[11.5px] text-slate-600 px-1 leading-snug">
-            <b>Best now: {TODAY_TFS.find((t) => t.tf === pick.tf)!.short}</b> — {pick.reasons.join("; ")}.
-          </p>
-        ) : (
-          <p className="text-[11.5px] text-slate-600 px-1">No timeframe has a running call right now — that is a no-trade moment.</p>
-        )}
-        {ordered.map((c) => {
+        <p className="text-[24px] font-black leading-tight mt-1">{verdict.headline}</p>
+        <p className="text-[12px] text-white/90 leading-snug mt-1">{verdict.detail}</p>
+        <div className="flex gap-1.5 mt-2.5 flex-wrap">
+          {plan.tfs.map((tf) => {
+            const a = actionable(reads.find((r) => r.tf === tf));
+            const short = TODAY_TFS.find((t) => t.tf === tf)!.short;
+            return (
+              <span key={tf} className={`text-[12px] font-black rounded-lg px-2.5 py-1 ${a === "CE" ? "bg-emerald-300 text-emerald-950" : a === "PE" ? "bg-rose-300 text-rose-950" : "bg-white/20 text-white"}`}>
+                {short} {a ?? "—"}
+              </span>
+            );
+          })}
+          {sym === "NATURALGAS" && (
+            <span className="text-[12px] font-black rounded-lg px-2.5 py-1 bg-white/15">4h trend {f.analyses[4].optSide ?? "—"}</span>
+          )}
+        </div>
+        <p className="text-[10.5px] text-white/70 mt-2">{plan.why}</p>
+      </section>
+
+      <section className="space-y-3">
+        {planCalls.map((c) => {
           const side = c.entry?.optSide;
-          const known = c.higherSides.filter((x) => x !== null);
-          const against = !!side && known.length > 0 && known.every((x) => x !== side);
-          const warn = against ? "Against the 1h / 4h trend — quick, small, or skip" : side && pic?.favour && side !== pic.favour ? "Against today's daily picture — quick trade only" : null;
+          const warn = side && verdict.side && side !== verdict.side ? "Not the plan's side — skip" : side && pic?.favour && side !== pic.favour ? "Against today's daily picture — book quickly" : null;
           return (
             <TodayCallCard
               key={c.tf}
@@ -163,11 +184,18 @@ function Focus({ sym, setSym }: { sym: FocusSym; setSym: (s: FocusSym) => void }
               record={c.record}
               options={f.options}
               candles={f.candles[c.tf]}
-              best={c.tf === pick?.tf}
+              best={verdict.trade && c.tf === plan.lead}
               warn={warn}
             />
           );
         })}
+        <button onClick={() => setShowOthers((x) => !x)} className="w-full rounded-2xl bg-white border border-slate-200 py-2.5 text-[12px] font-black text-slate-600">
+          {showOthers ? "Hide" : "Show"} other timeframes ({otherCalls.map((c) => c.short).join(", ")}) — background only
+        </button>
+        {showOthers &&
+          otherCalls.map((c) => (
+            <TodayCallCard key={c.tf} sym={sym} short={c.short} entry={c.entry} analysis={f.analyses[c.i]} record={c.record} options={f.options} candles={f.candles[c.tf]} best={false} warn="Outside your plan for this market — background only" />
+          ))}
       </section>
 
       <SessionClock symbol={sym} />

@@ -48,3 +48,16 @@ test("option pricing uses the leg's delta, and the stop never below 35% of the p
   const options = { atmStrike: 300, rows: [{ strike: 300, call: { ltp: 10, delta: 0.6 }, put: { ltp: 9, delta: -0.4 } }] } as unknown as OptionsAnalytics;
   expect(projectCall(a, options)).toEqual({ strike: 300, optSide: "CE", entry: 10, targets: [12.4, 14.8, 17.2], stop: 7.6 });
 });
+
+test("your plan: crude trades only when 5m, 10m and 15m all agree; gas only the 1h with the 4h not against", async () => {
+  const { planVerdict } = await import("../utils/playbook");
+  const r = (tf: string, optSide: "CE" | "PE" | null, decision: "STRONG BUY" | "BUY" | "WATCH BUY" | "WAIT" = "BUY") => ({ tf, optSide, decision });
+  const all = planVerdict("CRUDEOIL", [r("5", "CE"), r("10", "CE", "STRONG BUY"), r("15", "CE")]);
+  expect(all).toMatchObject({ trade: true, side: "CE", agree: 3 });
+  expect(planVerdict("CRUDEOIL", [r("5", "CE"), r("10", "CE"), r("15", "CE", "WATCH BUY")]).trade).toBe(false); // risky buy doesn't count
+  expect(planVerdict("CRUDEOIL", [r("5", "PE"), r("10", "CE"), r("15", "CE")]).headline).toMatch(/2 of 3/);
+  expect(planVerdict("NATURALGAS", [r("60", "CE"), r("240", "CE")]).trade).toBe(true);
+  expect(planVerdict("NATURALGAS", [r("60", "CE"), r("240", "PE")]).headline).toMatch(/4h PE/);
+  expect(planVerdict("NATURALGAS", [r("60", "CE"), r("240", null)], { closed: 20, wins: 5, losses: 15, winRate: 25 }).trade).toBe(false);
+  expect(planVerdict("NATURALGAS", [r("60", null), r("240", "CE")]).trade).toBe(false);
+});

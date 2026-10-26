@@ -8,7 +8,6 @@ import { useCandles, useOptionsAnalytics } from "../api/hooks";
 import { analyzeTimeframe, type TimeframeAnalysis } from "../utils/timeframeEngine";
 import { useTradeLog } from "./useTradeLog";
 import type { OptionsAnalytics } from "../types";
-import type { TradeLogEntry } from "../utils/tradeLogCore";
 
 export type FocusSym = "CRUDEOIL" | "NATURALGAS";
 
@@ -47,20 +46,7 @@ export function projectCall(a: TimeframeAnalysis, options: OptionsAnalytics | un
   };
 }
 
-export interface TfRecord {
-  closed: number;
-  wins: number; // reached T1 or beyond
-  losses: number; // stop hit
-  winRate: number | null;
-}
-
-/** A timeframe's record: this page's own log plus the same engine's older log (Trade Report / AI-Test). */
-export function tfRecord(logs: Record<string, TradeLogEntry[]>, sym: FocusSym, tf: string): TfRecord {
-  const all = [...(logs[`TODAY-${sym}-${tf}`] ?? []), ...(logs[`${sym}-${tf}`] ?? [])].filter((e) => e.closed);
-  const wins = all.filter((e) => e.status === "target3_hit" || e.status === "stopped_after_t1").length;
-  const losses = all.filter((e) => e.status === "sl_hit").length;
-  return { closed: all.length, wins, losses, winRate: wins + losses ? Math.round((wins / (wins + losses)) * 100) : null };
-}
+export { tfRecord, type TfRecord } from "../utils/tfRecord";
 
 export function useTodayFocus(sym: FocusSym) {
   const c5 = useCandles(sym, "5");

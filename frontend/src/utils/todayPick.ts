@@ -6,7 +6,7 @@
 // picked when another is available.
 
 import type { TradeLogEntry } from "./tradeLogCore";
-import type { TfRecord } from "../hooks/useTodayFocus";
+import type { TfRecord } from "./tfRecord";
 
 export interface TfCall {
   tf: string;

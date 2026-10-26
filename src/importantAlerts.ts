@@ -15,6 +15,8 @@ import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { scheduledEvents, type ScheduledEvent } from "../frontend/src/utils/timeProfileEngine";
 import { WINDOWS, measureWindow, todaysGroup, groupLine, hhmm, type Sym } from "../frontend/src/utils/sessionClock";
 import { getHistorical30mCandles, GAP_STUDY_DAYS } from "./gapStudy";
+import { analyzeTimeframe } from "../frontend/src/utils/timeframeEngine";
+import { PLAN, planVerdict, type PlanSym } from "../frontend/src/utils/playbook";
 
 /** Pushed when the release is this many minutes away (one FAST tick lands in the window). */
 const EVENT_WARN_FROM = 25;
@@ -60,6 +62,15 @@ export function sessionWindowText(sym: Sym, label: string, startMin: number, pre
       "",
       "A tendency, not a certainty. Tighten stops on open trades; let the Ai-Trust card decide any new entry.",
     ].join("\n"),
+  };
+}
+
+/** "Your plan just turned on" push text. */
+export function planPushText(sym: PlanSym, headline: string, detail: string, price: number | null): { title: string; body: string } {
+  const name = sym === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
+  return {
+    title: `🎯 AI-TODAY PLAN · ${name}: ${headline}`,
+    body: [price !== null ? `Futures ${price}.` : "", detail, "", "Open Ai-Today for the option, stop and targets. Not a guarantee — set the P&L exit."].filter((l, i) => l || i > 0).join("\n"),
   };
 }
 
@@ -111,6 +122,42 @@ export async function runImportantAlerts(env: Env): Promise<string[]> {
     }
   } catch (e: any) {
     report.push(`session windows: ${e?.message ?? "failed"}`);
+  }
+
+  // 1c. The trader's own Ai-Today plan (crude: 5m/10m/15m agree; gas: 1h with 4h
+  // not against). Pushed once when it turns on; the state is kept per market.
+  try {
+    const token = await env.COMMODITY_KV.get("access_token");
+    if (token && s.closeMin - s.minutes > 15) {
+      for (const sym of ["CRUDEOIL", "NATURALGAS"] as PlanSym[]) {
+        const fut = await getNearestFuture(token, sym as Symbol);
+        if (!fut) continue;
+        const tfs = sym === "CRUDEOIL" ? PLAN.CRUDEOIL.tfs : ["60", "240"];
+        const reads = [];
+        let price: number | null = null;
+        for (const tf of tfs) {
+          const c = await getCandlesForTF(env, token, fut, tf);
+          if ("error" in c) continue;
+          price = c[c.length - 1]?.close ?? price;
+          const a = analyzeTimeframe({ tf, label: tf, candles: c });
+          reads.push({ tf, optSide: a.optSide, decision: a.decision });
+        }
+        if (reads.length < tfs.length) continue;
+        const v = planVerdict(sym, reads, null);
+        const key = `playbook:state:${sym}`;
+        const prev = (await env.COMMODITY_KV.get(key)) ?? "none";
+        const now = v.trade && v.side ? v.side : "none";
+        if (now === prev) continue;
+        await cachePut(env.COMMODITY_KV, key, now, { expirationTtl: 86_400 });
+        if (now !== "none") {
+          const msg = planPushText(sym, v.headline, v.detail, price);
+          const r = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
+          report.push(`${sym} plan ${now}: ${r.ok ? "pushed" : "push failed"}.`);
+        } else report.push(`${sym} plan off.`);
+      }
+    }
+  } catch (e: any) {
+    report.push(`plan check: ${e?.message ?? "failed"}`);
   }
 
   // 2. Live data at the open: try the real thing, not just "is a token saved".
