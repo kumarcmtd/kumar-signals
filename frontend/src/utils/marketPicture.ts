@@ -38,9 +38,23 @@ function extremeMonths(closes: number[], low: boolean): number | null {
   return r1(days / 21);
 }
 
-export function marketPicture(raw: Candle[]): MarketPicture | null {
-  const c = [...raw].sort((a, b) => a.date.localeCompare(b.date));
+/**
+ * @param livePrice today's live futures price. Daily candles end at the last
+ * finished day, so without it the picture (and the range pointer) froze at
+ * yesterday's close -- even when today had already broken the range.
+ */
+export function marketPicture(raw: Candle[], livePrice?: number | null, now: number = Date.now()): MarketPicture | null {
+  let c = [...raw].sort((a, b) => a.date.localeCompare(b.date));
   if (c.length < 40) return null;
+  if (livePrice != null && Number.isFinite(livePrice) && livePrice > 0) {
+    const istDay = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const last = c[c.length - 1];
+    if (istDay(Date.parse(last.date)) === istDay(now)) {
+      c = [...c.slice(0, -1), { ...last, close: livePrice, high: Math.max(last.high, livePrice), low: Math.min(last.low, livePrice) }];
+    } else {
+      c = [...c, { date: new Date(now).toISOString(), open: last.close, high: Math.max(last.close, livePrice), low: Math.min(last.close, livePrice), close: livePrice }];
+    }
+  }
   const closes = c.map((k) => k.close);
   const last = closes[closes.length - 1];
   const rangeLow = Math.min(...c.map((k) => k.low));

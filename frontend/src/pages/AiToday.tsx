@@ -58,7 +58,9 @@ function Focus({ sym, setSym }: { sym: FocusSym; setSym: (s: FocusSym) => void }
   const card = useTradeVerdict(sym);
   const qc = useQueryClient();
   const [spin, setSpin] = useState(false);
-  const pic = useMemo(() => marketPicture(f.daily), [f.daily]);
+  const liveNow = f.candles["5"].at(-1)?.close ?? null;
+  // Live price included, so the range pointer and "lowest in N months" move with the market.
+  const pic = useMemo(() => marketPicture(f.daily, liveNow), [f.daily, liveNow]);
   const look = LOOK[sym];
   const today = istDay(Date.now());
 
@@ -115,11 +117,13 @@ function Focus({ sym, setSym }: { sym: FocusSym; setSym: (s: FocusSym) => void }
           <div className="relative mt-3 rounded-2xl bg-white/15 backdrop-blur px-3 py-2.5">
             <p className="text-[16px] font-black leading-snug">{pic.headline}</p>
             <div className="mt-2 h-2.5 rounded-full bg-black/25 relative">
-              <div className="absolute -top-1 w-4 h-4 rounded-full bg-white shadow" style={{ left: `calc(${pic.positionPct}% - 8px)` }} />
+              <div className="absolute -top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-700" style={{ left: `calc(${Math.min(100, Math.max(0, pic.positionPct))}% - 8px)` }}>
+                <span className="absolute inset-0 rounded-full bg-white animate-ping opacity-60" />
+              </div>
             </div>
             <div className="flex justify-between text-[10px] font-bold text-white/80 mt-1">
               <span>Low {pic.rangeLow.toFixed(2)}</span>
-              <span>{pic.positionPct}% of {Math.round(pic.days / 21)}-month range</span>
+              <span>Now {liveNow !== null ? liveNow.toFixed(2) : "—"} · {pic.positionPct}% of {Math.round(pic.days / 21)}-month range</span>
               <span>High {pic.rangeHigh.toFixed(2)}</span>
             </div>
             <ul className="mt-2 space-y-1">

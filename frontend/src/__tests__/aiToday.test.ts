@@ -61,3 +61,13 @@ test("your plan: crude trades only when 5m, 10m and 15m all agree; gas only the 
   expect(planVerdict("NATURALGAS", [r("60", "CE"), r("240", null)], { closed: 20, wins: 5, losses: 15, winRate: 25 }).trade).toBe(false);
   expect(planVerdict("NATURALGAS", [r("60", null), r("240", "CE")]).trade).toBe(false);
 });
+
+test("today's live price moves the picture: a break below the old low shows as 0% and a fresh low", () => {
+  const closes = Array.from({ length: 110 }, (_, i) => 300 - Math.sin(i / 9) * 30 - i * 0.2); // ends near its low
+  const d = daily(closes);
+  const old = marketPicture(d, null, Date.parse("2024-06-01T12:00:00Z"))!;
+  const live = marketPicture(d, Math.min(...d.map((k) => k.low)) - 7, Date.parse("2024-06-01T12:00:00Z"))!;
+  expect(live.positionPct).toBe(0);
+  expect(live.rangeLow).toBeLessThan(old.rangeLow);
+  expect(live.tone).toBe("reversal_up_watch");
+});
