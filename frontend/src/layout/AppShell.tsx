@@ -7,6 +7,7 @@ import { useAppStore } from "../store/appStore";
 import { PullbackStrip } from "./PullbackStrip";
 import { AiVerifyStrip } from "./AiVerifyStrip";
 import { NewsStrip } from "./NewsStrip";
+import { PriceMapStrip } from "./PriceMapStrip";
 
 export function AppShell({ children }: { children: ReactNode }) {
   // Mounted once here (not on any single page) so alerts keep firing across
@@ -19,6 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Header />
       <main className="flex-1 max-w-lg w-full mx-auto px-4 pt-4 pb-24">
         {/* News first on AI-Shoot (crude moves on headlines). */}
+        <PriceMapStrip />
         <NewsStrip />
         {/* AI Verify Pro at a glance on the first five tabs (Ai20-20 has its own). */}
         <AiVerifyStrip />
