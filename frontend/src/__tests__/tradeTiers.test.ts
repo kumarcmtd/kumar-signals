@@ -102,3 +102,10 @@ test("circuit breaker: 60-min cool-off after a stop on that market, done for the
   expect(g.reason).toMatch(/2 stop-losses today/);
   expect(dayGuard(two, "CRUDEOIL", Date.parse("2026-10-21T04:00:00.000Z")).blocked).toBe(false); // next day
 });
+
+test("the Trade Card call log needs the owner key (not open to scrapers); market data stays open", async () => {
+  const { requiresKey } = await import("../utils/apiGuard");
+  expect(requiresKey("GET", "/api/trade-card/log")).toBe(true);
+  expect(requiresKey("POST", "/api/trade-card/log")).toBe(true);
+  expect(requiresKey("GET", "/api/candles")).toBe(false);
+});

@@ -31,7 +31,9 @@ export const ACCESS_KEY_HEADER = "X-App-Key";
  * GET routes that reveal private data. Everything else a GET returns is
  * market data anyone could see on a chart.
  */
-export const SENSITIVE_READS = new Set(["/api/trade-logs", "/api/portfolio", "/api/notify/topic"]);
+// /api/trade-card/log is every call the Trade Card / Ai-Trust made -- the
+// app's signal output -- so it is not left open to scrapers.
+export const SENSITIVE_READS = new Set(["/api/trade-logs", "/api/portfolio", "/api/notify/topic", "/api/trade-card/log"]);
 
 /** Does this request need the owner key (when one is configured)? */
 export function requiresKey(method: string, pathname: string): boolean {

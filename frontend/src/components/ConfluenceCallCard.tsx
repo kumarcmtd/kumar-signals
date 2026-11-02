@@ -137,6 +137,21 @@ export function ConfluenceCallCard({
           <StatTile label="Target 2" value={`₹${call.suggestedTargets[1]}`} color="#16A34A" hit={displayEntry.targetsHit[1]} />
           <StatTile label="Target 3" value={`₹${call.suggestedTargets[2]}`} color="#16A34A" hit={displayEntry.targetsHit[2]} />
         </div>
+        {/* Money first: what one lot can lose and make, before entering. */}
+        <div className="mx-4 mt-2 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl bg-rose-50 px-2 py-1.5">
+            <p className="text-[9px] font-bold uppercase text-rose-500">Max risk / lot</p>
+            <p className="text-[13px] font-black text-rose-700">−₹{Math.round(Math.max(0, bestBuy - effStop) * lotSize).toLocaleString("en-IN")}</p>
+          </div>
+          <div className="rounded-xl bg-emerald-50 px-2 py-1.5">
+            <p className="text-[9px] font-bold uppercase text-emerald-600">T1 / lot</p>
+            <p className="text-[13px] font-black text-emerald-700">+₹{Math.round(Math.max(0, call.suggestedTargets[0] - bestBuy) * lotSize).toLocaleString("en-IN")}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 px-2 py-1.5">
+            <p className="text-[9px] font-bold uppercase text-slate-500">Reward : risk</p>
+            <p className="text-[13px] font-black text-slate-800">{bestBuy - effStop > 0 ? `1 : ${((call.suggestedTargets[0] - bestBuy) / (bestBuy - effStop)).toFixed(1)}` : "—"}</p>
+          </div>
+        </div>
         <p className="mx-4 mt-1.5 text-[10px] text-slate-400">
           Best Buy is the cheapest of the three confirmed entries; Stop &amp; Targets are the safest merge across all three engines. Buy at or below Best Buy — never chase above it.
         </p>

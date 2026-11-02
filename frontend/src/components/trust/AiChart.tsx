@@ -6,7 +6,7 @@
 // the same candles and the same zone finder as the Trade Card.
 
 import { useMemo, useState } from "react";
-import { useCandles } from "../../api/hooks";
+import { useCandles, useHistory30m } from "../../api/hooks";
 import { findZones } from "../../utils/zones";
 import { findFvgs, plannedPath, trendChannel, whereNow } from "../../utils/chartMarks";
 import { atr } from "../../utils/indicators";
@@ -209,18 +209,25 @@ function Chart({ candles, plan, levels }: { candles: Candle[]; plan: ChartPlan |
 export function AiChart({ symbol, plan, levels }: { symbol: "CRUDEOIL" | "NATURALGAS"; plan: ChartPlan | null; levels: KeyLevels | null }) {
   const [tf, setTf] = useState<"15" | "60">("15");
   const q = useCandles(symbol, tf);
-  const candles = q.data && "candles" in q.data ? q.data.candles.slice(tf === "15" ? -96 : -72) : null;
+  const live = q.data && "candles" in q.data && q.data.candles.length >= 20 ? q.data.candles.slice(tf === "15" ? -96 : -72) : null;
+  // Market shut (or the live feed not up yet): draw the last session from the
+  // cached 90-day 30-minute history instead of an empty box.
+  const hist = useHistory30m(symbol, live === null && !q.isLoading);
+  const histBars = hist.data && "candles" in hist.data ? (hist.data.candles as Candle[]).slice(tf === "15" ? -60 : -120) : null;
+  const candles = live ?? (histBars && histBars.length >= 20 ? histBars : null);
+  const fromHistory = live === null && candles !== null;
   return (
     <div className="rounded-2xl bg-white p-2 mt-3">
       <div className="flex items-center gap-1 mb-1.5 px-1">
         <p className="text-[11px] font-black text-slate-800">AI chart</p>
+        {fromHistory && <span className="ml-1 text-[9.5px] font-black rounded-md bg-amber-100 text-amber-800 px-1.5 py-0.5">Market closed — last session (30-min)</span>}
         {(["15", "60"] as const).map((t) => (
           <button key={t} onClick={() => setTf(t)} className={`ml-1 text-[10px] font-black rounded-md px-2 py-0.5 ${tf === t ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-600"}`}>
             {t === "15" ? "15m" : "1h"}
           </button>
         ))}
       </div>
-      {candles && candles.length >= 20 ? <Chart candles={candles} plan={plan} levels={levels} /> : <p className="text-[11px] text-slate-500 p-4 text-center">{q.isLoading ? "Loading candles…" : "Not enough candles to draw yet."}</p>}
+      {candles && candles.length >= 20 ? <Chart candles={candles} plan={plan} levels={levels} /> : <p className="text-[11px] text-slate-500 p-4 text-center">{q.isLoading || hist.isLoading ? "Loading candles…" : "No candles yet — the chart appears once MCX data is in (from 9:00 AM)."}</p>}
       <div className="flex flex-wrap gap-x-2 gap-y-0.5 px-1 mt-1.5 text-[9px] font-bold text-slate-600">
         <span className="text-emerald-700">■ BUY zone (CE side)</span>
         <span className="text-rose-700">■ SELL zone (PE side)</span>
