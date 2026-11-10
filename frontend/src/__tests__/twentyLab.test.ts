@@ -19,7 +19,7 @@ function series(path: { o: number; h: number; l: number; c: number }[], fromMin 
 }
 
 // A rule set whose signal we control: breakout fires on a wide close above the last hour.
-const BREAKOUT: LabRules = { signal: "breakout", mode: "always", htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
+const BREAKOUT: LabRules = { signal: "breakout", mode: "always", minScore: 58, htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
 
 describe("Ai20-20 rules lab", () => {
   test("a clean run to T3 books +2.25 x Rs 2000 less costs, and the stop rule counts first on a two-sided candle", () => {

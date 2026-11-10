@@ -32,6 +32,8 @@ export interface ImmediateCategory {
 
 export interface ImmediateAnalysis {
   bias: ImmediateDirection;
+  /** Average of the trend/momentum/price-action scores (0-100); >= 58 reads bullish, <= 42 bearish. */
+  underlyingScore?: number;
   optSide: "CE" | "PE" | null;
   insufficient: string | null;
   vetoes: string[];
@@ -105,6 +107,7 @@ export function analyzeImmediate(candles: Candle[], ceMomentumPct: number | null
   if (tentativeBias === "neutral") {
     return {
       bias: "neutral",
+      underlyingScore,
       optSide: null,
       insufficient: null,
       vetoes: [],
@@ -135,6 +138,7 @@ export function analyzeImmediate(candles: Candle[], ceMomentumPct: number | null
 
   return {
     bias: tentativeBias,
+    underlyingScore,
     optSide,
     insufficient: null,
     vetoes,

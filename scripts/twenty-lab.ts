@@ -9,7 +9,7 @@
 // 5-minute candles (~20 days) when MCX is open. Only aggregate results are
 // printed; no raw price data is written anywhere.
 
-import { CURRENT_RULES, prepare, ruleGrid, rulesLabel, simulate, statsOf, type LabStats, type LabSym, type Prepared } from "../frontend/src/utils/twentyLab";
+import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, simulate, statsOf, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
 import type { Candle } from "../frontend/src/types";
 
 const SITE = process.env.SITE ?? "https://kumar-signals.akumalla-kumar-sbh.workers.dev";
@@ -53,41 +53,48 @@ async function mcx(symbol: LabSym): Promise<Candle[] | string> {
 }
 
 const fmt = (n: number | null) => (n === null ? "—" : String(n));
-function row(s: LabStats): string {
-  return `| ${s.label} | ${s.trades} | ${s.perDay} | ${fmt(s.t1Pct)}% | ${fmt(s.winPct)}% | ${fmt(s.avgRs)} | ${s.netRs} | ${fmt(s.profitFactor)} | ${s.maxDrawdownRs} | ${fmt(s.firstHalfAvg)} / ${fmt(s.secondHalfAvg)} |`;
+const avgOf = (t: LabTrade[]) => (t.length ? Math.round(t.reduce((a, x) => a + x.rs, 0) / t.length) : null);
+function row(s: LabStats, g: { gated: LabTrade[]; eligible: LabTrade[] }): string {
+  return `| ${s.label} | ${s.trades} | ${s.perDay} | ${fmt(s.t1Pct)}% | ${fmt(s.winPct)}% | ${fmt(s.avgRs)} | ${s.netRs} | ${fmt(s.profitFactor)} | ${s.maxDrawdownRs} | ${fmt(s.firstHalfAvg)} / ${fmt(s.secondHalfAvg)} | ${fmt(avgOf(g.eligible))} (${g.eligible.length}) -> ${fmt(avgOf(g.gated))} (${g.gated.length}) |`;
 }
-const HEAD = "| Rules | Trades | /day | T1 hit | Win | Avg Rs | Net Rs | PF | Max DD | Halves avg |\n|---|---|---|---|---|---|---|---|---|---|";
+const HEAD = "| Rules | Trades | /day | T1 hit | Win | Avg Rs | Net Rs | PF | Max DD | Halves avg | After day 15: all -> gated |\n|---|---|---|---|---|---|---|---|---|---|---|";
 
 function report(name: string, sym: LabSym, candles: Candle[]): string {
   const p: Prepared = prepare(candles);
   const lines: string[] = [];
   const days = new Set(p.day).size;
   lines.push(`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`);
-  const all = ruleGrid().map((r) => ({ r, s: statsOf(simulate(p, r, sym), p, rulesLabel(r)) }));
-  const base = all.find((x) => rulesLabel(x.r) === rulesLabel(CURRENT_RULES))!;
-  lines.push("### Current Ai20-20 rules\n", HEAD, row(base.s));
+  const all = ruleGrid().map((r) => {
+    const t = simulate(p, r, sym);
+    return { r, t, s: statsOf(t, p, rulesLabel(r)), g: gateTrades(t, p) };
+  });
+  const base = all[0];
+  lines.push(HEAD, row(base.s, base.g));
   const ranked = all.filter((x) => x.s.trades >= 15 && x.s.avgRs !== null).sort((a, b) => b.s.avgRs! - a.s.avgRs!);
-  lines.push("\n### Top 25 by average Rs per trade (15+ trades)\n", HEAD, ...ranked.slice(0, 25).map((x) => row(x.s)));
   const robust = ranked.filter((x) => (x.s.firstHalfAvg ?? -1) > 0 && (x.s.secondHalfAvg ?? -1) > 0);
-  lines.push(`\n### Positive in BOTH halves: ${robust.length} of ${all.length}\n`, HEAD, ...robust.slice(0, 25).map((x) => row(x.s)));
-  lines.push("\n### Bottom 5\n", HEAD, ...ranked.slice(-5).map((x) => row(x.s)));
-  // Current rules by entry hour (IST)
-  const t = simulate(p, CURRENT_RULES, sym);
-  const byHour = new Map<number, { n: number; rs: number; t1: number }>();
-  for (const x of t) {
-    const h = Math.floor(x.entryMinute / 60);
-    const b = byHour.get(h) ?? { n: 0, rs: 0, t1: 0 };
-    b.n++;
-    b.rs += x.rs;
-    b.t1 += x.t1 ? 1 : 0;
-    byHour.set(h, b);
-  }
-  lines.push("\n### Current rules by entry hour (IST)\n", "| Hour | Trades | T1 hit | Avg Rs |\n|---|---|---|---|");
-  for (const [h, b] of [...byHour.entries()].sort((a, b) => a[0] - b[0])) lines.push(`| ${h}:00 | ${b.n} | ${Math.round((b.t1 / b.n) * 100)}% | ${Math.round(b.rs / b.n)} |`);
-  // Machine-readable summary of every rule set, for comparing datasets.
-  lines.push("\n<details><summary>All rule sets (label avgRs trades firstHalf secondHalf)</summary>\n\n```");
-  for (const x of all) lines.push(`${x.s.label} ${fmt(x.s.avgRs)} ${x.s.trades} ${fmt(x.s.firstHalfAvg)} ${fmt(x.s.secondHalfAvg)}`);
-  lines.push("```\n</details>");
+  lines.push(`\nTop 12 of ${all.length} (15+ trades); positive in both halves: ${robust.length}`, HEAD, ...ranked.slice(0, 12).map((x) => row(x.s, x.g)));
+  if (robust.length) lines.push("\nBoth halves positive (top 12)", HEAD, ...robust.slice(0, 12).map((x) => row(x.s, x.g)));
+  const gatedBest = all
+    .map((x) => ({ x, ga: avgOf(x.g.gated), gn: x.g.gated.length }))
+    .filter((y) => y.gn >= 15 && y.ga !== null)
+    .sort((a, b) => b.ga! - a.ga!);
+  lines.push("\nBest AFTER the 15-day gate (15+ gated trades)", HEAD, ...gatedBest.slice(0, 8).map((y) => row(y.x.s, y.x.g)));
+  const pos = all.filter((x) => (x.s.avgRs ?? -1) > 0).length;
+  const gpos = all.filter((x) => x.g.gated.length >= 10 && (avgOf(x.g.gated) ?? -1) > 0).length;
+  lines.push(`\nRule sets with positive average: ${pos} of ${all.length}; positive after the gate (10+ trades): ${gpos}`);
+  // By New York hour for the current rules and the best robust set.
+  const hourTable = (t: LabTrade[], title: string) => {
+    const by = new Map<number, LabTrade[]>();
+    for (const x of t) {
+      const h = Math.floor(p.etMinute[x.openIdx] / 60);
+      by.set(h, [...(by.get(h) ?? []), x]);
+    }
+    lines.push(`\n${title} by New York hour: ` + [...by.entries()].sort((a, b) => a[0] - b[0]).map(([h, xs]) => `${h}h ${xs.length}/${avgOf(xs)}`).join(" · "));
+  };
+  hourTable(base.t, "Current rules");
+  if (robust[0]) hourTable(robust[0].t, robust[0].s.label);
+  lines.push("\nCSV label,avg,n,first,second,eligibleAvg,eligibleN,gatedAvg,gatedN");
+  for (const x of all) lines.push(`CSV ${x.s.label},${fmt(x.s.avgRs)},${x.s.trades},${fmt(x.s.firstHalfAvg)},${fmt(x.s.secondHalfAvg)},${fmt(avgOf(x.g.eligible))},${x.g.eligible.length},${fmt(avgOf(x.g.gated))},${x.g.gated.length}`);
   return lines.join("\n");
 }
 

@@ -16,6 +16,7 @@
 
 import type { Candle } from "../types";
 import { analyzeImmediate } from "./aiTwentyTwentyEngine";
+import { usDstForSession } from "./mcxSession";
 
 export type LabSym = "CRUDEOIL" | "NATURALGAS";
 export const LAB_LOT: Record<LabSym, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
@@ -32,18 +33,23 @@ export interface LabRules {
   signal: SignalKind;
   /** always: re-enter whenever the read is on (the page today); fresh: only when it newly turns on. */
   mode: "always" | "fresh";
-  htf: "none" | "15" | "60";
+  /** "score" only: the strength needed for CE (PE mirrors it: 100 - minScore). The page uses 58. */
+  minScore: number;
+  /** 60ok15: the 1-hour trend agrees and the 15-minute trend is not against it. */
+  htf: "none" | "15" | "60" | "60ok15";
   chop: "none" | "adx";
-  hours: "all" | "evening";
+  /** evening: 17:30-23:00 IST. usopen: 10:00-13:15 New York time (after the US open settles), DST-aware. */
+  hours: "all" | "evening" | "usopen";
   exits: "fixed" | "atr";
   timeStop: boolean;
 }
 
-export const CURRENT_RULES: LabRules = { signal: "score", mode: "always", htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
+export const CURRENT_RULES: LabRules = { signal: "score", mode: "always", minScore: 58, htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
 
 export function rulesLabel(r: LabRules): string {
   const parts: string[] = [r.signal];
   if (r.signal === "score") parts.push(r.mode);
+  if (r.signal === "score" && r.minScore !== 58) parts.push(`s${r.minScore}`);
   if (r.htf !== "none") parts.push(`htf${r.htf}`);
   if (r.chop !== "none") parts.push(r.chop);
   if (r.hours !== "all") parts.push(r.hours);
@@ -127,7 +133,8 @@ export interface Prepared {
   volAvg: number[]; // average volume of the 20 candles BEFORE this one
   htf15: number[]; // +1 / -1 / 0: EMA20 vs EMA50 on finished 15-min candles
   htf60: number[];
-  score: ("CE" | "PE" | null)[]; // the page's own analyzeImmediate side
+  score: number[]; // the page's own analyzeImmediate strength (NaN while too few candles)
+  etMinute: number[]; // New York minute of the day (DST-aware)
 }
 
 /** Trend of finished higher-timeframe candles, as seen at each 5-min candle's close. */
@@ -185,14 +192,21 @@ export function prepare(raw: Candle[], withScore = true): Prepared {
     for (let j = i - 20; j < i; j++) s += vols[j];
     return s / 20;
   });
-  const score: ("CE" | "PE" | null)[] = c.map(() => null);
+  const score: number[] = c.map(() => NaN);
   if (withScore) {
     for (let i = 0; i < c.length; i++) {
       if (i + 1 < 30) continue;
       const a = analyzeImmediate(c.slice(Math.max(0, i + 1 - SCORE_WINDOW), i + 1), null, null);
-      score[i] = a.optSide;
+      score[i] = a.underlyingScore ?? NaN;
     }
   }
+  const etMinute = c.map((k) => {
+    const ms = Date.parse(k.date);
+    const d = new Date(ms);
+    const dst = usDstForSession(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    const et = ms - (dst ? 4 : 5) * 3600_000;
+    return Math.floor((((et % 86_400_000) + 86_400_000) % 86_400_000) / 60_000);
+  });
   return {
     c,
     day,
@@ -207,12 +221,17 @@ export function prepare(raw: Candle[], withScore = true): Prepared {
     htf15: htfTrend(c, day, minute, 15),
     htf60: htfTrend(c, day, minute, 60),
     score,
+    etMinute,
   };
 }
 
-function rawSide(p: Prepared, i: number, kind: SignalKind): "CE" | "PE" | null {
+function rawSide(p: Prepared, i: number, kind: SignalKind, minScore = 58): "CE" | "PE" | null {
   const { c, ema9, ema20, ema50, atr, volAvg } = p;
-  if (kind === "score") return p.score[i];
+  if (kind === "score") {
+    const sc = p.score[i];
+    if (!Number.isFinite(sc)) return null;
+    return sc >= minScore ? "CE" : sc <= 100 - minScore ? "PE" : null;
+  }
   if (i < 60 || !Number.isFinite(atr[i]) || !Number.isFinite(ema50[i])) return null;
   const k = c[i];
   if (kind === "pullback") {
@@ -238,15 +257,17 @@ function rawSide(p: Prepared, i: number, kind: SignalKind): "CE" | "PE" | null {
 
 /** The side a rule set calls at candle i, or null. Pure; exported for the live engine. */
 export function signalAt(p: Prepared, i: number, r: LabRules): "CE" | "PE" | null {
-  const side = rawSide(p, i, r.signal);
+  const side = rawSide(p, i, r.signal, r.minScore);
   if (!side) return null;
-  if (r.signal === "score" && r.mode === "fresh" && i > 0 && rawSide(p, i - 1, r.signal) === side) return null;
+  if (r.signal === "score" && r.mode === "fresh" && i > 0 && rawSide(p, i - 1, r.signal, r.minScore) === side) return null;
   const want = side === "CE" ? 1 : -1;
   if (r.htf === "15" && p.htf15[i] !== want) return null;
-  if (r.htf === "60" && p.htf60[i] !== want) return null;
+  if ((r.htf === "60" || r.htf === "60ok15") && p.htf60[i] !== want) return null;
+  if (r.htf === "60ok15" && p.htf15[i] === -want) return null;
   if (r.chop === "adx" && !(p.adx[i] >= 20)) return null;
   const m = p.minute[i];
   if (r.hours === "evening" && (m < 17 * 60 + 30 || m >= 23 * 60)) return null;
+  if (r.hours === "usopen" && (p.etMinute[i] < 10 * 60 || p.etMinute[i] >= 13 * 60 + 15 || m >= 23 * 60 + 30)) return null;
   return side;
 }
 
@@ -374,15 +395,60 @@ export function statsOf(trades: LabTrade[], p: Prepared, label: string): LabStat
   };
 }
 
-/** Every combination the lab compares. */
+/** Every combination the lab compares (the page's current rules first). */
 export function ruleGrid(): LabRules[] {
-  const out: LabRules[] = [];
-  for (const signal of ["score", "pullback", "breakout"] as const)
-    for (const mode of signal === "score" ? (["always", "fresh"] as const) : (["always"] as const))
-      for (const htf of ["none", "15", "60"] as const)
-        for (const chop of ["none", "adx"] as const)
-          for (const hours of ["all", "evening"] as const)
-            for (const exits of ["fixed", "atr"] as const)
-              for (const timeStop of [false, true]) out.push({ signal, mode, htf, chop, hours, exits, timeStop });
+  const out: LabRules[] = [CURRENT_RULES];
+  const seen = new Set([rulesLabel(CURRENT_RULES)]);
+  const add = (r: LabRules) => {
+    const k = rulesLabel(r);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(r);
+    }
+  };
+  const base = { chop: "none" as const };
+  for (const mode of ["always", "fresh"] as const)
+    for (const minScore of [58, 62, 66])
+      for (const htf of ["none", "60", "60ok15"] as const)
+        for (const hours of ["all", "evening", "usopen"] as const)
+          for (const exits of ["fixed", "atr"] as const)
+            for (const timeStop of [false, true]) add({ ...base, signal: "score", mode, minScore, htf, hours, exits, timeStop });
+  for (const signal of ["pullback", "breakout"] as const)
+    for (const htf of ["none", "60"] as const)
+      for (const hours of ["all", "evening", "usopen"] as const)
+        for (const exits of ["fixed", "atr"] as const)
+          for (const timeStop of [false, true]) add({ ...base, signal, mode: "always", minScore: 58, htf, hours, exits, timeStop });
   return out;
+}
+
+export const GATE = { lookbackDays: 15, minTrades: 8 } as const;
+
+/**
+ * The edge gate, replayed: a trade is taken only when the SAME rules' test
+ * trades over the previous `lookbackDays` trading days averaged above zero
+ * (with at least `minTrades` of them). Judged only on days after that
+ * window, so it never sees its own future. Days before the window have no
+ * evidence yet and take no trades.
+ */
+export function gateTrades(trades: LabTrade[], p: Prepared, lookbackDays: number = GATE.lookbackDays, minTrades: number = GATE.minTrades): { gated: LabTrade[]; eligible: LabTrade[] } {
+  const days = [...new Set(p.day)].sort((a, b) => a - b);
+  const idx = new Map(days.map((d, i) => [d, i]));
+  const gated: LabTrade[] = [];
+  const eligible: LabTrade[] = [];
+  for (const t of trades) {
+    const di = idx.get(p.day[t.openIdx])!;
+    if (di < lookbackDays) continue;
+    eligible.push(t);
+    let n = 0;
+    let sum = 0;
+    for (const x of trades) {
+      const xi = idx.get(p.day[x.closeIdx])!;
+      if (xi < di && xi >= di - lookbackDays) {
+        n++;
+        sum += x.rs;
+      }
+    }
+    if (n >= minTrades && sum / n > 0) gated.push(t);
+  }
+  return { gated, eligible };
 }
