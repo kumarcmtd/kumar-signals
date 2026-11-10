@@ -38,9 +38,14 @@ export interface LabRules {
   /** 60ok15: the 1-hour trend agrees and the 15-minute trend is not against it. */
   htf: "none" | "15" | "60" | "60ok15";
   chop: "none" | "adx";
-  /** evening: 17:30-23:00 IST. usopen: 10:00-13:15 New York time (after the US open settles), DST-aware. */
-  hours: "all" | "evening" | "usopen";
+  /** evening: 17:30-23:00 IST. usopen: 10:00-13:15 New York time (after the US open settles), DST-aware. et: `window`. */
+  hours: "all" | "evening" | "usopen" | "et";
+  /** New York minutes [from, to) when hours = "et". */
+  window?: [number, number];
   exits: "fixed" | "atr";
+  /** ATR exits: stop = stopAtr x ATR(14, 5-min); T1 = t1R x stop. Defaults 1.5 / 1.5. */
+  stopAtr?: number;
+  t1R?: number;
   timeStop: boolean;
 }
 
@@ -52,8 +57,11 @@ export function rulesLabel(r: LabRules): string {
   if (r.signal === "score" && r.minScore !== 58) parts.push(`s${r.minScore}`);
   if (r.htf !== "none") parts.push(`htf${r.htf}`);
   if (r.chop !== "none") parts.push(r.chop);
-  if (r.hours !== "all") parts.push(r.hours);
-  parts.push(r.exits);
+  const hm = (m: number) => `${Math.floor(m / 60)}${String(m % 60).padStart(2, "0")}`;
+  if (r.hours === "et" && r.window) parts.push(`et${hm(r.window[0])}-${hm(r.window[1])}`);
+  else if (r.hours !== "all") parts.push(r.hours);
+  parts.push(r.exits === "atr" && (r.stopAtr ?? 1.5) !== 1.5 ? `atr${r.stopAtr}` : r.exits);
+  if (r.exits === "atr" && (r.t1R ?? 1.5) !== 1.5) parts.push(`r${r.t1R}`);
   if (r.timeStop) parts.push("tstop");
   return parts.join("+");
 }
@@ -268,6 +276,7 @@ export function signalAt(p: Prepared, i: number, r: LabRules): "CE" | "PE" | nul
   const m = p.minute[i];
   if (r.hours === "evening" && (m < 17 * 60 + 30 || m >= 23 * 60)) return null;
   if (r.hours === "usopen" && (p.etMinute[i] < 10 * 60 || p.etMinute[i] >= 13 * 60 + 15 || m >= 23 * 60 + 30)) return null;
+  if (r.hours === "et" && r.window && (p.etMinute[i] < r.window[0] || p.etMinute[i] >= r.window[1] || m >= 23 * 60 + 30)) return null;
   return side;
 }
 
@@ -335,8 +344,8 @@ export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
       } else {
         const a = p.atr[i];
         if (!Number.isFinite(a) || a <= 0) continue;
-        stop = 1.5 * a;
-        t1 = 1.5 * stop;
+        stop = (r.stopAtr ?? 1.5) * a;
+        t1 = (r.t1R ?? 1.5) * stop;
       }
       open = { side, i0: i, entry: c[i].close, stop, t1, t2: 1.6 * t1, t3: 2.25 * t1, h1: false, h2: false };
     }
@@ -418,6 +427,43 @@ export function ruleGrid(): LabRules[] {
       for (const hours of ["all", "evening", "usopen"] as const)
         for (const exits of ["fixed", "atr"] as const)
           for (const timeStop of [false, true]) add({ ...base, signal, mode: "always", minScore: 58, htf, hours, exits, timeStop });
+  return out;
+}
+
+/** Round 3: settings around the best crude rule set, to see whether its neighbours hold up too. */
+export function sensitivityGrid(): LabRules[] {
+  const out: LabRules[] = [CURRENT_RULES];
+  const seen = new Set([rulesLabel(CURRENT_RULES)]);
+  const add = (r: LabRules) => {
+    const k = rulesLabel(r);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(r);
+    }
+  };
+  const windows: (["usopen", undefined] | ["et", [number, number]] | ["evening", undefined] | ["all", undefined])[] = [
+    ["usopen", undefined],
+    ["et", [9 * 60 + 45, 13 * 60 + 15]],
+    ["et", [10 * 60 + 30, 13 * 60 + 15]],
+    ["et", [10 * 60, 12 * 60 + 30]],
+    ["et", [9 * 60, 13 * 60 + 15]],
+    ["evening", undefined],
+    ["all", undefined],
+  ];
+  const exits: { exits: "fixed" | "atr"; stopAtr?: number; t1R?: number }[] = [
+    { exits: "fixed" },
+    { exits: "atr" },
+    { exits: "atr", stopAtr: 1.2 },
+    { exits: "atr", stopAtr: 2 },
+    { exits: "atr", t1R: 1.2 },
+    { exits: "atr", t1R: 2 },
+  ];
+  for (const mode of ["fresh", "always"] as const)
+    for (const minScore of [58, 62])
+      for (const htf of ["60", "60ok15"] as const)
+        for (const [hours, window] of windows)
+          for (const ex of exits)
+            for (const timeStop of [false, true]) add({ signal: "score", mode, minScore, htf, chop: "none", hours, window, ...ex, timeStop });
   return out;
 }
 

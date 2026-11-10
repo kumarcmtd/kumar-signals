@@ -29,6 +29,6 @@ jobs:
           node-version: "22"
       - name: Run the lab
         run: |
-          npx -y tsx scripts/twenty-lab.ts > lab.md
+          LAB_GRID=sensitivity npx -y tsx scripts/twenty-lab.ts > lab.md
           cat lab.md
           cat lab.md >> "$GITHUB_STEP_SUMMARY"

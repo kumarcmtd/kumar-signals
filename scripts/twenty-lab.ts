@@ -9,7 +9,7 @@
 // 5-minute candles (~20 days) when MCX is open. Only aggregate results are
 // printed; no raw price data is written anywhere.
 
-import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, simulate, statsOf, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
+import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, sensitivityGrid, simulate, statsOf, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
 import type { Candle } from "../frontend/src/types";
 
 const SITE = process.env.SITE ?? "https://kumar-signals.akumalla-kumar-sbh.workers.dev";
@@ -64,7 +64,8 @@ function report(name: string, sym: LabSym, candles: Candle[]): string {
   const lines: string[] = [];
   const days = new Set(p.day).size;
   lines.push(`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`);
-  const all = ruleGrid().map((r) => {
+  const grid = process.env.LAB_GRID === "sensitivity" ? sensitivityGrid() : ruleGrid();
+  const all = grid.map((r) => {
     const t = simulate(p, r, sym);
     return { r, t, s: statsOf(t, p, rulesLabel(r)), g: gateTrades(t, p) };
   });
