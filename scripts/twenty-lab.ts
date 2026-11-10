@@ -39,10 +39,14 @@ async function yahoo(ticker: string): Promise<Candle[]> {
 
 async function mcx(symbol: LabSym): Promise<Candle[] | string> {
   try {
-    const res = await fetch(`${SITE}/api/candles?symbol=${symbol}&tf=5`, { headers: { Accept: "application/json" } });
-    const j: any = await res.json();
-    if (j.error) return String(j.error);
-    return j.candles as Candle[];
+    // /api/history-5m answers while MCX is shut too; /api/candles only while it is open.
+    for (const path of [`/api/history-5m?symbol=${symbol}`, `/api/candles?symbol=${symbol}&tf=5`]) {
+      const res = await fetch(`${SITE}${path}`, { headers: { Accept: "application/json" } });
+      const j: any = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!j.error && Array.isArray(j.candles) && j.candles.length >= 100) return j.candles as Candle[];
+      if (path.startsWith("/api/candles")) return String(j.error ?? `HTTP ${res.status}`);
+    }
+    return "no data";
   } catch (e) {
     return `${String(e)} ${String((e as any)?.cause?.message ?? "")}`;
   }

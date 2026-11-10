@@ -20,7 +20,7 @@ import { computePullback, serveTimeProfile } from "./profiles";
 import { computeSeasonal } from "./seasonal";
 import { computeWeather } from "./weather";
 import { computeNgStorage } from "./ngStorage";
-import { computeCandles, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
+import { computeCandles, computeHistory5m, computePrices, computeScan, computeSignal, computeSignals } from "./signals";
 import { createPortfolioTrade, deletePortfolioTrade, getPortfolioTrades, type PortfolioTrade, updatePortfolioTrade } from "./storage";
 import { pushTradeLogs, readAllTradeLogsJson } from "./tradeLogStore";
 import { getCronStatus } from "./tradeLogCron";
@@ -137,6 +137,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
           if (!fut) return json({ symbol, tradingSymbol: null, candles: [], error: "No instrument found" });
           const candles = await getHistorical30mCandles(env, token, fut.instrument_key, GAP_STUDY_DAYS);
           return json({ symbol, tradingSymbol: fut.trading_symbol, candles });
+        }
+
+        // 20 days of finished 5-minute candles for the Ai20-20 rules lab
+        // (the lab itself runs in the browser, like the Backtest Lab).
+        if (url.pathname === "/api/history-5m") {
+          const token = await requireToken(env, guard);
+          if (token instanceof Response) return token;
+          const symbol = url.searchParams.get("symbol") as Symbol;
+          if (!OPTION_SYMBOLS.includes(symbol as any)) return json({ error: "invalid symbol" }, 400);
+          return json(await computeHistory5m(env, token, symbol));
         }
 
         if (url.pathname === "/api/pullback") {

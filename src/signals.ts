@@ -212,6 +212,24 @@ export async function getCandlesForTF(env: Env, token: string, fut: FutureInfo, 
   return candles;
 }
 
+/**
+ * 20 days of finished 5-minute candles for the Ai20-20 rules lab. Unlike
+ * /api/candles it also answers while MCX is shut (prior days only), so the
+ * lab can be checked before the session opens. The candle still forming is
+ * left out: the lab only judges finished candles, as the live engine does.
+ */
+export async function computeHistory5m(env: Env, token: string, symbol: Symbol, now: number = Date.now()): Promise<{ tradingSymbol: string; candles: Candle[] } | { error: string }> {
+  const fut = await getNearestFuture(token, symbol);
+  if (!fut) return { error: "No instrument found" };
+  const prior = (await getPriorDayBars(env, token, fut.instrument_key, PRIOR_HISTORY_DAYS, 5)) ?? [];
+  const today = (await getIntradayCandles(token, fut.instrument_key)) ?? [];
+  const todayStart = today.length ? +new Date(today[0].date) : Infinity;
+  const all = [...prior.filter((b) => +new Date(b.date) < todayStart), ...resampleCandles(today, 5)];
+  const candles = all.filter((b) => +new Date(b.date) + 5 * 60_000 <= now);
+  if (candles.length < 100) return { error: "Not enough 5-minute history yet" };
+  return { tradingSymbol: fut.trading_symbol, candles };
+}
+
 export async function computeScan(env: Env, token: string, symbol: Symbol, tf: string): Promise<(SignalCard & { timeframe: string }) | { error: string }> {
   const fut = await getNearestFuture(token, symbol);
   if (!fut) return { error: "No instrument found" };

@@ -1,0 +1,34 @@
+name: Ai20-20 rules lab
+
+# Replays Ai20-20 rule sets on past 5-minute candles (NYMEX from Yahoo, and
+# the app's own MCX candles) and prints ONLY aggregate results to the log and
+# the run summary. No raw price data is stored. Runs by hand, or when the lab
+# code changes on the development branch.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/natural-gas-crude-oil-options-qkizj2]
+    paths:
+      - "scripts/twenty-lab.ts"
+      - "frontend/src/utils/twentyLab.ts"
+      - "frontend/src/utils/aiTwentyTwentyEngine.ts"
+      - ".github/workflows/ai2020-lab.yml"
+
+concurrency:
+  group: ai2020-lab
+  cancel-in-progress: true
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run the lab
+        run: |
+          npx -y tsx scripts/twenty-lab.ts > lab.md
+          cat lab.md
+          cat lab.md >> "$GITHUB_STEP_SUMMARY"
