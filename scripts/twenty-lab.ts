@@ -10,6 +10,7 @@
 // printed; no raw price data is written anywhere.
 
 import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, sensitivityGrid, simulate, statsOf, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
+import { V2_RULES } from "../frontend/src/utils/twentyV2";
 import type { Candle } from "../frontend/src/types";
 
 const SITE = process.env.SITE ?? "https://kumar-signals.akumalla-kumar-sbh.workers.dev";
@@ -64,7 +65,9 @@ function report(name: string, sym: LabSym, candles: Candle[]): string {
   const lines: string[] = [];
   const days = new Set(p.day).size;
   lines.push(`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`);
-  const grid = process.env.LAB_GRID === "sensitivity" ? sensitivityGrid() : ruleGrid();
+  const mode = process.env.LAB_GRID;
+  if (mode === "final") return finalReport(name, sym, candles);
+  const grid = mode === "sensitivity" ? sensitivityGrid() : ruleGrid();
   const all = grid.map((r) => {
     const t = simulate(p, r, sym);
     return { r, t, s: statsOf(t, p, rulesLabel(r)), g: gateTrades(t, p) };
@@ -96,6 +99,32 @@ function report(name: string, sym: LabSym, candles: Candle[]): string {
   if (robust[0]) hourTable(robust[0].t, robust[0].s.label);
   lines.push("\nCSV label,avg,n,first,second,eligibleAvg,eligibleN,gatedAvg,gatedN");
   for (const x of all) lines.push(`CSV ${x.s.label},${fmt(x.s.avgRs)},${x.s.trades},${fmt(x.s.firstHalfAvg)},${fmt(x.s.secondHalfAvg)},${fmt(avgOf(x.g.eligible))},${x.g.eligible.length},${fmt(avgOf(x.g.gated))},${x.g.gated.length}`);
+  return lines.join("\n");
+}
+
+/** Old rules vs the v2 rules the page uses, with full stats and gentler gate settings. */
+function finalReport(name: string, sym: LabSym, candles: Candle[]): string {
+  const p: Prepared = prepare(candles);
+  const days = new Set(p.day).size;
+  const lines: string[] = [`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`, HEAD];
+  const runs = [CURRENT_RULES, V2_RULES].map((r) => {
+    const t = simulate(p, r, sym);
+    return { r, t, s: statsOf(t, p, r === V2_RULES ? `V2 ${rulesLabel(r)}` : `OLD ${rulesLabel(r)}`) };
+  });
+  for (const x of runs) lines.push(row(x.s, gateTrades(x.t, p)));
+  const v2 = runs[1];
+  const ex = v2.s.exits;
+  lines.push(`\nV2 exits: ${Object.entries(ex).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
+  lines.push("\nV2 with a pause-only-on-evidence gate (min 8 trades in the window):", "| Window days | Floor Rs | After warm-up: all -> taken |", "|---|---|---|");
+  for (const look of [10, 15])
+    for (const floor of [0, -300, -600]) {
+      const g = gateTrades(v2.t, p, look, 8, floor, true);
+      lines.push(`| ${look} | ${floor} | ${fmt(avgOf(g.eligible))} (${g.eligible.length}) -> ${fmt(avgOf(g.gated))} (${g.gated.length}) |`);
+    }
+  const byDay = new Map<number, number>();
+  for (const t of v2.t) byDay.set(p.day[t.openIdx], (byDay.get(p.day[t.openIdx]) ?? 0) + t.rs);
+  const dayVals = [...byDay.values()];
+  lines.push(`\nV2 trading days: ${dayVals.length} of ${days}; winning days ${dayVals.filter((v) => v > 0).length}; worst day ${Math.min(...dayVals, 0)}; best day ${Math.max(...dayVals, 0)}`);
   return lines.join("\n");
 }
 

@@ -186,7 +186,12 @@ function htfTrend(c: Candle[], day: number[], minute: number[], tf: number): num
 
 const SCORE_WINDOW = 300;
 
-export function prepare(raw: Candle[], withScore = true): Prepared {
+/**
+ * @param withScore true: score every candle (the lab). A number n: only the
+ * last n candles (the live engine needs just the latest two -- scoring each
+ * candle runs the page's whole indicator read, the slow part).
+ */
+export function prepare(raw: Candle[], withScore: boolean | number = true): Prepared {
   const c = [...raw].sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
   const ist = c.map((k) => Date.parse(k.date) + IST_MS);
   const day = ist.map((t) => Math.floor(t / 86_400_000));
@@ -201,8 +206,9 @@ export function prepare(raw: Candle[], withScore = true): Prepared {
     return s / 20;
   });
   const score: number[] = c.map(() => NaN);
-  if (withScore) {
-    for (let i = 0; i < c.length; i++) {
+  if (withScore !== false) {
+    const from = typeof withScore === "number" ? Math.max(0, c.length - withScore) : 0;
+    for (let i = from; i < c.length; i++) {
       if (i + 1 < 30) continue;
       const a = analyzeImmediate(c.slice(Math.max(0, i + 1 - SCORE_WINDOW), i + 1), null, null);
       score[i] = a.underlyingScore ?? NaN;
@@ -476,7 +482,16 @@ export const GATE = { lookbackDays: 15, minTrades: 8 } as const;
  * window, so it never sees its own future. Days before the window have no
  * evidence yet and take no trades.
  */
-export function gateTrades(trades: LabTrade[], p: Prepared, lookbackDays: number = GATE.lookbackDays, minTrades: number = GATE.minTrades): { gated: LabTrade[]; eligible: LabTrade[] } {
+export function gateTrades(
+  trades: LabTrade[],
+  p: Prepared,
+  lookbackDays: number = GATE.lookbackDays,
+  minTrades: number = GATE.minTrades,
+  /** Average Rs per trade the window must beat. */
+  floorRs = 0,
+  /** true: pause only on clear evidence (enough trades AND below the floor); too few trades -> take it. */
+  pauseOnlyOnEvidence = false
+): { gated: LabTrade[]; eligible: LabTrade[] } {
   const days = [...new Set(p.day)].sort((a, b) => a - b);
   const idx = new Map(days.map((d, i) => [d, i]));
   const gated: LabTrade[] = [];
@@ -494,7 +509,9 @@ export function gateTrades(trades: LabTrade[], p: Prepared, lookbackDays: number
         sum += x.rs;
       }
     }
-    if (n >= minTrades && sum / n > 0) gated.push(t);
+    const enough = n >= minTrades;
+    const take = pauseOnlyOnEvidence ? !(enough && sum / n < floorRs) : enough && sum / n > floorRs;
+    if (take) gated.push(t);
   }
   return { gated, eligible };
 }

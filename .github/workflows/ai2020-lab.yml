@@ -12,6 +12,7 @@ on:
       - "scripts/twenty-lab.ts"
       - "frontend/src/utils/twentyLab.ts"
       - "frontend/src/utils/aiTwentyTwentyEngine.ts"
+      - "frontend/src/utils/twentyV2.ts"
       - ".github/workflows/ai2020-lab.yml"
 
 concurrency:
@@ -29,6 +30,6 @@ jobs:
           node-version: "22"
       - name: Run the lab
         run: |
-          LAB_GRID=sensitivity npx -y tsx scripts/twenty-lab.ts > lab.md
+          LAB_GRID=final npx -y tsx scripts/twenty-lab.ts > lab.md
           cat lab.md
           cat lab.md >> "$GITHUB_STEP_SUMMARY"
