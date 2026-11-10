@@ -1,0 +1,388 @@
+// Ai20-20 rules lab: replays a rule set over past 5-minute futures candles
+// and trades it the way the Ai20-20 page does, so a rule change is judged by
+// what it would actually have made -- not by how good it sounds.
+//
+// How a test trade works (same as the page's trade log):
+//   - enter at the signal candle's close (only finished candles are used)
+//   - Target 1 = Rs 2000 per lot, T2 = 1.6x, T3 = 2.25x, stop = 0.6x T1
+//     (or ATR-sized levels for the "atr" exits)
+//   - after T1 the stop moves to entry; after T2 it moves to T1; T3 closes
+//   - closed at the session's last candle -- never held overnight
+//   - if one candle touches both the stop and a target, the STOP counts
+// The option is modelled at delta 0.5 (at the money): Rs per lot =
+// 0.5 x futures move x lot size. Costs are charged on every trade: spread +
+// brokerage/taxes (Rs 150 Crude, Rs 200 NG per lot) and time decay (about
+// Rs 50 per lot per hour held). An estimate, so results are labelled as such.
+
+import type { Candle } from "../types";
+import { analyzeImmediate } from "./aiTwentyTwentyEngine";
+
+export type LabSym = "CRUDEOIL" | "NATURALGAS";
+export const LAB_LOT: Record<LabSym, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
+export const LAB_COST_RS: Record<LabSym, number> = { CRUDEOIL: 150, NATURALGAS: 200 };
+export const LAB_DELTA = 0.5;
+const THETA_RS_PER_HOUR = 50;
+const PROFIT_PER_LOT = 2000;
+const TIME_STOP_BARS = 12; // 60 minutes without reaching T1
+const REENTRY_COOLDOWN_BARS = 2; // 10 minutes after a stop, same side
+const IST_MS = 5.5 * 3600_000;
+
+export type SignalKind = "score" | "pullback" | "breakout";
+export interface LabRules {
+  signal: SignalKind;
+  /** always: re-enter whenever the read is on (the page today); fresh: only when it newly turns on. */
+  mode: "always" | "fresh";
+  htf: "none" | "15" | "60";
+  chop: "none" | "adx";
+  hours: "all" | "evening";
+  exits: "fixed" | "atr";
+  timeStop: boolean;
+}
+
+export const CURRENT_RULES: LabRules = { signal: "score", mode: "always", htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
+
+export function rulesLabel(r: LabRules): string {
+  const parts: string[] = [r.signal];
+  if (r.signal === "score") parts.push(r.mode);
+  if (r.htf !== "none") parts.push(`htf${r.htf}`);
+  if (r.chop !== "none") parts.push(r.chop);
+  if (r.hours !== "all") parts.push(r.hours);
+  parts.push(r.exits);
+  if (r.timeStop) parts.push("tstop");
+  return parts.join("+");
+}
+
+// ---- series helpers (whole-array passes, so a test is O(n)) ----
+
+function emaSeries(v: number[], p: number): number[] {
+  const out = new Array<number>(v.length).fill(NaN);
+  if (v.length < p) return out;
+  let s = 0;
+  for (let i = 0; i < p; i++) s += v[i];
+  let e = s / p;
+  out[p - 1] = e;
+  const k = 2 / (p + 1);
+  for (let i = p; i < v.length; i++) {
+    e = v[i] * k + e * (1 - k);
+    out[i] = e;
+  }
+  return out;
+}
+
+/** Wilder smoothing: SMA seed at index p-1, then prev + (x - prev) / p. */
+function wilderSeries(v: number[], p: number, start = 0): number[] {
+  const out = new Array<number>(v.length).fill(NaN);
+  if (v.length - start < p) return out;
+  let s = 0;
+  for (let i = start; i < start + p; i++) s += v[i];
+  let w = s / p;
+  out[start + p - 1] = w;
+  for (let i = start + p; i < v.length; i++) {
+    w = w + (v[i] - w) / p;
+    out[i] = w;
+  }
+  return out;
+}
+
+function trSeries(c: Candle[]): number[] {
+  return c.map((k, i) => (i === 0 ? k.high - k.low : Math.max(k.high - k.low, Math.abs(k.high - c[i - 1].close), Math.abs(k.low - c[i - 1].close))));
+}
+
+function adxSeries(c: Candle[], p = 14): number[] {
+  const n = c.length;
+  const plus = new Array<number>(n).fill(0);
+  const minus = new Array<number>(n).fill(0);
+  for (let i = 1; i < n; i++) {
+    const up = c[i].high - c[i - 1].high;
+    const dn = c[i - 1].low - c[i].low;
+    plus[i] = up > dn && up > 0 ? up : 0;
+    minus[i] = dn > up && dn > 0 ? dn : 0;
+  }
+  const tr = trSeries(c);
+  const sTr = wilderSeries(tr, p, 1);
+  const sP = wilderSeries(plus, p, 1);
+  const sM = wilderSeries(minus, p, 1);
+  const dx = new Array<number>(n).fill(NaN);
+  let first = -1;
+  for (let i = 0; i < n; i++) {
+    if (!Number.isFinite(sTr[i])) continue;
+    if (first < 0) first = i;
+    const pdi = sTr[i] ? (sP[i] / sTr[i]) * 100 : 0;
+    const mdi = sTr[i] ? (sM[i] / sTr[i]) * 100 : 0;
+    dx[i] = pdi + mdi ? (Math.abs(pdi - mdi) / (pdi + mdi)) * 100 : 0;
+  }
+  return first < 0 ? dx : wilderSeries(dx.map((x) => (Number.isFinite(x) ? x : 0)), p, first);
+}
+
+export interface Prepared {
+  c: Candle[];
+  day: number[]; // IST calendar day number
+  minute: number[]; // IST minute of the day
+  lastOfDay: boolean[];
+  ema9: number[];
+  ema20: number[];
+  ema50: number[];
+  atr: number[];
+  adx: number[];
+  volAvg: number[]; // average volume of the 20 candles BEFORE this one
+  htf15: number[]; // +1 / -1 / 0: EMA20 vs EMA50 on finished 15-min candles
+  htf60: number[];
+  score: ("CE" | "PE" | null)[]; // the page's own analyzeImmediate side
+}
+
+/** Trend of finished higher-timeframe candles, as seen at each 5-min candle's close. */
+function htfTrend(c: Candle[], day: number[], minute: number[], tf: number): number[] {
+  const out = new Array<number>(c.length).fill(0);
+  const closes: number[] = [];
+  let e20: number | null = null;
+  let e50: number | null = null;
+  let bucket = "";
+  let lastClose = NaN;
+  const push = (x: number) => {
+    closes.push(x);
+    const n = closes.length;
+    if (n === 20) e20 = closes.reduce((s, v) => s + v, 0) / 20;
+    else if (n > 20 && e20 !== null) e20 = x * (2 / 21) + e20 * (19 / 21);
+    if (n === 50) e50 = closes.reduce((s, v) => s + v, 0) / 50;
+    else if (n > 50 && e50 !== null) e50 = x * (2 / 51) + e50 * (49 / 51);
+  };
+  for (let i = 0; i < c.length; i++) {
+    const b = `${day[i]}-${Math.floor(minute[i] / tf)}`;
+    if (bucket && b !== bucket && Number.isFinite(lastClose)) push(lastClose);
+    bucket = b;
+    lastClose = c[i].close;
+    // This candle closes its bucket when its end reaches the bucket's end.
+    const done = (minute[i] + 5) % tf === 0 || (minute[i] + 5) >= (Math.floor(minute[i] / tf) + 1) * tf;
+    let a20 = e20 as number | null;
+    let a50 = e50 as number | null;
+    if (done) {
+      // Include this just-finished bucket without double counting it later.
+      const n = closes.length + 1;
+      const v = lastClose;
+      if (n === 20) a20 = (closes.reduce((s, x) => s + x, 0) + v) / 20;
+      else if (n > 20 && a20 !== null) a20 = v * (2 / 21) + a20 * (19 / 21);
+      if (n === 50) a50 = (closes.reduce((s, x) => s + x, 0) + v) / 50;
+      else if (n > 50 && a50 !== null) a50 = v * (2 / 51) + a50 * (49 / 51);
+    }
+    out[i] = a20 !== null && a50 !== null ? (a20 > a50 ? 1 : a20 < a50 ? -1 : 0) : 0;
+  }
+  return out;
+}
+
+const SCORE_WINDOW = 300;
+
+export function prepare(raw: Candle[], withScore = true): Prepared {
+  const c = [...raw].sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
+  const ist = c.map((k) => Date.parse(k.date) + IST_MS);
+  const day = ist.map((t) => Math.floor(t / 86_400_000));
+  const minute = ist.map((t) => Math.floor((t % 86_400_000) / 60_000));
+  const lastOfDay = c.map((_, i) => i === c.length - 1 || day[i + 1] !== day[i]);
+  const closes = c.map((k) => k.close);
+  const vols = c.map((k) => k.volume ?? 0);
+  const volAvg = vols.map((_, i) => {
+    if (i < 20) return NaN;
+    let s = 0;
+    for (let j = i - 20; j < i; j++) s += vols[j];
+    return s / 20;
+  });
+  const score: ("CE" | "PE" | null)[] = c.map(() => null);
+  if (withScore) {
+    for (let i = 0; i < c.length; i++) {
+      if (i + 1 < 30) continue;
+      const a = analyzeImmediate(c.slice(Math.max(0, i + 1 - SCORE_WINDOW), i + 1), null, null);
+      score[i] = a.optSide;
+    }
+  }
+  return {
+    c,
+    day,
+    minute,
+    lastOfDay,
+    ema9: emaSeries(closes, 9),
+    ema20: emaSeries(closes, 20),
+    ema50: emaSeries(closes, 50),
+    atr: wilderSeries(trSeries(c), 14),
+    adx: adxSeries(c, 14),
+    volAvg,
+    htf15: htfTrend(c, day, minute, 15),
+    htf60: htfTrend(c, day, minute, 60),
+    score,
+  };
+}
+
+function rawSide(p: Prepared, i: number, kind: SignalKind): "CE" | "PE" | null {
+  const { c, ema9, ema20, ema50, atr, volAvg } = p;
+  if (kind === "score") return p.score[i];
+  if (i < 60 || !Number.isFinite(atr[i]) || !Number.isFinite(ema50[i])) return null;
+  const k = c[i];
+  if (kind === "pullback") {
+    const lo = Math.min(c[i].low, c[i - 1].low, c[i - 2].low);
+    const hi = Math.max(c[i].high, c[i - 1].high, c[i - 2].high);
+    const up = ema20[i] > ema50[i] && ema20[i] > ema20[i - 3] && lo <= ema20[i] + 0.25 * atr[i] && k.close > ema9[i] && k.close > k.open && k.close > ema20[i];
+    const dn = ema20[i] < ema50[i] && ema20[i] < ema20[i - 3] && hi >= ema20[i] - 0.25 * atr[i] && k.close < ema9[i] && k.close < k.open && k.close < ema20[i];
+    return up && !dn ? "CE" : dn && !up ? "PE" : null;
+  }
+  // breakout: closes beyond the last hour's range on a wide candle, with volume when volume is known
+  let hh = -Infinity;
+  let ll = Infinity;
+  for (let j = i - 12; j < i; j++) {
+    hh = Math.max(hh, c[j].high);
+    ll = Math.min(ll, c[j].low);
+  }
+  const wide = k.high - k.low >= 0.8 * atr[i];
+  const volOk = !Number.isFinite(volAvg[i]) || volAvg[i] <= 0 || (k.volume ?? 0) >= 1.3 * volAvg[i];
+  if (k.close > hh && wide && volOk && k.close > k.open) return "CE";
+  if (k.close < ll && wide && volOk && k.close < k.open) return "PE";
+  return null;
+}
+
+/** The side a rule set calls at candle i, or null. Pure; exported for the live engine. */
+export function signalAt(p: Prepared, i: number, r: LabRules): "CE" | "PE" | null {
+  const side = rawSide(p, i, r.signal);
+  if (!side) return null;
+  if (r.signal === "score" && r.mode === "fresh" && i > 0 && rawSide(p, i - 1, r.signal) === side) return null;
+  const want = side === "CE" ? 1 : -1;
+  if (r.htf === "15" && p.htf15[i] !== want) return null;
+  if (r.htf === "60" && p.htf60[i] !== want) return null;
+  if (r.chop === "adx" && !(p.adx[i] >= 20)) return null;
+  const m = p.minute[i];
+  if (r.hours === "evening" && (m < 17 * 60 + 30 || m >= 23 * 60)) return null;
+  return side;
+}
+
+export type LabExit = "sl" | "breakeven" | "after_t1" | "t3" | "time" | "day_end";
+export interface LabTrade {
+  side: "CE" | "PE";
+  openIdx: number;
+  closeIdx: number;
+  openAt: string;
+  entryMinute: number;
+  t1: boolean;
+  exit: LabExit;
+  rs: number; // Rs per lot after costs
+}
+
+export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
+  const { c } = p;
+  const lot = LAB_LOT[sym];
+  const out: LabTrade[] = [];
+  let open: { side: "CE" | "PE"; i0: number; entry: number; stop: number; t1: number; t2: number; t3: number; h1: boolean; h2: boolean } | null = null;
+  let lastStop: { side: "CE" | "PE"; at: number } | null = null;
+
+  const close = (j: number, fav: number, exit: LabExit) => {
+    const o = open!;
+    const hours = ((j - o.i0) * 5) / 60;
+    const rs = LAB_DELTA * fav * lot - LAB_COST_RS[sym] - THETA_RS_PER_HOUR * hours;
+    out.push({ side: o.side, openIdx: o.i0, closeIdx: j, openAt: c[o.i0].date, entryMinute: p.minute[o.i0], t1: o.h1, exit, rs: Math.round(rs) });
+    if (exit === "sl" || exit === "breakeven" || exit === "after_t1") lastStop = { side: o.side, at: j };
+    open = null;
+  };
+
+  for (let i = 0; i < c.length; i++) {
+    if (open) {
+      const o = open as NonNullable<typeof open>;
+      const k = c[i];
+      const d = o.side === "CE" ? 1 : -1;
+      const favOf = (x: number) => d * (x - o.entry);
+      const adverse = d > 0 ? favOf(k.low) : favOf(k.high);
+      const best = d > 0 ? favOf(k.high) : favOf(k.low);
+      const eff = o.h2 ? o.t1 : o.h1 ? 0 : -o.stop;
+      if (adverse <= eff) {
+        close(i, Math.min(favOf(k.open), eff), o.h2 ? "after_t1" : o.h1 ? "breakeven" : "sl");
+      } else {
+        if (best >= o.t1) o.h1 = true;
+        if (best >= o.t2) o.h2 = true;
+        if (best >= o.t3) close(i, o.t3, "t3");
+        else {
+          const eff2 = o.h2 ? o.t1 : o.h1 ? 0 : -o.stop;
+          if (eff2 > eff && favOf(k.close) <= eff2) close(i, eff2, o.h2 ? "after_t1" : "breakeven");
+          else if (r.timeStop && !o.h1 && i - o.i0 >= TIME_STOP_BARS) close(i, favOf(k.close), "time");
+          else if (p.lastOfDay[i]) close(i, favOf(k.close), "day_end");
+        }
+      }
+    }
+    if (!open && !p.lastOfDay[i]) {
+      const side = signalAt(p, i, r);
+      if (!side) continue;
+      const ls = lastStop as { side: "CE" | "PE"; at: number } | null;
+      if (ls && ls.side === side && i - ls.at < REENTRY_COOLDOWN_BARS) continue;
+      let stop: number;
+      let t1: number;
+      if (r.exits === "fixed") {
+        t1 = PROFIT_PER_LOT / lot / LAB_DELTA;
+        stop = 0.6 * t1;
+      } else {
+        const a = p.atr[i];
+        if (!Number.isFinite(a) || a <= 0) continue;
+        stop = 1.5 * a;
+        t1 = 1.5 * stop;
+      }
+      open = { side, i0: i, entry: c[i].close, stop, t1, t2: 1.6 * t1, t3: 2.25 * t1, h1: false, h2: false };
+    }
+  }
+  return out;
+}
+
+export interface LabStats {
+  label: string;
+  trades: number;
+  days: number;
+  perDay: number;
+  t1Pct: number | null;
+  winPct: number | null;
+  avgRs: number | null;
+  netRs: number;
+  profitFactor: number | null;
+  maxDrawdownRs: number;
+  firstHalfAvg: number | null;
+  secondHalfAvg: number | null;
+  exits: Partial<Record<LabExit, number>>;
+}
+
+export function statsOf(trades: LabTrade[], p: Prepared, label: string): LabStats {
+  const days = new Set(p.day).size;
+  const n = trades.length;
+  const net = trades.reduce((s, t) => s + t.rs, 0);
+  const gains = trades.filter((t) => t.rs > 0).reduce((s, t) => s + t.rs, 0);
+  const losses = -trades.filter((t) => t.rs < 0).reduce((s, t) => s + t.rs, 0);
+  let peak = 0;
+  let eq = 0;
+  let dd = 0;
+  for (const t of trades) {
+    eq += t.rs;
+    peak = Math.max(peak, eq);
+    dd = Math.max(dd, peak - eq);
+  }
+  const mid = p.c.length / 2;
+  const avg = (xs: LabTrade[]) => (xs.length ? Math.round(xs.reduce((s, t) => s + t.rs, 0) / xs.length) : null);
+  const exits: Partial<Record<LabExit, number>> = {};
+  for (const t of trades) exits[t.exit] = (exits[t.exit] ?? 0) + 1;
+  return {
+    label,
+    trades: n,
+    days,
+    perDay: days ? Math.round((n / days) * 10) / 10 : 0,
+    t1Pct: n ? Math.round((trades.filter((t) => t.t1).length / n) * 100) : null,
+    winPct: n ? Math.round((trades.filter((t) => t.rs > 0).length / n) * 100) : null,
+    avgRs: avg(trades),
+    netRs: Math.round(net),
+    profitFactor: losses > 0 ? Math.round((gains / losses) * 100) / 100 : gains > 0 ? 99 : null,
+    maxDrawdownRs: Math.round(dd),
+    firstHalfAvg: avg(trades.filter((t) => t.openIdx < mid)),
+    secondHalfAvg: avg(trades.filter((t) => t.openIdx >= mid)),
+    exits,
+  };
+}
+
+/** Every combination the lab compares. */
+export function ruleGrid(): LabRules[] {
+  const out: LabRules[] = [];
+  for (const signal of ["score", "pullback", "breakout"] as const)
+    for (const mode of signal === "score" ? (["always", "fresh"] as const) : (["always"] as const))
+      for (const htf of ["none", "15", "60"] as const)
+        for (const chop of ["none", "adx"] as const)
+          for (const hours of ["all", "evening"] as const)
+            for (const exits of ["fixed", "atr"] as const)
+              for (const timeStop of [false, true]) out.push({ signal, mode, htf, chop, hours, exits, timeStop });
+  return out;
+}
