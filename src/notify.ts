@@ -147,6 +147,23 @@ const TWENTY_KV_BACKUP_MS = 0;
 let twentyMem: { at: number; backedUpAt: number; buffers: TwentySampleBuffer } | null = null;
 
 /** The MATCHED push, shared by the real alert and the test button so they look identical. */
+/** Same-side strike rolls are pushed at most this often; a side flip always is. */
+export const TWENTY_RAW_GAP_MS = 15 * 60_000;
+
+/** A plain new Ai20-20 call -- the fast 5-minute scan, not yet confirmed. */
+export function twentyCallText(p: { displayName: string; strike: number; optSide: "CE" | "PE"; entry: number; stop: number; targets: [number, number, number]; lot: number }): { title: string; body: string } {
+  return {
+    title: `⚡ Ai20-20: ${p.displayName} ${p.strike} ${p.optSide}`,
+    body: [
+      `New Ai20-20 call -- ${p.displayName} ${p.strike} ${p.optSide} @ Rs ${p.entry}`,
+      `Stop: Rs ${p.stop} | T1 Rs ${p.targets[0]} | T2 Rs ${p.targets[1]} | T3 Rs ${p.targets[2]}`,
+      `Per lot: risk about Rs ${Math.round((p.entry - p.stop) * p.lot)}, T1 about +Rs ${Math.round((p.targets[0] - p.entry) * p.lot)}.`,
+      "",
+      "Fast 5-min call, NOT confirmed by the Trade Card. Check Ai20-20 / Ai-Trust before entering and set the P&L exit.",
+    ].join("\n"),
+  };
+}
+
 export function matchedPushText(p: {
   displayName: string;
   strike: number;
@@ -265,6 +282,26 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
       if (!projection) {
         say("Ai20-20 leans one way but no option premium to price the call.");
         continue;
+      }
+
+      // Every NEW Ai20-20 call is pushed too (the page's own alert, with the
+      // app closed): once per new call, a side flip at once, a strike roll on
+      // the same side at most every 15 minutes. Marked as the fast,
+      // unconfirmed call -- MATCHED below stays the confirmed one.
+      try {
+        const rawKey = `notified:TWENTY-RAW-${symbol}`;
+        const sig = `${projection.optSide}-${projection.strike}`;
+        const prev = (await env.COMMODITY_KV.get(rawKey)) ?? "";
+        const [prevSig, prevAt] = prev.split("|");
+        const sideFlip = !prevSig || prevSig.split("-")[0] !== projection.optSide;
+        const due = prevSig !== sig && (sideFlip || Date.now() - Number(prevAt || 0) >= TWENTY_RAW_GAP_MS);
+        if (due && (await cachePut(env.COMMODITY_KV, rawKey, `${sig}|${Date.now()}`, { expirationTtl: 86_400 }))) {
+          const m = twentyCallText({ displayName: name, ...projection, lot: TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1 });
+          const r = await sendNtfyNotification(topic, m.title, m.body, "high", { token: env.NTFY_TOKEN });
+          say(`Ai20-20 ${projection.strike} ${projection.optSide} -- new call ${r.ok ? "pushed" : "push failed"}.`);
+        }
+      } catch {
+        // the raw push must never stop the MATCHED check below
       }
 
       // Push ONLY when AI Verify Pro (closed 15m/1h/4h candles) has confirmed

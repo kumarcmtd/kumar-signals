@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { matchedPushText, runTwentyTwentyNotificationCheck } from "../../src/notify";
+import { matchedPushText, runTwentyTwentyNotificationCheck, twentyCallText } from "../../src/notify";
 
 afterEach(() => vi.useRealTimers());
 
@@ -21,4 +21,14 @@ test("the live check explains itself when the market is closed", async () => {
   const env = { COMMODITY_KV: { get: async () => null, put: async () => undefined } } as any;
   const report = await runTwentyTwentyNotificationCheck(env);
   expect(report[0]).toContain("MCX is closed");
+});
+
+test("every new Ai20-20 call gets its own push text, marked as unconfirmed", () => {
+  const m = twentyCallText({ displayName: "Crude Oil", strike: 9300, optSide: "CE", entry: 200, stop: 180, targets: [220, 240, 260], lot: 100 });
+  expect(m.title).toBe("⚡ Ai20-20: Crude Oil 9300 CE");
+  expect(m.body).toContain("@ Rs 200");
+  expect(m.body).toContain("Stop: Rs 180 | T1 Rs 220 | T2 Rs 240 | T3 Rs 260");
+  expect(m.body).toContain("risk about Rs 2000, T1 about +Rs 2000");
+  expect(m.body).toContain("NOT confirmed by the Trade Card");
+  expect(m.body.split("\n").length).toBeGreaterThan(3);
 });
