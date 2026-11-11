@@ -82,3 +82,10 @@ test("the retry gap is slow enough to be a recovery, not a poll", () => {
   assert.ok(PAUSED_RETRY_MS >= 30_000, "this must not become a back-door poll on every paused page");
   assert.ok(PAUSED_RETRY_MS <= 120_000, "but a broken figure should not sit on screen for minutes either");
 });
+
+test("Ai-Today is a bottom-bar tab; AI-Up moved to More but still keeps updating", () => {
+  assert.equal((LIVE_PAGE_PATHS as readonly string[]).includes("/ai-today"), true);
+  assert.equal((LIVE_PAGE_PATHS as readonly string[]).includes("/ai-up"), false);
+  assert.equal(isAlwaysLivePage("/ai-today"), true);
+  assert.equal(isAlwaysLivePage("/ai-up"), true, "AI-Up logs its own calls, so it must keep polling while open");
+});

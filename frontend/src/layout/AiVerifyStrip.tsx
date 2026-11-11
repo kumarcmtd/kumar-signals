@@ -1,16 +1,17 @@
-// The Trade Card (one answer per market) on the first five bottom-bar tabs.
+// The Trade Card (one answer per market) on AI-Shoot, Best Call and AI-Up.
 //
 // Rendered once here in the shell, like PullbackStrip, so the pages
-// themselves stay untouched. Ai20-20 already shows the card inside its own
-// layout (below the volatility meters), so it is skipped here to avoid
-// showing it twice.
+// themselves stay untouched. Ai20-20 and Ai-Trust carry their own Trade Card
+// views, and Ai-Today has its own one-market plan -- a second verdict on top
+// of that plan would only argue with it.
 
 import { useLocation } from "react-router-dom";
-import { LIVE_PAGE_PATHS } from "../config/livePages";
 import { TradeCard } from "../components/TradeCard";
 
-// Ai-20-20 and Ai-Trust carry their own Trade Card views.
-const SHOWN_ON = new Set<string>(LIVE_PAGE_PATHS.slice(0, 5).filter((p) => p !== "/ai-20-20" && p !== "/ai-trust"));
+// Listed by page, not by bottom-bar position: when Ai-Today took AI-Up's tab,
+// the card stayed with AI-Up instead of jumping onto Ai-Today.
+export const TRADE_CARD_STRIP_PAGES = ["/", "/best-call", "/ai-up"] as const;
+const SHOWN_ON = new Set<string>(TRADE_CARD_STRIP_PAGES);
 
 export function AiVerifyStrip() {
   const { pathname } = useLocation();

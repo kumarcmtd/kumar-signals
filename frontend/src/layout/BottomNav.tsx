@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
-import { LIVE_PAGE_PATHS, isAlwaysLivePage } from "../config/livePages";
+import { LIVE_PAGE_PATHS } from "../config/livePages";
 
 interface NavItem {
   to: string;
@@ -37,14 +37,14 @@ const PRIMARY: NavItem[] = [
   { to: LIVE_PAGE_PATHS[1], label: "Best Call", icon: Crosshair },
   { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
   { to: LIVE_PAGE_PATHS[3], label: "Ai-Trust", icon: Gem },
-  { to: LIVE_PAGE_PATHS[4], label: "AI-Up", icon: Repeat },
+  { to: LIVE_PAGE_PATHS[4], label: "Ai-Today", icon: Sun },
   { to: LIVE_PAGE_PATHS[5], label: "Ai-News", icon: Rss },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "🎯 Focus on one market",
-    items: [{ to: "/ai-today", label: "Ai-Today", icon: Sun }],
+    title: "🔁 AI-Up (moved here from the bottom bar)",
+    items: [{ to: "/ai-up", label: "AI-Up", icon: Repeat }],
   },
   {
     title: "Signals",
@@ -179,7 +179,10 @@ export function BottomNav() {
   const unreadCount = useAppStore((s) => s.alerts.filter((a) => !a.read).length);
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
-  const onSecondaryPage = !isAlwaysLivePage(location.pathname);
+  // "More" lights up on any page that is not one of the six bar tabs --
+  // including AI-Up, which keeps updating like a main page but lives in More.
+  const path = location.pathname.length > 1 && location.pathname.endsWith("/") ? location.pathname.slice(0, -1) : location.pathname;
+  const onSecondaryPage = !(LIVE_PAGE_PATHS as readonly string[]).includes(path);
 
   const tabClass = (active: boolean) =>
     `relative flex flex-col items-center gap-0.5 py-2.5 px-0.5 text-[10px] leading-tight text-center font-medium transition-colors flex-1 min-w-0 ${

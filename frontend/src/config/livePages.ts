@@ -20,15 +20,16 @@ export const LIVE_PAGE_PATHS = [
   "/best-call",
   "/ai-20-20",
   "/ai-trust", // took Level Cross's tab (Level Cross is in More -> Signals)
-  "/ai-up",
+  "/ai-today", // took AI-Up's tab (AI-Up is at the top of More)
   "/ai-news", // took SuperTrend's tab: war-time crude moves on headlines
 ] as const;
 
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 
-// Live but NOT a bottom-bar tab: Ai-Today (More menu) logs its own calls,
-// so it must keep updating while it is open.
-export const EXTRA_LIVE_PATHS = ["/ai-today"] as const;
+// Live but NOT a bottom-bar tab: AI-Up (top of the More menu) logs its own
+// calls, so it must keep updating while it is open -- moving its button did
+// not change how the page works.
+export const EXTRA_LIVE_PATHS = ["/ai-up"] as const;
 
 const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 
