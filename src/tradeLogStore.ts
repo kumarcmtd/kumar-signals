@@ -228,6 +228,14 @@ export async function pushTradeLogs(env: Env, body: Record<string, unknown>): Pr
   }
 }
 
+/** One key's full history (running copy merged with its shard) -- what the app would show. */
+export async function readTradeLogKey(env: Env, key: string): Promise<TradeLogEntry[]> {
+  const keys = await readKeys(env);
+  if (keys === null) return ((await getTradeLogsFromKv(env)) as Logs)[key] ?? [];
+  const [hot, shard] = await Promise.all([readHot(env), readShard(env, key)]);
+  return hot[key]?.length ? mergeTradeLogEntryLists(hot[key], shard.list) : shard.list;
+}
+
 // ---------------------------------------------------------------------------
 // Cron
 // ---------------------------------------------------------------------------

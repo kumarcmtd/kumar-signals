@@ -1,6 +1,8 @@
 // ntfy push notifications: Best Call and Ai20-20 background checks.
 
-import { analyzeImmediate, LOT_SIZE as TWENTY_LOT_SIZE, projectPremium20, scanForAiTwenty } from "../frontend/src/utils/aiTwentyTwentyEngine";
+import { measureV2, openV2Entry, planV2, readV2, v2Guard, v2Key, v2PushText, v2Window, V2_MARKETS } from "../frontend/src/utils/twentyV2";
+import type { LabSym } from "../frontend/src/utils/twentyLab";
+import type { OptionsAnalytics } from "../frontend/src/types";
 import { type BestCallPick, eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall } from "../frontend/src/utils/bestCallSelector";
 import { evaluateDirectionalGate } from "../frontend/src/utils/directionalGateEngine";
 import { findEliteSignal } from "../frontend/src/utils/eliteSignal";
@@ -8,18 +10,17 @@ import { scanAllSetups } from "../frontend/src/utils/kimiScanner";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { evaluateBuyDecision } from "../frontend/src/utils/buyDecisionEngine";
 import { tradeVerdict } from "../frontend/src/utils/tradeVerdict";
-import { liveMomentum } from "../frontend/src/utils/liveMomentum";
-import { trendPulse } from "../frontend/src/utils/trendPulse";
 import { newsPulseFor } from "../frontend/src/utils/newsPulse";
 import { fetchEiaData } from "./eiaCalendar";
 import { fetchEnergyNews } from "./news";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { scheduledEvents } from "../frontend/src/utils/timeProfileEngine";
 import { analyzeTimeframe } from "../frontend/src/utils/timeframeEngine";
-import { cachePut, type Candle, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
+import { cachePut, type Candle, type Env, type FutureInfo, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { getCandlesForTF } from "./signals";
-import { getNearestFuture } from "./upstox";
+import { getNearestFuture, getPriorDayBars } from "./upstox";
+import { pushTradeLogs, readTradeLogKey } from "./tradeLogStore";
 
 // ---- Best Call background push notifications (ntfy.sh) ----
 // A Cron Trigger (see wrangler.jsonc) calls runBestCallNotificationCheck on a
@@ -104,66 +105,65 @@ export async function sendNtfyNotification(
   return { ok: false, error: `ntfy.sh is not responding right now (${last}, tried ${tries} times). This is on ntfy's side -- try again in a few minutes.` };
 }
 
-// ---- Ai20-20 background push (ntfy.sh) ----
+// ---- Ai20-20 background calls (ntfy.sh) ----
 //
-// The page this is built for is the one actually traded, and the trader is at
-// work when its calls fire. Everything below therefore runs on the Cron with
-// no browser open, importing the SAME pure engine the page renders
-// (aiTwentyTwentyEngine) so a pushed call and an on-screen call can never
-// disagree.
-//
-// The one thing the Worker does not get for free is premium MOMENTUM. The page
-// builds it from a rolling buffer of ATM CE/PE prices collected while it is
-// open; the Worker keeps the equivalent buffer in KV across Cron ticks. The
-// buffer resets whenever the ATM strike rolls, exactly as the page's does --
-// an old strike's premium history says nothing about a freshly repriced one.
-const TWENTY_SAMPLES_KV_KEY = "twenty20:samples:v1";
-const TWENTY_MAX_SAMPLES = 12;
+// The trader is at work or away when calls fire, so Ai20-20 runs here on the
+// Cron with no browser open, on the SAME pure v2 engine the page renders
+// (frontend/src/utils/twentyV2.ts): a pushed call and an on-screen call can
+// never disagree. When it finds a call it also OPENS it in the trade log, so
+// every pushed call is tracked -- target, stop and day-end close -- even if
+// the app is never opened. The page writes the identical entry (same id, from
+// the signal candle) when it is open, so the two never double up.
 
-interface TwentySampleBuffer {
-  [symbol: string]: { strike: number | null; ce: number[]; pe: number[] };
+const IST_OFFSET_MS = 5.5 * 3600_000;
+
+/** These v2 rules re-measured on the prior days' real MCX candles; once a day, cached. */
+async function twentyRecord(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number): Promise<{ trades: number; avgRs: number | null; days: number; caution: boolean } | null> {
+  const day = new Date(now + IST_OFFSET_MS).toISOString().slice(0, 10);
+  const kvKey = `twenty2:rec:${sym}:${day}`;
+  const cached = await env.COMMODITY_KV.get(kvKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+      // rebuild below
+    }
+  }
+  const bars = await getPriorDayBars(env, token, instrumentKey, 20, 5);
+  if (!bars) return null;
+  const m = measureV2(bars, sym, false);
+  if (!m) return null;
+  const out = { trades: m.v2.trades, avgRs: m.v2.avgRs, days: m.days, caution: m.caution };
+  await cachePut(env.COMMODITY_KV, kvKey, JSON.stringify(out), { expirationTtl: 2 * 86_400 });
+  return out;
 }
 
-function twentyMomentumPct(samples: number[]): number | null {
-  if (samples.length < 3 || samples[0] <= 0) return null;
-  return ((samples[samples.length - 1] - samples[0]) / samples[0]) * 100;
+/** What the Trade Card says about this side right now, as one line for the push (null if it cannot load). */
+async function twentyCardLine(env: Env, token: string, fut: FutureInfo, symbol: Symbol, fast: Candle[], options: OptionsAnalytics | undefined, side: "CE" | "PE", now: number): Promise<string | null> {
+  const [c15, c60, c240] = await Promise.all(["15", "60", "240"].map((tf) => getCandlesForTF(env, token, fut, tf)));
+  if ("error" in c15 || "error" in c60 || "error" in c240) return null;
+  const session = mcxSessionAt(now);
+  const event = scheduledEvents(now).find((e) => e.affects === symbol);
+  const verify = evaluateBuyDecision({
+    c15,
+    c60,
+    c240,
+    now,
+    marketOpen: true,
+    eia: event ? { minutesAway: event.minutesAway, minutesSince: 7 * 24 * 60 - event.minutesAway, label: event.name } : null,
+    minutesToClose: session.isOpen ? session.closeMin - session.minutes : null,
+    daysToOptionExpiry: options ? daysToExpiry(options.expiry, now) : null,
+  });
+  if (!verify) return null;
+  const [newsFeed, eiaData] = await Promise.all([fetchEnergyNews(env).catch(() => null), fetchEiaData(env).catch(() => null)]);
+  const sym = symbol === "NATURALGAS" ? "NATURALGAS" : "CRUDEOIL";
+  const eia = sym === "CRUDEOIL" ? (eiaData?.crude ?? null) : (eiaData?.ngStorage ?? null);
+  const news = newsFeed?.available ? newsPulseFor(sym, newsFeed.articles, eia, newsFeed.builtAt ?? null, now) : null;
+  const card = tradeVerdict({ result: verify, c5: fast, c15, news, now, marketOpen: true });
+  return card.action === `TRADE_${side}` ? `agrees (${card.headline})` : `${card.headline} -- ${card.reason}`;
 }
 
-function twentySignature(symbol: string, strike: number, optSide: string, entry: number): string {
-  return `${symbol}-${strike}-${optSide}-${entry.toFixed(2)}`;
-}
-
-/**
- * One Cron tick of the Ai20-20 watcher.
- *
- * Deliberately gated on market hours: outside them there is nothing to enter,
- * the sample buffer would fill with stale prices, and every tick would be a KV
- * write against a 1,000/day free limit for no benefit.
- */
-const TWENTY_MEM_FRESH_MS = 11 * 60 * 1000; // older than two ticks -> trust KV instead
-// Paid plan: back up every tick, so a cold isolate never loses samples.
-// (Free plan used 15 minutes to stay under 1,000 KV writes a day.)
-const TWENTY_KV_BACKUP_MS = 0;
-let twentyMem: { at: number; backedUpAt: number; buffers: TwentySampleBuffer } | null = null;
-
-/** The MATCHED push, shared by the real alert and the test button so they look identical. */
-/** Same-side strike rolls are pushed at most this often; a side flip always is. */
-export const TWENTY_RAW_GAP_MS = 15 * 60_000;
-
-/** A plain new Ai20-20 call -- the fast 5-minute scan, not yet confirmed. */
-export function twentyCallText(p: { displayName: string; strike: number; optSide: "CE" | "PE"; entry: number; stop: number; targets: [number, number, number]; lot: number }): { title: string; body: string } {
-  return {
-    title: `⚡ Ai20-20: ${p.displayName} ${p.strike} ${p.optSide}`,
-    body: [
-      `New Ai20-20 call -- ${p.displayName} ${p.strike} ${p.optSide} @ Rs ${p.entry}`,
-      `Stop: Rs ${p.stop} | T1 Rs ${p.targets[0]} | T2 Rs ${p.targets[1]} | T3 Rs ${p.targets[2]}`,
-      `Per lot: risk about Rs ${Math.round((p.entry - p.stop) * p.lot)}, T1 about +Rs ${Math.round((p.targets[0] - p.entry) * p.lot)}.`,
-      "",
-      "Fast 5-min call, NOT confirmed by the Trade Card. Check Ai20-20 / Ai-Trust before entering and set the P&L exit.",
-    ].join("\n"),
-  };
-}
-
+/** The MATCHED push format, kept for the Settings test button. */
 export function matchedPushText(p: {
   displayName: string;
   strike: number;
@@ -204,46 +204,29 @@ export function matchedPushText(p: {
 }
 
 /**
- * Returns one plain-English line per market saying what the check found, so
- * the "Check for MATCHED now" button can show why a push did or did not go.
- * The Cron ignores the report.
+ * One Cron tick of Ai20-20 (v2). Returns one plain-English line per market
+ * saying what it found, so the "Check now" button can show why a push did or
+ * did not go. The Cron ignores the report.
  */
-export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string[]> {
-  const report: string[] = [];
-  // Gated on market hours for three reasons, not one: there is nothing to
-  // enter outside them, the sample buffer would fill with stale prices, and
-  // every tick would spend Upstox requests -- which is what pushes the app
-  // into Upstox's 1015 rate limit -- for no possible benefit.
-  if (!getMarketStatus().isOpen) return ["MCX is closed -- the MATCHED check only runs while the market is open."];
+export async function runTwentyTwentyNotificationCheck(env: Env, now: number = Date.now()): Promise<string[]> {
+  // Market hours first: nothing to enter outside them, and every tick would
+  // spend Upstox requests -- what pushes the app into the 1015 rate limit.
+  if (!getMarketStatus().isOpen) return ["MCX is closed -- Ai20-20 only runs while the market is open."];
+  const win = v2Window(now);
+  if (!win.open) return [`Ai20-20 calls only ${win.label} (10:00 AM - 1:15 PM New York) -- outside that window now.`];
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return ["Not logged in to Upstox today -- no live data to check."];
-  // Checked BEFORE any upstream call. With no ntfy topic saved there is
-  // nowhere to send a push, so fetching the data to build one would be pure
-  // waste against the rate limit.
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
-  if (!topic) return ["No ntfy topic saved -- there is nowhere to send a push."];
-
-  // Memory first: this was a KV write every 5 minutes (~175 a day, a sixth
-  // of the free plan's 1,000). Cron runs usually land on a warm isolate, so
-  // the buffer lives in memory and KV only keeps a backup copy every
-  // TWENTY_KV_BACKUP_MS. A cold isolate reloads that backup -- at worst a few
-  // samples short, which the momentum read already tolerates.
-  let buffers: TwentySampleBuffer = {};
-  if (twentyMem && Date.now() - twentyMem.at < TWENTY_MEM_FRESH_MS) {
-    buffers = twentyMem.buffers;
-  } else {
-    try {
-      buffers = JSON.parse((await env.COMMODITY_KV.get(TWENTY_SAMPLES_KV_KEY)) ?? "{}") as TwentySampleBuffer;
-    } catch {
-      buffers = {};
-    }
-  }
-
-  let buffersChanged = false;
+  const report: string[] = [];
 
   for (const symbol of OPTION_SYMBOLS) {
+    const sym = symbol as LabSym;
     const name = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
     const say = (t: string) => report.push(`${name}: ${t}`);
+    if (!V2_MARKETS[sym]) {
+      say("no Ai20-20 calls on this market -- 5-minute calls lost money on gas in every rule set tested.");
+      continue;
+    }
     try {
       const fut = await getNearestFuture(token, symbol as Symbol);
       if (!fut) {
@@ -255,160 +238,54 @@ export async function runTwentyTwentyNotificationCheck(env: Env): Promise<string
         say("no 5-minute candles yet.");
         continue;
       }
-
+      const read = readV2(fast, sym, now);
+      if (read.state !== "call" || !read.barEnd) {
+        say(read.headline);
+        continue;
+      }
+      // One look per signal candle (the "check now" button can run mid-candle too).
+      const barKey = `notified:TWENTY2-${symbol}`;
+      if ((await env.COMMODITY_KV.get(barKey)) === String(read.barEnd)) {
+        say(`${read.side} call on this candle -- already handled.`);
+        continue;
+      }
+      const key = v2Key(sym);
+      const guard = v2Guard(await readTradeLogKey(env, key), read.side, now);
+      if (!guard.ok) {
+        say(`${read.side} call skipped: ${guard.reason}`);
+        await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 });
+        continue;
+      }
       const optionsResult = await computeOptionsAnalytics(env, token, symbol as Symbol);
       const options = "error" in optionsResult ? undefined : optionsResult;
-
-      // --- keep the momentum buffer -------------------------------------
-      const atmRow = options && options.atmStrike !== null ? options.rows.find((r) => r.strike === options.atmStrike) : undefined;
-      const strike = atmRow?.strike ?? null;
-      const prev = buffers[symbol];
-      const buf = prev && prev.strike === strike ? prev : { strike, ce: [], pe: [] };
-      const ceLtp = atmRow?.call.ltp ?? null;
-      const peLtp = atmRow?.put.ltp ?? null;
-      if (typeof ceLtp === "number") buf.ce = [...buf.ce, ceLtp].slice(-TWENTY_MAX_SAMPLES);
-      if (typeof peLtp === "number") buf.pe = [...buf.pe, peLtp].slice(-TWENTY_MAX_SAMPLES);
-      buffers[symbol] = buf;
-      buffersChanged = true;
-
-      // --- the same engine the page runs --------------------------------
-      const analysis = analyzeImmediate(fast, twentyMomentumPct(buf.ce), twentyMomentumPct(buf.pe));
-      const candidates = scanForAiTwenty([{ symbol, analysis }]);
-      if (candidates.length === 0) {
-        say("no Ai20-20 call right now.");
+      const plan = planV2(read, options, sym);
+      if (!plan) {
+        say(`${read.side} call, but no live option premium to price it -- nothing recorded.`);
         continue;
       }
-      const projection = projectPremium20(analysis, options);
-      if (!projection) {
-        say("Ai20-20 leans one way but no option premium to price the call.");
+      // Marker first: past the KV write limit it cannot be saved, and acting
+      // anyway would record and push the same call again on the next tick.
+      if (!(await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 }))) {
+        say("call found, but the already-handled marker could not be saved -- skipped so it cannot repeat.");
         continue;
       }
-
-      // Every NEW Ai20-20 call is pushed too (the page's own alert, with the
-      // app closed): once per new call, a side flip at once, a strike roll on
-      // the same side at most every 15 minutes. Marked as the fast,
-      // unconfirmed call -- MATCHED below stays the confirmed one.
-      try {
-        const rawKey = `notified:TWENTY-RAW-${symbol}`;
-        const sig = `${projection.optSide}-${projection.strike}`;
-        const prev = (await env.COMMODITY_KV.get(rawKey)) ?? "";
-        const [prevSig, prevAt] = prev.split("|");
-        const sideFlip = !prevSig || prevSig.split("-")[0] !== projection.optSide;
-        const due = prevSig !== sig && (sideFlip || Date.now() - Number(prevAt || 0) >= TWENTY_RAW_GAP_MS);
-        if (due && (await cachePut(env.COMMODITY_KV, rawKey, `${sig}|${Date.now()}`, { expirationTtl: 86_400 }))) {
-          const m = twentyCallText({ displayName: name, ...projection, lot: TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1 });
-          const r = await sendNtfyNotification(topic, m.title, m.body, "high", { token: env.NTFY_TOKEN });
-          say(`Ai20-20 ${projection.strike} ${projection.optSide} -- new call ${r.ok ? "pushed" : "push failed"}.`);
-        }
-      } catch {
-        // the raw push must never stop the MATCHED check below
-      }
-
-      // Push ONLY when AI Verify Pro (closed 15m/1h/4h candles) has confirmed
-      // the same side and the live candle is not already turning against it.
-      // An unmatched Ai20-20 call alone fires too often to trade on.
-      const now = Date.now();
-      const [c15, c60, c240] = await Promise.all(["15", "60", "240"].map((tf) => getCandlesForTF(env, token, fut, tf)));
-      if ("error" in c15 || "error" in c60 || "error" in c240) {
-        say(`Ai20-20 ${projection.optSide} call, but the 15m/1h/4h candles did not load.`);
+      await pushTradeLogs(env, { [key]: [openV2Entry(plan, read)] });
+      say(`${plan.strike} ${plan.optSide} @ Rs ${plan.entry} -- call recorded in the trade log.`);
+      if (!topic) {
+        say("no ntfy topic saved -- recorded but not pushed.");
         continue;
       }
-      const session = mcxSessionAt(now);
-      const event = scheduledEvents(now).find((e) => e.affects === symbol);
-      const verify = evaluateBuyDecision({
-        c15,
-        c60,
-        c240,
-        now,
-        marketOpen: true,
-        eia: event ? { minutesAway: event.minutesAway, minutesSince: 7 * 24 * 60 - event.minutesAway, label: event.name } : null,
-        minutesToClose: session.isOpen ? session.closeMin - session.minutes : null,
-        daysToOptionExpiry: options ? daysToExpiry(options.expiry, now) : null,
-      });
-      if (!verify) {
-        say(`Ai20-20 ${projection.optSide} call, but not enough closed candles for AI Verify Pro.`);
-        continue;
-      }
-      const live = liveMomentum(c15, fast, verify, now, true);
-      // Same extra checks as the card: steady 5-minute candles, no chase, and
-      // news (risk premium) not against the side. Both are cached server-side.
-      const pulse = trendPulse(fast, now, fast[fast.length - 1]?.close ?? null);
-      const [newsFeed, eiaData] = await Promise.all([fetchEnergyNews(env).catch(() => null), fetchEiaData(env).catch(() => null)]);
-      const sym = symbol === "NATURALGAS" ? "NATURALGAS" : "CRUDEOIL";
-      const eia = sym === "CRUDEOIL" ? (eiaData?.crude ?? null) : (eiaData?.ngStorage ?? null);
-      const news = newsFeed?.available ? newsPulseFor(sym, newsFeed.articles, eia, newsFeed.builtAt ?? null, now) : null;
-      // The Trade Card is the referee: push only when it is full green (CE) or
-      // full red (PE) on the SAME side as the Ai20-20 call -- trend, steady or
-      // bouncing 5-min candles, a strong candle with volume, news not against,
-      // and a good entry spot. Plus the live candle must not be turning on it.
-      const card = tradeVerdict({ result: verify, c5: fast, c15, news, now, marketOpen: true });
-      if (card.action !== `TRADE_${projection.optSide}`) {
-        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: Trade Card says ${card.headline} (${card.reason}).`);
-        continue;
-      }
-      if (live && live.tone === "bad") {
-        say(`Ai20-20 ${projection.strike} ${projection.optSide} -- not matched: the live candle is turning against it.`);
-        continue;
-      }
-      // The Trade Card tracker (run just before this) already pushed "TRADE"
-      // for this market and side -- one alert per trade, not two.
-      try {
-        const cardLogs = JSON.parse((await env.COMMODITY_KV.get("tradecard:log:v1")) ?? "{}") as Record<string, { side: string; closed: boolean }[]>;
-        if ((cardLogs[sym] ?? []).some((c) => !c.closed && c.side === projection.optSide)) {
-          say(`MATCHED ${projection.strike} ${projection.optSide} -- already alerted by the Trade Card.`);
-          continue;
-        }
-      } catch {
-        // unreadable log -> fall through and push as before
-      }
-
-      // One push per confirmed AI Verify setup -- not one per premium tick.
-      const sig = `${twentySignature(symbol, projection.strike, projection.optSide, 0)}-${verify.since ?? verify.lastClosedAt ?? ""}`;
-      const sigKey = `notified:MATCHED-${symbol}`;
-      if ((await env.COMMODITY_KV.get(sigKey)) === sig) {
-        say(`MATCHED ${projection.strike} ${projection.optSide} -- already pushed for this setup.`);
-        continue;
-      }
-      // Only alert if the "already sent" marker was saved -- past the daily
-      // KV write limit it cannot be, and alerting anyway would resend this
-      // same call every five minutes.
-      if (!(await cachePut(env.COMMODITY_KV, sigKey, sig))) {
-        say("MATCHED, but the already-sent marker could not be saved, so no push (it would repeat).");
-        continue;
-      }
-
-      const msg = matchedPushText({
-        displayName: name,
-        strike: projection.strike,
-        optSide: projection.optSide,
-        entry: projection.entry,
-        t1: projection.targets[0],
-        stop: projection.stop,
-        lot: TWENTY_LOT_SIZE[symbol as keyof typeof TWENTY_LOT_SIZE] ?? 1,
-        strength: verify.strength,
-        since: verify.since,
-        liveHeadline: live?.headline ?? null,
-        pulseTitle: pulse?.title ?? null,
-        newsText: news ? `${news.net > 0 ? "+" : ""}${news.net} ${news.direction}${news.top ? ` -- ${news.top.headline}` : ""}` : null,
-        cardText: `${card.headline}: all ${card.checks.length} checks pass. Futures stop ${card.stop ?? "-"}, target ${card.t1 ?? "-"}.`,
-      });
+      const [record, cardLine] = await Promise.all([
+        twentyRecord(env, token, fut.instrument_key, sym, now).catch(() => null),
+        twentyCardLine(env, token, fut, symbol as Symbol, fast, options, plan.optSide, now).catch(() => null),
+      ]);
+      const msg = v2PushText({ displayName: name, plan, read, record, cardLine, caution: record?.caution ?? false });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
-      say(sent.ok ? `MATCHED ${projection.strike} ${projection.optSide} -- push sent.` : `MATCHED, but the push failed: ${sent.error ?? "unknown error"}.`);
+      say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {
-      // One symbol failing must never stop the other, and must never fail the
-      // whole Cron run.
+      // One market failing must never stop the other, or fail the Cron run.
       say(`check failed (${e?.message ?? "error"}).`);
     }
-  }
-
-  if (buffersChanged) {
-    const now = Date.now();
-    const lastBackup = twentyMem?.backedUpAt ?? 0;
-    let backedUpAt = lastBackup;
-    if (now - lastBackup >= TWENTY_KV_BACKUP_MS) {
-      if (await cachePut(env.COMMODITY_KV, TWENTY_SAMPLES_KV_KEY, JSON.stringify(buffers), { expirationTtl: 24 * 60 * 60 })) backedUpAt = now;
-    }
-    twentyMem = { at: now, backedUpAt, buffers };
   }
   return report;
 }

@@ -316,6 +316,15 @@ export function useHistory30m(symbol: InstrumentSymbol, enabled: boolean) {
   });
 }
 
+export function useHistory5m(symbol: InstrumentSymbol) {
+  return useQuery({
+    queryKey: ["history-5m", symbol],
+    queryFn: () => api.history5m(symbol),
+    staleTime: 30 * 60_000,
+    refetchInterval: false,
+  });
+}
+
 // How far WTI / Brent / Henry Hub have moved since MCX shut.
 //
 // Two KV-and-memo reads on the Worker and no Upstox call, so a five-minute
@@ -461,7 +470,7 @@ export function useSendTestMatched() {
 
 /** Sample Trade Card / EIA-warning push, in the real format, marked TEST. */
 export function useSendTestAlert() {
-  return useMutation({ mutationFn: (kind: "card" | "event" | "quick") => api.sendTestAlert(kind) });
+  return useMutation({ mutationFn: (kind: "card" | "event" | "quick" | "twenty") => api.sendTestAlert(kind) });
 }
 
 export function useCheckMatchedNow() {

@@ -70,7 +70,7 @@ export function CallReviewCard({ review, className }: { review: CallReview; clas
                 <div className="h-full rounded-full transition-all" style={{ width: `${goal}%`, background: v.color }} />
               </div>
               <p className="text-[9px] text-slate-400 mt-1">
-                {review.goalProgressPct === null ? "—" : `${review.goalProgressPct}% of the way to the ₹2,000 target`} · open {formatMinutes(review.minutesOpen)}
+                {review.goalProgressPct === null ? "—" : `${review.goalProgressPct}% of the way to the ₹${(review.goalRs ?? 2000).toLocaleString("en-IN")} target`} · open {formatMinutes(review.minutesOpen)}
               </p>
             </div>
 

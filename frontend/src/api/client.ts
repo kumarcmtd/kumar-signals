@@ -172,6 +172,8 @@ export const api = {
   // seconds. Server-side this is the same KV-cached series the gap study uses.
   history30m: (symbol: InstrumentSymbol) =>
     getJSON<{ symbol: InstrumentSymbol; tradingSymbol: string | null; candles: Candle[]; error?: string }>(`/history-30m?symbol=${symbol}`),
+  /** 20 days of finished 5-minute candles (also while MCX is shut), for the Ai20-20 record. */
+  history5m: (symbol: InstrumentSymbol) => getJSON<{ tradingSymbol?: string; candles?: Candle[]; error?: string }>(`/history-5m?symbol=${symbol}`),
   portfolio: () => getJSON<PortfolioTrade[]>("/portfolio"),
   createTrade: (trade: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>("/portfolio", "POST", trade),
   updateTrade: (id: string, patch: Partial<PortfolioTrade>) => sendJSON<PortfolioTrade>(`/portfolio/${id}`, "PATCH", patch),
@@ -183,7 +185,7 @@ export const api = {
   sendTestNotification: () => sendJSON<{ ok: true }>("/notify/test", "POST"),
   checkNotificationsNow: () => sendJSON<{ ok: true }>("/notify/check-now", "POST"),
   sendTestMatched: () => sendJSON<{ ok: true }>("/notify/test?kind=matched", "POST"),
-  sendTestAlert: (kind: "card" | "event" | "quick") => sendJSON<{ ok: true }>(`/notify/test?kind=${kind}`, "POST"),
+  sendTestAlert: (kind: "card" | "event" | "quick" | "twenty") => sendJSON<{ ok: true }>(`/notify/test?kind=${kind}`, "POST"),
   checkMatchedNow: () => sendJSON<{ report: string[] }>("/notify/check-matched", "POST"),
   getTradeLogs: () => getJSON<Record<string, TradeLogEntry[]>>("/trade-logs"),
   saveTradeLogs: (logs: Record<string, TradeLogEntry[]>) => saveTradeLogsInChunks(logs),

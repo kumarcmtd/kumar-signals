@@ -38,6 +38,8 @@ export interface ReviewFactor {
 
 export interface CallReview {
   verdict: ReviewVerdict;
+  /** The Rs-per-lot target this review measured progress against. */
+  goalRs?: number;
   headline: string;
   reason: string;
   /** 0-100 health of the position right now. Not a probability. */
@@ -182,6 +184,7 @@ export function reviewCall(input: ReviewInput): CallReview {
     peakRs: peakRs > 0 ? peakRs : 0,
     giveBackPct,
     goalProgressPct,
+    goalRs: input.goalRs,
     thetaBurnedRs,
     minutesOpen: Math.round(minutesOpen),
     factors,

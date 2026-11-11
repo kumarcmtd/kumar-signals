@@ -7,7 +7,10 @@
 //   NG: no rule set we tried made money on both data sets -> no NG calls
 // A test on past prices, not a promise: real fills and new markets differ.
 // The page shows the same rules re-measured on the last ~15 days of real MCX
-// candles, so the record is always visible.
+// candles, so the record is always visible. Final check (lab, old vs v2):
+//   NYMEX 50 days: v2 46 calls, T1 hit 37%, 54% winners, +1,110/call,
+//     worst run of losses -15,057, worst day -4,203 (per lot)
+//   MCX 15 days:   v2 11 calls, T1 hit 45%, 55% winners, +2,420/call
 //
 // The v2 call, all on FINISHED 5-minute candles (nothing repaints):
 //   1. the page's own 5-min strength read turns strong (58+ CE / 42- PE) ...
@@ -22,6 +25,15 @@ import type { Candle, OptionsAnalytics } from "../types";
 import { CURRENT_RULES, LAB_LOT, prepare, signalAt, simulate, statsOf, type LabRules, type LabStats, type LabSym, type LabTrade } from "./twentyLab";
 import { usDstForSession } from "./mcxSession";
 import { openNewEntry, type TradeLogEntry } from "./tradeLogCore";
+
+/** The lab's longer test (NYMEX 5-min candles, 1 Sep - 10 Nov 2026), shown on the page beside the live MCX record. */
+export const V2_LAB_FACTS = {
+  to: "10 Nov 2026",
+  days: 50,
+  ruleSetsTried: 264 + 673,
+  crude: { v2Calls: 46, v2T1: 37, v2Win: 54, v2Avg: 1110, v2WorstDay: -4203, v2WorstRun: -15057, oldCalls: 889, oldAvg: -138 },
+  gas: { v2Calls: 46, v2Avg: -113, oldCalls: 261, oldAvg: -433 },
+} as const;
 
 export const V2_RULES: LabRules = { signal: "score", mode: "fresh", minScore: 58, htf: "60", chop: "none", hours: "usopen", exits: "atr", stopAtr: 2, t1R: 1.5, timeStop: false };
 
@@ -119,7 +131,13 @@ export function finishedCandles(c: Candle[], now: number): Candle[] {
 export function readV2(candles: Candle[], sym: LabSym, now: number = Date.now()): V2Read {
   const closed = finishedCandles(candles, now);
   const none = (headline: string, state: V2Read["state"] = "no_data"): V2Read => ({ state, side: null, barEnd: null, fut: null, atr: null, stopPts: null, t1Pts: null, strength: null, checks: [], headline });
-  if (closed.length < MIN_BARS) return none("Waiting for enough 5-minute history (about 7 sessions).");
+  const offText = "Ai20-20 calls are off for Natural Gas — 5-minute calls lost money on gas in every rule set tested.";
+  if (closed.length < MIN_BARS) {
+    if (!V2_MARKETS[sym]) return none(offText, "off");
+    const w0 = v2Window(now);
+    if (!w0.open) return none(w0.opensAt ? `Calls only ${w0.label}. Next window opens ${istClock(w0.opensAt)}.` : `Calls only ${w0.label}.`, "window_closed");
+    return none("Waiting for the 5-minute candles to load.");
+  }
   const p = prepare(closed.slice(-LIVE_BARS), 3);
   const i = p.c.length - 1;
   const sc = p.score[i];
@@ -139,7 +157,7 @@ export function readV2(candles: Candle[], sym: LabSym, now: number = Date.now())
   const atr = p.atr[i];
   const base = { side: side ?? lean, barEnd: Date.parse(p.c[i].date) + BAR_MS, fut: p.c[i].close, atr: Number.isFinite(atr) ? atr : null, strength: Number.isFinite(sc) ? Math.round(sc) : null, checks };
   if (!V2_MARKETS[sym]) {
-    return { ...base, state: "off", stopPts: null, t1Pts: null, headline: "Ai20-20 calls are off for Natural Gas — 5-minute calls lost money on gas in every rule set tested." };
+    return { ...base, state: "off", stopPts: null, t1Pts: null, headline: offText };
   }
   if (side && base.atr) {
     const stopPts = (V2_RULES.stopAtr ?? 2) * base.atr;
@@ -229,13 +247,20 @@ export interface V2Record {
   to: string;
   v2: LabStats;
   old: LabStats | null;
-  /** Pause new calls: the rules clearly lost money over this window (see V2_GATE). */
-  paused: boolean;
+  /** The v2 test calls of the last V2_CAUTION.days trading days. */
+  recent: { days: number; trades: number; avgRs: number | null };
+  /** The rules clearly lost money lately: calls still come, marked "half size or skip". */
+  caution: boolean;
   trades: LabTrade[];
 }
 
-/** Pause only on clear evidence: at least `minTrades` test calls averaging below `floorRs`. */
-export const V2_GATE = { minTrades: 8, floorRs: 0 } as const;
+/**
+ * When to mark calls with a caution. The lab replayed several automatic
+ * pauses: only this gentle one (last 10 days, 8+ calls, average below
+ * -Rs 300) did not cost money on the good days, so it warns rather than
+ * blocks.
+ */
+export const V2_CAUTION = { days: 10, minTrades: 8, floorRs: -300 } as const;
 
 export function measureV2(history: Candle[], sym: LabSym, withOld = true): V2Record | null {
   if (history.length < MIN_BARS) return null;
@@ -243,15 +268,19 @@ export function measureV2(history: Candle[], sym: LabSym, withOld = true): V2Rec
   const trades = simulate(p, V2_RULES, sym);
   const v2 = statsOf(trades, p, "Ai20-20 v2");
   const old = withOld ? statsOf(simulate(p, CURRENT_RULES, sym), p, "Old rules") : null;
-  const paused = v2.trades >= V2_GATE.minTrades && (v2.avgRs ?? 0) < V2_GATE.floorRs;
-  return { days: v2.days, from: p.c[0].date, to: p.c[p.c.length - 1].date, v2, old, paused, trades };
+  const days = [...new Set(p.day)].sort((a, b) => a - b);
+  const since = days[Math.max(0, days.length - V2_CAUTION.days)];
+  const recentT = trades.filter((t) => p.day[t.openIdx] >= since);
+  const avg = recentT.length ? Math.round(recentT.reduce((a, t) => a + t.rs, 0) / recentT.length) : null;
+  const caution = recentT.length >= V2_CAUTION.minTrades && (avg ?? 0) < V2_CAUTION.floorRs;
+  return { days: v2.days, from: p.c[0].date, to: p.c[p.c.length - 1].date, v2, old, recent: { days: Math.min(V2_CAUTION.days, days.length), trades: recentT.length, avgRs: avg }, caution, trades };
 }
 
 // ---- the push ----
 
 const rs = (n: number) => `Rs ${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 
-export function v2PushText(p: { displayName: string; plan: V2Plan; read: V2Read; record: { trades: number; avgRs: number | null; days: number } | null; cardLine: string | null; paused: boolean }): { title: string; body: string } {
+export function v2PushText(p: { displayName: string; plan: V2Plan; read: V2Read; record: { trades: number; avgRs: number | null; days: number } | null; cardLine: string | null; caution: boolean }): { title: string; body: string } {
   const { plan } = p;
   const why = p.read.checks.filter((c) => c.ok).map((c) => c.detail.split(" (")[0]);
   const lines = [
@@ -261,7 +290,7 @@ export function v2PushText(p: { displayName: string; plan: V2Plan; read: V2Read;
     p.record && p.record.trades > 0 && p.record.avgRs !== null
       ? `These rules, last ${p.record.days} days on MCX: ${p.record.trades} calls, average ${p.record.avgRs >= 0 ? "+" : "-"}${rs(p.record.avgRs)}/lot (test, not live fills).`
       : "",
-    p.paused ? "CAUTION: these rules lost money over the last 15 days -- half size or skip." : "",
+    p.caution ? "CAUTION: these rules lost money over the last 10 days -- half size or skip." : "",
     p.cardLine ? `Trade Card: ${p.cardLine}` : "",
     "After T1 move the stop to entry. Closes at the day's end if still open.",
   ];

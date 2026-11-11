@@ -203,8 +203,13 @@ export function useAlertEngine(): void {
         // The first pass only records what already exists, so opening the app
         // does not replay every historical call as a new alert.
         if (firstRunRef.current) continue;
+        // A call the server opened while the app was shut arrives with the
+        // next sync -- it was already pushed to the phone then, so ringing
+        // again now (maybe hours later) would only mislead.
+        if (now - latest.openedAt > 10 * 60_000) continue;
         const symbol: TradableSymbol = key.includes("NATURALGAS") ? "NATURALGAS" : "CRUDEOIL";
-        const tf = key.split("-").pop() ?? "";
+        const last = key.split("-").pop() ?? "";
+        const tf = /^\d+$/.test(last) ? last : "";
         fresh.push({
           id: `${key}-${latest.id}`,
           createdAt: now,

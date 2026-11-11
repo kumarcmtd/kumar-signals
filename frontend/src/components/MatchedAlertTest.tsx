@@ -1,29 +1,29 @@
-// Two ways to try the MATCHED alert: a sample push in the exact real format
+// Two ways to try the Ai20-20 alert: a sample push in the exact real format
 // (marked TEST), and the real check run on live data now, with one line per
-// market saying why it did or did not match.
+// market saying why it did or did not call. Plus samples of the other pushes.
 
 import { BellRing, Search } from "lucide-react";
-import { useCheckMatchedNow, useSendTestAlert, useSendTestMatched } from "../api/hooks";
+import { useCheckMatchedNow, useSendTestAlert } from "../api/hooks";
 
 export function MatchedAlertTest({ hasTopic }: { hasTopic: boolean }) {
-  const sample = useSendTestMatched();
+  const sample = useSendTestAlert();
   const check = useCheckMatchedNow();
   const other = useSendTestAlert();
   return (
     <div className="rounded-xl p-3 space-y-2 bg-emerald-50 border border-emerald-200">
-      <p className="text-[12px] font-black text-emerald-800">Test the MATCHED alert</p>
+      <p className="text-[12px] font-black text-emerald-800">Test the Ai20-20 alert</p>
       <p className="text-[10.5px] text-slate-600 leading-snug">
-        A MATCHED push comes only when an Ai20-20 call agrees with a full green / full red Trade Card on the same side. The Trade Card also pushes on its own: TRADE, target hit, stop hit, day end. Plus a warning 30 min before each EIA report, and one if live data fails at the open.
+        Every Ai20-20 v2 call (Crude, in the US-session window) is pushed the moment it fires, even with the app closed, with its plan and what the Trade Card thinks. The Trade Card also pushes on its own: TRADE, target hit, stop hit, day end. Plus a warning 30 min before each EIA report, and one if live data fails at the open.
       </p>
       <button
         disabled={!hasTopic || sample.isPending}
-        onClick={() => sample.mutate()}
+        onClick={() => sample.mutate("twenty")}
         className="w-full flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg text-white disabled:opacity-40"
         style={{ background: "linear-gradient(135deg,#059669,#10B981)" }}
       >
-        <BellRing size={13} /> {sample.isPending ? "Sending…" : "Send test MATCHED alert (sample)"}
+        <BellRing size={13} /> {sample.isPending ? "Sending…" : "Send test Ai20-20 alert (sample)"}
       </button>
-      {sample.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — a push titled "TEST — MATCHED: Crude Oil 8850 CE" should ring now. Its numbers are samples.</p>}
+      {sample.isSuccess && <p className="text-[11px] font-bold text-emerald-700">Sent — a push titled "TEST — ⚡ Ai20-20: Crude Oil 5400 CE" should ring now. Its numbers are samples.</p>}
       {sample.isError && <p className="text-[11px] font-bold text-rose-700">{(sample.error as Error).message}</p>}
 
       <button
@@ -31,7 +31,7 @@ export function MatchedAlertTest({ hasTopic }: { hasTopic: boolean }) {
         onClick={() => check.mutate()}
         className="w-full flex items-center justify-center gap-1.5 text-xs font-bold py-2.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 disabled:opacity-40"
       >
-        <Search size={13} /> {check.isPending ? "Checking live data…" : "Check for a MATCHED call now (live)"}
+        <Search size={13} /> {check.isPending ? "Checking live data…" : "Check for an Ai20-20 call now (live)"}
       </button>
       {check.isSuccess && (
         <ul className="space-y-1">
