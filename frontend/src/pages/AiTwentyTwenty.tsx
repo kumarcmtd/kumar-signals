@@ -3,7 +3,6 @@ import { Target, TrendingUp, TrendingDown, Info, X, ChevronRight, ChevronDown, C
 import { useMarketStatus, useSignal } from "../api/hooks";
 import { useTwentyV2 } from "../hooks/useTwentyV2";
 import { effectiveStopFor } from "../hooks/useTradeLog";
-import { summarizeTradeLogsByDay } from "../utils/tradeLogStats";
 import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
 import { verifiedEntryIds } from "../utils/dedupeTradeLog";
 import { tickMarks, fmtWhen, DetailRow, CallChart, PriceScale, ProfitEstimate } from "../components/CallCardKit";
@@ -196,7 +195,6 @@ export function AiTwentyTwenty() {
     for (const [k, v] of Object.entries(twentyLogs)) if (!parseKey(k).v2) old[k] = v.filter((e) => verifiedIds[k]?.has(e.id));
     return computePerformanceStats(flattenClosedTrades(old));
   }, [twentyLogs, verifiedIds]);
-  const dayStats = useMemo(() => summarizeTradeLogsByDay(twentyLogs), [twentyLogs]);
   const allCalls = useMemo(() => {
     const out: { key: string; symbol: TradableSymbol; v2: boolean; entry: TradeLogEntry; verified: boolean }[] = [];
     for (const [k, v] of Object.entries(twentyLogs)) {
@@ -297,37 +295,6 @@ export function AiTwentyTwenty() {
         </div>
       )}
 
-      <section className="rounded-3xl bg-white shadow-md p-4 overflow-x-auto">
-        <p className="text-xs font-bold uppercase text-slate-500 mb-1 flex items-center gap-1.5">
-          <Target size={13} className="text-sky-500" /> Day by day — both markets, old and v2
-        </p>
-        {dayStats.length === 0 ? (
-          <p className="text-xs text-slate-400 text-center py-3">No calls have closed yet.</p>
-        ) : (
-          <table className="w-full text-[11px] min-w-[420px]">
-            <thead>
-              <tr className="text-slate-400 text-left">
-                <th className="font-semibold pb-2">Date</th>
-                <th className="font-semibold pb-2">Target hit</th>
-                <th className="font-semibold pb-2">Breakeven</th>
-                <th className="font-semibold pb-2">SL hit</th>
-                <th className="font-semibold pb-2">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dayStats.map((d) => (
-                <tr key={d.dateKey} className="border-t border-slate-100">
-                  <td className="py-2 font-semibold text-slate-700">{d.label}</td>
-                  <td className="py-2 font-bold text-emerald-600">{d.targetHit}</td>
-                  <td className="py-2 font-bold text-lime-600">{d.breakeven}</td>
-                  <td className="py-2 font-bold text-rose-500">{d.slHit}</td>
-                  <td className="py-2 text-slate-500">{d.total}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
 
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">
         Educational reference, not financial advice. Records are tests on past prices with costs taken off — real fills, spreads and fast markets differ. Never risk money you cannot afford to lose.

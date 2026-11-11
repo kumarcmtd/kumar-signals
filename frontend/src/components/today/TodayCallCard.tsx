@@ -8,6 +8,8 @@ import { liveLtpFor } from "../../hooks/useTradeLog";
 import { PriceScale, ProfitEstimate } from "../CallCardKit";
 import { AiChart } from "../trust/AiChart";
 import { premiumToFutures } from "../../utils/chartMarks";
+import { buyNowAdvice, minutesToMcxClose } from "../../utils/buyNow";
+import { BuyNowBanner } from "../BuyNowBanner";
 import { LOT_SIZE } from "../../utils/aiTwentyTwentyEngine";
 import type { TradeLogEntry } from "../../utils/tradeLogCore";
 import type { TfRecord, FocusSym } from "../../hooks/useTodayFocus";
@@ -97,6 +99,25 @@ export function TodayCallCard({
               Called {when(entry.openedAt)} at ₹{entry.entry.toFixed(2)}
             </p>
             {warn && <p className="mt-1 text-[11px] font-black text-amber-700">⚠ {warn}</p>}
+            {!entry.closed && (
+              <BuyNowBanner
+                className="mt-2"
+                advice={buyNowAdvice({
+                  entry: entry.entry,
+                  stop: entry.stop,
+                  targets: entry.targets,
+                  targetsHit: entry.targetsHit,
+                  closed: entry.closed,
+                  live,
+                  lot: LOT_SIZE[sym],
+                  minutesToClose: minutesToMcxClose(),
+                  // The timeframe's read now: a call made on STRONG BUY that has
+                  // faded to WATCH BUY is no longer a fresh entry.
+                  stillValid: analysis.optSide === entry.optSide && (analysis.decision === "STRONG BUY" || analysis.decision === "BUY"),
+                  signalNow: analysis.optSide === entry.optSide ? analysis.decision : `${analysis.decision}${analysis.optSide ? ` (${analysis.optSide})` : ""}`,
+                })}
+              />
+            )}
             <div className="grid grid-cols-3 gap-1.5 mt-2">
               <Box label="Entry" value={`₹${entry.entry.toFixed(2)}`} />
               <Box label={entry.closed ? "Exit" : "Live"} value={current !== null ? `₹${current.toFixed(2)}` : "—"} />

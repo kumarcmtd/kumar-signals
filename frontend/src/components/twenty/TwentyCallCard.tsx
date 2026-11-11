@@ -14,6 +14,8 @@ import { premiumToFutures } from "../../utils/chartMarks";
 import { formatTipCard } from "../../utils/tipFormat";
 import { reviewCall } from "../../utils/callReviewEngine";
 import { PriceScale, ProfitEstimate, fmtWhen, formatExpiryTip } from "../CallCardKit";
+import { BuyNowBanner } from "../BuyNowBanner";
+import { buyNowAdvice, minutesToMcxClose } from "../../utils/buyNow";
 import { CallReviewCard } from "../CallReviewCard";
 import { ProfitMilestones } from "../ProfitMilestones";
 import { AiChart, type ChartPlan } from "../trust/AiChart";
@@ -65,6 +67,9 @@ function RunningCall({ sym, s, open, legacy, expiry }: { sym: LabSym; s: TwentyV
           {legacy ? " · made by the OLD rules" : ""}
         </p>
       </div>
+      <BuyNowBanner
+        advice={buyNowAdvice({ entry: open.entry, stop: open.stop, targets: open.targets, targetsHit: open.targetsHit, closed: open.closed, live: ltp, lot, minutesToClose: minutesToMcxClose() })}
+      />
       <div className="grid grid-cols-3 gap-2">
         <Level label={open.targetsHit[0] ? "Stop (moved)" : "Stop"} value={`₹${stop}`} sub={rsLot(stop - open.entry, lot)} color="#E11D48" />
         <Level label="Target 1" value={`₹${open.targets[0]}`} sub={rsLot(open.targets[0] - open.entry, lot)} color="#059669" />

@@ -15,6 +15,8 @@ import { AiChart } from "./AiChart";
 import { useOptionsAnalytics, useTradeCardLog } from "../../api/hooks";
 import { liveLtpFor } from "../../hooks/useTradeLog";
 import { PriceScale, ProfitEstimate } from "../CallCardKit";
+import { BuyNowBanner } from "../BuyNowBanner";
+import { buyNowAdvice, minutesToMcxClose } from "../../utils/buyNow";
 import { LOT_SIZE } from "../../utils/aiTwentyTwentyEngine";
 import type { CardCall } from "../../utils/tradeCardLog";
 import type { TradeLogEntry } from "../../utils/tradeLogCore";
@@ -97,6 +99,23 @@ function CallCard({ sym, c }: { sym: Sym; c: CardCall }) {
           {c.opt ? ` at ₹${c.opt.entry.toFixed(2)}` : ""}
           {tier === "quick" && c.exitByIso && !c.closed ? ` · exit by ${when(c.exitByIso).split(", ").pop()}` : ""}
         </p>
+
+        {entry && !c.closed && (
+          <BuyNowBanner
+            className="mt-2.5"
+            advice={buyNowAdvice({
+              entry: entry.entry,
+              stop: entry.stop,
+              targets: entry.targets,
+              targetsHit: entry.targetsHit,
+              closed: false,
+              live,
+              lot: LOT_SIZE[sym],
+              minutesToClose: minutesToMcxClose(),
+              exitByMinutes: tier === "quick" && c.exitByIso ? (Date.parse(c.exitByIso) - Date.now()) / 60_000 : null,
+            })}
+          />
+        )}
 
         {c.opt ? (
           <div className="grid grid-cols-3 gap-2 mt-3">

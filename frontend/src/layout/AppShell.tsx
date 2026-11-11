@@ -8,6 +8,7 @@ import { PullbackStrip } from "./PullbackStrip";
 import { AiVerifyStrip } from "./AiVerifyStrip";
 import { NewsStrip } from "./NewsStrip";
 import { PriceMapStrip } from "./PriceMapStrip";
+import { PageReportStrip } from "../components/PageTradeReport";
 
 export function AppShell({ children }: { children: ReactNode }) {
   // Mounted once here (not on any single page) so alerts keep firing across
@@ -27,6 +28,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         {/* Renders only on the six main tabs; null everywhere else. */}
         <PullbackStrip />
         {children}
+        {/* This page's own trade report (only on pages that make calls). */}
+        <PageReportStrip />
       </main>
       <BottomNav />
     </div>
