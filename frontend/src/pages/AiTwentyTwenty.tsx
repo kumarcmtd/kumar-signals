@@ -12,6 +12,8 @@ import { TwentyEdgePanel } from "../components/twenty/TwentyEdgePanel";
 import { LAB_LOT } from "../utils/twentyLab";
 import { v2Window } from "../utils/twentyV2";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
+import { useSyncStatus } from "../syncTradeLogs";
+import { Link } from "react-router-dom";
 import type { Candle } from "../types";
 
 // Ai20-20 v2. The page shows what the measured rules say now for each market,
@@ -157,6 +159,7 @@ export function AiTwentyTwenty() {
   const { data: crudeSignal } = useSignal("CRUDEOIL");
   const { data: gasSignal } = useSignal("NATURALGAS");
   const tradeLogs = useAppStore((s) => s.tradeLogs);
+  const sync = useSyncStatus();
   // Re-worked out whenever the live read refreshes (every 15 s).
   const win = useMemo(() => v2Window(Date.now()), [crude.read]);
   const now = Date.now();
@@ -233,6 +236,21 @@ export function AiTwentyTwenty() {
           </p>
         </div>
       </section>
+
+      {(sync.pull === "failed" || sync.push === "failed") && (
+        <section className="rounded-2xl px-3 py-2.5 bg-amber-50 border border-amber-300">
+          <p className="text-[12px] font-black text-amber-900">⚠️ This phone's call record is not syncing with the server</p>
+          {sync.error && <p className="text-[11px] text-amber-900 leading-snug mt-0.5">{sync.error}</p>}
+          <p className="text-[10.5px] text-amber-800 leading-snug mt-1">
+            Until it syncs, calls the server records while the app is closed — and the server's day-end closes — will not show on this phone.{" "}
+            {sync.error && /access key/i.test(sync.error) && (
+              <Link to="/settings" className="font-black underline">
+                Open Settings
+              </Link>
+            )}
+          </p>
+        </section>
+      )}
 
       <div className="grid grid-cols-3 gap-2">
         <StatTile label="Calls today" value={String(crude.guard.callsToday)} gradient="linear-gradient(135deg,#0EA5E9,#06B6D4)" />

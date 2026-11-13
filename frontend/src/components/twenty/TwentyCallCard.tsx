@@ -21,6 +21,8 @@ import { ProfitMilestones } from "../ProfitMilestones";
 import { AiChart, type ChartPlan } from "../trust/AiChart";
 import type { Candle, OptionsAnalytics } from "../../types";
 
+/** The expiry shown is today's option series -- only meaningful for a call made today. */
+const sameIstDay = (a: number, b: number) => Math.floor((a + 5.5 * 3600_000) / 86_400_000) === Math.floor((b + 5.5 * 3600_000) / 86_400_000);
 const rsLot = (pts: number, lot: number) => `${pts >= 0 ? "+" : "−"}₹${Math.abs(Math.round(pts * lot)).toLocaleString("en-IN")}`;
 
 /** This call's premium levels as approximate futures levels, for the AI chart. */
@@ -63,7 +65,7 @@ function RunningCall({ sym, s, open, legacy, expiry }: { sym: LabSym; s: TwentyV
           BUY {open.strike} {open.optSide} @ ₹{open.entry}
         </p>
         <p className="text-[10.5px] text-slate-500">
-          {formatExpiryTip(expiry)} expiry · called {fmtWhen(open.openedAt)} · 1 lot = {lot}
+          {sameIstDay(open.openedAt, Date.now()) ? `${formatExpiryTip(expiry)} expiry · ` : ""}called {fmtWhen(open.openedAt)} · 1 lot = {lot}
           {legacy ? " · made by the OLD rules" : ""}
         </p>
       </div>

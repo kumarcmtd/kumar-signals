@@ -1,6 +1,7 @@
 import type { OptionsAnalytics } from "../types";
 import type { Decision6 } from "./timeframeEngine";
 import { dedupeOverlappingEntries } from "./dedupeTradeLog";
+import { isTradingWeekday, istParts, mcxCloseInstant } from "./mcxSession";
 
 // The pure, React-free heart of trade-log tracking: the entry shape, the
 // advance/close rules, and the cross-source merge. Deliberately kept free of
@@ -397,4 +398,48 @@ export function isMinorListChange(was: TradeLogEntry[] | undefined, now: TradeLo
   if (!was || !now || was.length !== now.length || now.length === 0) return false;
   for (let i = 0; i < now.length - 1; i++) if (was[i] !== now[i] && JSON.stringify(was[i]) !== JSON.stringify(now[i])) return false;
   return isMinorProgress(was[was.length - 1], now[now.length - 1]);
+}
+
+/** The close of the MCX session a trade was opened in: the first close at or after it opened. */
+export function sessionCloseFor(openedAt: number): number {
+  for (let ahead = 0; ahead < 10; ahead += 1) {
+    const p = istParts(openedAt + ahead * 86_400_000);
+    if (!isTradingWeekday(p.weekday)) continue;
+    const closeAt = mcxCloseInstant(p.y, p.m, p.d);
+    if (closeAt >= openedAt) return closeAt;
+  }
+  return openedAt;
+}
+
+/**
+ * How long after the bell the phone waits before closing a stale trade
+ * itself -- the server's day-end close, which records the real last premium,
+ * gets the first chance.
+ */
+export const STALE_GRACE_MS = 60 * 60_000;
+
+/**
+ * Closes every trade still "running" from an EARLIER session.
+ *
+ * Every call in this app is intraday, and the server closes them at the bell
+ * with the last premium -- but only the trades it knows about. A trade that
+ * never reached it (sync refused, e.g. no app key on this phone), or whose
+ * contract has expired so no quote ever comes, stayed "running" on the phone
+ * for weeks: the browser only closes on a live target or stop. Same rule as
+ * the server's own day-end close: closed_eod at that session's close, with no
+ * exit price, so P&L books it at breakeven -- never an invented result.
+ */
+export function sweepStaleRunning(logs: Record<string, TradeLogEntry[]>, now: number): { logs: Record<string, TradeLogEntry[]>; closedKeys: string[] } {
+  const closedKeys: string[] = [];
+  let next = logs;
+  for (const [key, entries] of Object.entries(logs)) {
+    const last = entries[entries.length - 1];
+    if (!last || last.closed) continue;
+    const closeAt = sessionCloseFor(last.openedAt);
+    if (now < closeAt + STALE_GRACE_MS) continue;
+    if (next === logs) next = { ...logs };
+    next[key] = [...entries.slice(0, -1), { ...last, closed: true, closedAt: closeAt, status: "closed_eod" }];
+    closedKeys.push(key);
+  }
+  return { logs: next, closedKeys };
 }

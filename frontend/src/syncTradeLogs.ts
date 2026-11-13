@@ -1,3 +1,4 @@
+import { create } from "zustand";
 import { useAppStore, type TradeLogEntry } from "./store/appStore";
 import { api } from "./api/client";
 // The merge lives in the pure tradeLogCore so the browser and the Cloudflare
@@ -5,7 +6,24 @@ import { api } from "./api/client";
 // wins" rule -- that shared rule is what lets the Cron close a trade
 // server-side and have that close survive a browser later pushing its own
 // still-open copy of the same id.
-import { isMinorListChange, mergeTradeLogs, MINOR_PROGRESS_SAVE_MS } from "./utils/tradeLogCore";
+import { isMinorListChange, mergeTradeLogs, MINOR_PROGRESS_SAVE_MS, sweepStaleRunning } from "./utils/tradeLogCore";
+
+/**
+ * Whether this phone's call record is actually syncing with the server. Sync
+ * used to fail silently -- e.g. the server asks for the app key and this
+ * phone has none -- and then the server's day-end closes, and the calls it
+ * records with the app shut, never reached the phone. Pages show a warning.
+ */
+export interface SyncStatus {
+  pull: "ok" | "failed" | null;
+  push: "ok" | "failed" | null;
+  error: string | null;
+  at: number | null;
+}
+export const useSyncStatus = create<SyncStatus>(() => ({ pull: null, push: null, error: null, at: null }));
+
+/** How often the phone checks for calls left "running" from an earlier session. */
+const SWEEP_EVERY_MS = 15 * 60_000;
 
 // This app has no login, so trade/signal history has exactly one shared
 // home on the server (same trust level as every other endpoint here) rather
@@ -69,15 +87,17 @@ function pushChanged(logs: Record<string, TradeLogEntry[]>): void {
   }
   api.saveTradeLogs(diff).then(
     () => {
+      useSyncStatus.setState({ push: "ok", at: Date.now(), ...(useSyncStatus.getState().pull !== "failed" ? { error: null } : {}) });
       lastPushAt = Date.now();
       for (const [key, list] of Object.entries(diff)) {
         lastPushed.set(key, JSON.stringify(list));
         lastPushedList.set(key, list);
       }
     },
-    () => {
+    (e: unknown) => {
       // Best-effort: a network hiccup here must never break the rest of the
       // app. The keys stay "changed", so the next push retries them.
+      useSyncStatus.setState({ push: "failed", error: e instanceof Error ? e.message : "could not save to the server", at: Date.now() });
     }
   );
 }
@@ -103,12 +123,16 @@ export async function initTradeLogSync(): Promise<void> {
   let server: Record<string, TradeLogEntry[]> = {};
   try {
     server = await api.getTradeLogs();
-  } catch {
-    // Offline or the API is unreachable -- proceed with local-only history.
+    useSyncStatus.setState({ pull: "ok", at: Date.now() });
+  } catch (e) {
+    // Offline, or the server refused -- proceed with local-only history, and say so.
+    useSyncStatus.setState({ pull: "failed", error: e instanceof Error ? e.message : "could not reach the server", at: Date.now() });
   }
 
   const local = useAppStore.getState().tradeLogs;
-  const merged = mergeTradeLogs(local, server);
+  // Any call still "running" from an earlier session is closed at that
+  // session's bell -- whether or not the server ever saw it.
+  const merged = sweepStaleRunning(mergeTradeLogs(local, server), Date.now()).logs;
   useAppStore.getState().hydrateTradeLogs(merged);
 
   // What the server already holds counts as pushed; only what the merge
@@ -120,4 +144,11 @@ export async function initTradeLogSync(): Promise<void> {
   useAppStore.subscribe((state, prevState) => {
     if (state.tradeLogs !== prevState.tradeLogs) schedulePush(state.tradeLogs);
   });
+
+  // An app left open overnight: the same sweep, now and then.
+  setInterval(() => {
+    const { logs, closedKeys } = sweepStaleRunning(useAppStore.getState().tradeLogs, Date.now());
+    const set = useAppStore.getState().setTradeLog;
+    for (const k of closedKeys) set(k, logs[k]);
+  }, SWEEP_EVERY_MS);
 }
