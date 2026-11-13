@@ -30,6 +30,6 @@ jobs:
           node-version: "22"
       - name: Run the lab
         run: |
-          LAB_GRID=final npx -y tsx scripts/twenty-lab.ts > lab.md
+          LAB_GRID=improve npx -y tsx scripts/twenty-lab.ts > lab.md
           cat lab.md
           cat lab.md >> "$GITHUB_STEP_SUMMARY"

@@ -9,7 +9,7 @@
 // 5-minute candles (~20 days) when MCX is open. Only aggregate results are
 // printed; no raw price data is written anywhere.
 
-import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, sensitivityGrid, simulate, statsOf, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
+import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, sensitivityGrid, simulate, statsOf, type LabRules, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
 import { V2_RULES } from "../frontend/src/utils/twentyV2";
 import type { Candle } from "../frontend/src/types";
 
@@ -67,6 +67,7 @@ function report(name: string, sym: LabSym, candles: Candle[]): string {
   lines.push(`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`);
   const mode = process.env.LAB_GRID;
   if (mode === "final") return finalReport(name, sym, candles);
+  if (mode === "improve") return improveReport(name, sym, candles);
   const grid = mode === "sensitivity" ? sensitivityGrid() : ruleGrid();
   const all = grid.map((r) => {
     const t = simulate(p, r, sym);
@@ -125,6 +126,40 @@ function finalReport(name: string, sym: LabSym, candles: Candle[]): string {
   for (const t of v2.t) byDay.set(p.day[t.openIdx], (byDay.get(p.day[t.openIdx]) ?? 0) + t.rs);
   const dayVals = [...byDay.values()];
   lines.push(`\nV2 trading days: ${dayVals.length} of ${days}; winning days ${dayVals.filter((v) => v > 0).length}; worst day ${Math.min(...dayVals, 0)}; best day ${Math.max(...dayVals, 0)}`);
+  return lines.join("\n");
+}
+
+/** Research ideas on top of v2: an EIA-Wednesday pause and other ways to exit. */
+function improveReport(name: string, sym: LabSym, candles: Candle[]): string {
+  const p: Prepared = prepare(candles);
+  const days = new Set(p.day).size;
+  const v = V2_RULES;
+  const near1030: LabRules = { ...v, hours: "et", window: [10 * 60 + 30, 13 * 60 + 15] };
+  const always: LabRules = { ...v, mode: "always" };
+  const variants: LabRules[] = [
+    v,
+    { ...v, eiaPause: true },
+    { ...v, manage: "half" },
+    { ...v, manage: "chandelier", trailAtr: 3 },
+    { ...v, manage: "chandelier", trailAtr: 2 },
+    { ...v, eiaPause: true, manage: "half" },
+    { ...v, eiaPause: true, manage: "chandelier", trailAtr: 3 },
+    near1030,
+    { ...near1030, eiaPause: true },
+    { ...near1030, manage: "half" },
+    always,
+    { ...always, eiaPause: true },
+    { ...always, manage: "half" },
+  ];
+  const lines: string[] = [`\n## ${name} — ${candles.length} candles, ${days} days (${candles[0]?.date.slice(0, 10)} to ${candles[candles.length - 1]?.date.slice(0, 10)})\n`, HEAD];
+  for (const r of variants) {
+    const t = simulate(p, r, sym);
+    lines.push(row(statsOf(t, p, rulesLabel(r)), gateTrades(t, p)));
+  }
+  // What the EIA window itself did under plain v2: the calls the pause would remove.
+  const base = simulate(p, v, sym);
+  const inEia = base.filter((t) => p.etWeekday[t.openIdx] === 3 && p.etMinute[t.openIdx] >= 10 * 60 + 20 && p.etMinute[t.openIdx] < 10 * 60 + 50);
+  lines.push(`\nv2 calls inside the Wednesday 10:20-10:50 New York window: ${inEia.length}, average ${fmt(avgOf(inEia))} Rs, total ${inEia.reduce((a, x) => a + x.rs, 0)} Rs`);
   return lines.join("\n");
 }
 

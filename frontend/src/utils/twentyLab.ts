@@ -47,6 +47,15 @@ export interface LabRules {
   stopAtr?: number;
   t1R?: number;
   timeStop: boolean;
+  /** No new entries on Wednesdays 10:20-10:50 New York time (EIA crude report at 10:30). */
+  eiaPause?: boolean;
+  /**
+   * After entry: steps (the page: stop to entry after T1, to T1 after T2, out at T3),
+   * half (book half at T1, the rest as steps), chandelier (no targets; the stop
+   * trails trailAtr x ATR behind the best price since entry).
+   */
+  manage?: "steps" | "half" | "chandelier";
+  trailAtr?: number;
 }
 
 export const CURRENT_RULES: LabRules = { signal: "score", mode: "always", minScore: 58, htf: "none", chop: "none", hours: "all", exits: "fixed", timeStop: false };
@@ -62,6 +71,9 @@ export function rulesLabel(r: LabRules): string {
   else if (r.hours !== "all") parts.push(r.hours);
   parts.push(r.exits === "atr" && (r.stopAtr ?? 1.5) !== 1.5 ? `atr${r.stopAtr}` : r.exits);
   if (r.exits === "atr" && (r.t1R ?? 1.5) !== 1.5) parts.push(`r${r.t1R}`);
+  if (r.eiaPause) parts.push("eia");
+  if (r.manage === "half") parts.push("half");
+  if (r.manage === "chandelier") parts.push(`trail${r.trailAtr ?? 3}`);
   if (r.timeStop) parts.push("tstop");
   return parts.join("+");
 }
@@ -143,6 +155,7 @@ export interface Prepared {
   htf60: number[];
   score: number[]; // the page's own analyzeImmediate strength (NaN while too few candles)
   etMinute: number[]; // New York minute of the day (DST-aware)
+  etWeekday: number[]; // New York day of the week (0 = Sunday)
 }
 
 /** Trend of finished higher-timeframe candles, as seen at each 5-min candle's close. */
@@ -214,13 +227,14 @@ export function prepare(raw: Candle[], withScore: boolean | number = true): Prep
       score[i] = a.underlyingScore ?? NaN;
     }
   }
-  const etMinute = c.map((k) => {
+  const etMs = c.map((k) => {
     const ms = Date.parse(k.date);
     const d = new Date(ms);
     const dst = usDstForSession(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
-    const et = ms - (dst ? 4 : 5) * 3600_000;
-    return Math.floor((((et % 86_400_000) + 86_400_000) % 86_400_000) / 60_000);
+    return ms - (dst ? 4 : 5) * 3600_000;
   });
+  const etMinute = etMs.map((et) => Math.floor((((et % 86_400_000) + 86_400_000) % 86_400_000) / 60_000));
+  const etWeekday = etMs.map((et) => new Date(et).getUTCDay());
   return {
     c,
     day,
@@ -236,6 +250,7 @@ export function prepare(raw: Candle[], withScore: boolean | number = true): Prep
     htf60: htfTrend(c, day, minute, 60),
     score,
     etMinute,
+    etWeekday,
   };
 }
 
@@ -283,6 +298,7 @@ export function signalAt(p: Prepared, i: number, r: LabRules): "CE" | "PE" | nul
   if (r.hours === "evening" && (m < 17 * 60 + 30 || m >= 23 * 60)) return null;
   if (r.hours === "usopen" && (p.etMinute[i] < 10 * 60 || p.etMinute[i] >= 13 * 60 + 15 || m >= 23 * 60 + 30)) return null;
   if (r.hours === "et" && r.window && (p.etMinute[i] < r.window[0] || p.etMinute[i] >= r.window[1] || m >= 23 * 60 + 30)) return null;
+  if (r.eiaPause && p.etWeekday[i] === 3 && p.etMinute[i] >= 10 * 60 + 20 && p.etMinute[i] < 10 * 60 + 50) return null;
   return side;
 }
 
@@ -302,13 +318,16 @@ export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
   const { c } = p;
   const lot = LAB_LOT[sym];
   const out: LabTrade[] = [];
-  let open: { side: "CE" | "PE"; i0: number; entry: number; stop: number; t1: number; t2: number; t3: number; h1: boolean; h2: boolean } | null = null;
+  const manage = r.manage ?? "steps";
+  let open: { side: "CE" | "PE"; i0: number; entry: number; stop: number; t1: number; t2: number; t3: number; h1: boolean; h2: boolean; atr: number; best: number; booked: boolean } | null = null;
   let lastStop: { side: "CE" | "PE"; at: number } | null = null;
 
   const close = (j: number, fav: number, exit: LabExit) => {
     const o = open!;
     const hours = ((j - o.i0) * 5) / 60;
-    const rs = LAB_DELTA * fav * lot - LAB_COST_RS[sym] - THETA_RS_PER_HOUR * hours;
+    // Half booked at T1: half the position earned T1, the rest earns `fav`.
+    const total = o.booked ? 0.5 * o.t1 + 0.5 * fav : fav;
+    const rs = LAB_DELTA * total * lot - LAB_COST_RS[sym] - (o.booked ? 50 : 0) - THETA_RS_PER_HOUR * hours;
     out.push({ side: o.side, openIdx: o.i0, closeIdx: j, openAt: c[o.i0].date, entryMinute: p.minute[o.i0], t1: o.h1, exit, rs: Math.round(rs) });
     if (exit === "sl" || exit === "breakeven" || exit === "after_t1") lastStop = { side: o.side, at: j };
     open = null;
@@ -322,11 +341,24 @@ export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
       const favOf = (x: number) => d * (x - o.entry);
       const adverse = d > 0 ? favOf(k.low) : favOf(k.high);
       const best = d > 0 ? favOf(k.high) : favOf(k.low);
+      if (manage === "chandelier") {
+        // The stop trails behind the best price reached on EARLIER candles.
+        const trail = Math.max(-o.stop, o.best - (r.trailAtr ?? 3) * o.atr);
+        if (adverse <= trail) close(i, Math.min(favOf(k.open), trail), trail > 0 ? "after_t1" : trail > -o.stop ? "breakeven" : "sl");
+        else {
+          o.best = Math.max(o.best, best);
+          if (o.best >= o.t1) o.h1 = true;
+          if (p.lastOfDay[i]) close(i, favOf(k.close), "day_end");
+        }
+      } else {
       const eff = o.h2 ? o.t1 : o.h1 ? 0 : -o.stop;
       if (adverse <= eff) {
         close(i, Math.min(favOf(k.open), eff), o.h2 ? "after_t1" : o.h1 ? "breakeven" : "sl");
       } else {
-        if (best >= o.t1) o.h1 = true;
+        if (best >= o.t1) {
+          o.h1 = true;
+          if (manage === "half") o.booked = true;
+        }
         if (best >= o.t2) o.h2 = true;
         if (best >= o.t3) close(i, o.t3, "t3");
         else {
@@ -335,6 +367,7 @@ export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
           else if (r.timeStop && !o.h1 && i - o.i0 >= TIME_STOP_BARS) close(i, favOf(k.close), "time");
           else if (p.lastOfDay[i]) close(i, favOf(k.close), "day_end");
         }
+      }
       }
     }
     if (!open && !p.lastOfDay[i]) {
@@ -353,7 +386,7 @@ export function simulate(p: Prepared, r: LabRules, sym: LabSym): LabTrade[] {
         stop = (r.stopAtr ?? 1.5) * a;
         t1 = (r.t1R ?? 1.5) * stop;
       }
-      open = { side, i0: i, entry: c[i].close, stop, t1, t2: 1.6 * t1, t3: 2.25 * t1, h1: false, h2: false };
+      open = { side, i0: i, entry: c[i].close, stop, t1, t2: 1.6 * t1, t3: 2.25 * t1, h1: false, h2: false, atr: Number.isFinite(p.atr[i]) ? p.atr[i] : stop / 2, best: 0, booked: false };
     }
   }
   return out;

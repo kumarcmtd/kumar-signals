@@ -92,4 +92,26 @@ describe("Ai20-20 rules lab", () => {
     expect(s.netRs).toBe(trades.reduce((a, t) => a + t.rs, 0));
     expect(s.winPct).toBe(Math.round((trades.filter((t) => t.rs > 0).length / trades.length) * 100));
   });
+
+  test("book half at T1: half earns T1, the rest exits at entry; one extra order charged", () => {
+    const c = series([
+      { o: 6000, h: 6010, l: 5999, c: 6010 },
+      { o: 6010, h: 6052, l: 6011, c: 6040 }, // T1 (+40)
+      { o: 6040, h: 6041, l: 6005, c: 6006 }, // back to entry
+    ]);
+    const t = simulate(prepare(c, false), { ...BREAKOUT, manage: "half" }, "CRUDEOIL");
+    // 0.5 x (0.5 x 40 + 0.5 x 0) x 100 = 1000, less Rs150 + Rs50 and 10 min of decay
+    expect(t[0].exit).toBe("breakeven");
+    expect(t[0].rs).toBe(Math.round(1000 - 150 - 50 - 50 * (10 / 60)));
+  });
+
+  test("ATR trail: no targets; the stop follows the best earlier price", () => {
+    const up = [{ o: 6000, h: 6010, l: 5999, c: 6010 }];
+    for (let k = 1; k <= 8; k++) up.push({ o: 6010 + (k - 1) * 10, h: 6010 + k * 10 + 1, l: 6010 + (k - 1) * 10 - 1, c: 6010 + k * 10 });
+    up.push({ o: 6090, h: 6091, l: 6040, c: 6045 }); // a sharp drop hits the trail
+    const t = simulate(prepare(series(up), false), { ...BREAKOUT, manage: "chandelier", trailAtr: 3 }, "CRUDEOIL");
+    expect(t[0].exit).toBe("after_t1"); // closed by the trail in profit, not at a fixed target
+    expect(t[0].rs).toBeGreaterThan(0);
+    expect(t[0].t1).toBe(true);
+  });
 });
