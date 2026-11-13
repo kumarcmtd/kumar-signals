@@ -55,4 +55,18 @@ describe("calls left running from an earlier session", () => {
     expect(sessionCloseFor(ist("2026-11-13T10:00:00"))).toBe(ist("2026-11-13T23:55:00"));
     expect(sessionCloseFor(ist("2026-10-09T22:00:00"))).toBe(ist("2026-10-09T23:30:00")); // Friday, US summer time
   });
+
+  test("a stale call buried in the MIDDLE of a list (two devices merged) is closed too", () => {
+    const zombie = run(ist("2026-09-24T21:11:00"));
+    const later = [
+      run(ist("2026-09-25T20:00:00"), { id: "b", strike: 8900, closed: true, status: "sl_hit", closedAt: ist("2026-09-25T20:30:00") }),
+      run(ist("2026-11-10T21:00:00"), { id: "c", strike: 5400, closed: true, status: "closed_eod", closedAt: ist("2026-11-10T23:55:00"), exitPrice: 180 }),
+    ];
+    const { logs, closedKeys } = sweepStaleRunning({ k: [zombie, ...later] }, ist("2026-11-13T19:45:00"));
+    expect(closedKeys).toEqual(["k"]);
+    expect(logs.k[0].closed).toBe(true);
+    expect(logs.k[0].closedAt).toBe(ist("2026-09-24T23:30:00"));
+    expect(logs.k.slice(1)).toEqual(later); // the closed ones are untouched
+    expect(logs.k.some((e) => !e.closed)).toBe(false);
+  });
 });

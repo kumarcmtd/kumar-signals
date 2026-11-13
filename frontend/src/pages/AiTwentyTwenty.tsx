@@ -13,6 +13,7 @@ import { LAB_LOT } from "../utils/twentyLab";
 import { v2Window } from "../utils/twentyV2";
 import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { useSyncStatus } from "../syncTradeLogs";
+import { appVersionLabel } from "../utils/appVersion";
 import { Link } from "react-router-dom";
 import type { Candle } from "../types";
 
@@ -326,6 +327,7 @@ export function AiTwentyTwenty() {
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">
         Educational reference, not financial advice. Records are tests on past prices with costs taken off — real fills, spreads and fast markets differ. Never risk money you cannot afford to lose.
       </p>
+      <p className="text-[10px] text-slate-400 text-center -mt-2">App version: {appVersionLabel()}</p>
 
       {detail && <CallDetailModal symbol={detail.symbol} entry={detail.entry} candles={board[detail.symbol].candles} candlesLoading={board[detail.symbol].loading} onClose={() => setDetail(null)} />}
     </div>

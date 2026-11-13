@@ -433,12 +433,22 @@ export function sweepStaleRunning(logs: Record<string, TradeLogEntry[]>, now: nu
   const closedKeys: string[] = [];
   let next = logs;
   for (const [key, entries] of Object.entries(logs)) {
-    const last = entries[entries.length - 1];
-    if (!last || last.closed) continue;
-    const closeAt = sessionCloseFor(last.openedAt);
-    if (now < closeAt + STALE_GRACE_MS) continue;
+    // EVERY entry, not just the newest: merging two devices' copies can leave
+    // a still-"running" copy of an old call in the MIDDLE of a list (seen
+    // live: a 24 Sept call under weeks of later ones). Nothing advances a
+    // middle entry -- page and server only move the newest -- so it stayed
+    // "running" for good, and the page's search for a running call found it.
+    let changed = false;
+    const fixed = entries.map((e) => {
+      if (e.closed) return e;
+      const closeAt = sessionCloseFor(e.openedAt);
+      if (now < closeAt + STALE_GRACE_MS) return e;
+      changed = true;
+      return { ...e, closed: true, closedAt: closeAt, status: "closed_eod" as const };
+    });
+    if (!changed) continue;
     if (next === logs) next = { ...logs };
-    next[key] = [...entries.slice(0, -1), { ...last, closed: true, closedAt: closeAt, status: "closed_eod" }];
+    next[key] = fixed;
     closedKeys.push(key);
   }
   return { logs: next, closedKeys };
