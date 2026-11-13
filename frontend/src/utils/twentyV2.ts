@@ -1,16 +1,16 @@
 // Ai20-20 v2: the rule set the rules lab measured best, as the live engine.
 //
-// What the lab found (5-min candles; NYMEX 50 days + real MCX 15 days, to
-// 10 Nov 2026; Rs per lot after costs, option at delta 0.5):
+// What the lab found (5-min candles; NYMEX 50 days + real MCX ~15 days;
+// Rs per lot after costs, option at delta 0.5). First pass, to 10 Nov 2026:
 //   old rules: about 18-20 calls a day, Crude -139 / -246 per call, NG -436 / -404
 //   v2 rules (Crude): about 1 call a day, +1,107 / +2,420 per call
 //   NG: no rule set we tried made money on both data sets -> no NG calls
 // A test on past prices, not a promise: real fills and new markets differ.
 // The page shows the same rules re-measured on the last ~15 days of real MCX
 // candles, so the record is always visible. Final check (lab, old vs v2):
-//   NYMEX 50 days: v2 46 calls, T1 hit 37%, 54% winners, +1,110/call,
-//     worst run of losses -15,057, worst day -4,203 (per lot)
-//   MCX 15 days:   v2 11 calls, T1 hit 45%, 55% winners, +2,420/call
+//   NYMEX 50 days (to 13 Nov): v2 40 calls, T1 hit 40%, 55% winners,
+//     +1,475/call, worst run of losses -7,762, worst day -4,203 (per lot)
+//   MCX 16 days: v2 9 calls, +1,165/call (old rules: -128 and -219/call)
 //
 // The v2 call, all on FINISHED 5-minute candles (nothing repaints):
 //   1. the page's own 5-min strength read turns strong (58+ CE / 42- PE) ...
@@ -35,11 +35,11 @@ import { daysToExpiry } from "./oiBuildup";
 
 /** The lab's longer test (NYMEX 5-min candles, 1 Sep - 10 Nov 2026), shown on the page beside the live MCX record. */
 export const V2_LAB_FACTS = {
-  to: "10 Nov 2026",
+  to: "13 Nov 2026",
   days: 50,
-  ruleSetsTried: 264 + 673,
-  crude: { v2Calls: 46, v2T1: 37, v2Win: 54, v2Avg: 1110, v2WorstDay: -4203, v2WorstRun: -15057, oldCalls: 889, oldAvg: -138 },
-  gas: { v2Calls: 46, v2Avg: -113, oldCalls: 261, oldAvg: -433 },
+  ruleSetsTried: 264 + 673 + 13,
+  crude: { v2Calls: 40, v2T1: 40, v2Win: 55, v2Avg: 1475, v2WorstDay: -4203, v2WorstRun: -7762, oldCalls: 877, oldAvg: -128 },
+  gas: { v2Calls: 39, v2Avg: -93, oldCalls: 259, oldAvg: -371 },
 } as const;
 
 export const V2_RULES: LabRules = { signal: "score", mode: "fresh", minScore: 58, htf: "60", chop: "none", hours: "et", window: [10 * 60 + 30, 13 * 60 + 15], eiaPause: true, exits: "atr", stopAtr: 2, t1R: 1.5, timeStop: false };
