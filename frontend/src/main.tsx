@@ -5,8 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import App from "./App.tsx";
 import { initTradeLogSync } from "./syncTradeLogs";
+import { startPwaUpdates } from "./pwaUpdate";
 
 initTradeLogSync();
+startPwaUpdates();
 
 const queryClient = new QueryClient({
   defaultOptions: {

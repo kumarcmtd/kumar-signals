@@ -1,6 +1,6 @@
 // ntfy push notifications: Best Call and Ai20-20 background checks.
 
-import { measureV2, openV2Entry, planV2, readV2, v2Guard, v2Key, v2PushText, v2Window, V2_MARKETS } from "../frontend/src/utils/twentyV2";
+import { expiryBlock, measureV2, openV2Entry, planV2, readV2, v2Guard, v2Key, v2PushText, v2Window, V2_MARKETS } from "../frontend/src/utils/twentyV2";
 import type { LabSym } from "../frontend/src/utils/twentyLab";
 import type { OptionsAnalytics } from "../frontend/src/types";
 import { type BestCallPick, eliteToBestCallPick, gateToBestCallPick, kimiToBestCallPick, pickBestCall } from "../frontend/src/utils/bestCallSelector";
@@ -213,7 +213,7 @@ export async function runTwentyTwentyNotificationCheck(env: Env, now: number = D
   // spend Upstox requests -- what pushes the app into the 1015 rate limit.
   if (!getMarketStatus().isOpen) return ["MCX is closed -- Ai20-20 only runs while the market is open."];
   const win = v2Window(now);
-  if (!win.open) return [`Ai20-20 calls only ${win.label} (10:00 AM - 1:15 PM New York) -- outside that window now.`];
+  if (!win.open) return [`Ai20-20 calls only ${win.label} (10:30 AM - 1:15 PM New York) -- outside that window now.`];
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return ["Not logged in to Upstox today -- no live data to check."];
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
@@ -258,6 +258,12 @@ export async function runTwentyTwentyNotificationCheck(env: Env, now: number = D
       }
       const optionsResult = await computeOptionsAnalytics(env, token, symbol as Symbol);
       const options = "error" in optionsResult ? undefined : optionsResult;
+      const onExpiry = expiryBlock(options, now);
+      if (onExpiry) {
+        say(`${read.side} call skipped: ${onExpiry}`);
+        await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 });
+        continue;
+      }
       const plan = planV2(read, options, sym);
       if (!plan) {
         say(`${read.side} call, but no live option premium to price it -- nothing recorded.`);

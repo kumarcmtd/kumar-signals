@@ -90,7 +90,7 @@ export function TwentyEdgePanel({ crude, gas }: { crude: Rec; gas: Rec }) {
           <p>
             • Crude v2 over {f.days} days: {f.crude.v2Calls} calls, T1 hit {f.crude.v2T1}%, {f.crude.v2Win}% winners, {rs(f.crude.v2Avg)} per call. Worst day {rs(f.crude.v2WorstDay)}; worst losing run {rs(f.crude.v2WorstRun)} per lot — size so that would not hurt.
           </p>
-          <p>• What made the difference: waiting for the US session to settle (after 10:00 AM New York), trading only with the 1-hour trend, entering on a fresh turn instead of chasing, and stops wide enough (2× the recent 5-minute range) not to be shaken out.</p>
+          <p>• What made the difference: waiting out the US session's first, choppiest hour (calls only after 10:30 AM New York), pausing for the Wednesday EIA report, trading only with the 1-hour trend, entering on a fresh turn instead of chasing, and stops wide enough (2× the recent 5-minute range) not to be shaken out.</p>
         </div>
       )}
     </section>

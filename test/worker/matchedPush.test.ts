@@ -28,5 +28,5 @@ test("inside MCX hours but outside the US window, Ai20-20 says when calls come",
   vi.setSystemTime(new Date("2026-11-11T04:30:00Z")); // Wed 10:00 IST
   const env = { COMMODITY_KV: { get: async () => null, put: async () => undefined } } as any;
   const report = await runTwentyTwentyNotificationCheck(env);
-  expect(report[0]).toContain("Ai20-20 calls only 8:30 PM – 11:30 PM IST");
+  expect(report[0]).toContain("Ai20-20 calls only 9:00 PM – 11:30 PM IST");
 });

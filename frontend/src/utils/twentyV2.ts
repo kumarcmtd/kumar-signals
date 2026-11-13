@@ -16,8 +16,14 @@
 //   1. the page's own 5-min strength read turns strong (58+ CE / 42- PE) ...
 //   2. ... on THIS candle (a fresh turn, not one already running = no chase)
 //   3. the 1-hour trend (EMA 20 vs 50 of finished 1-hour candles) agrees
-//   4. inside 10:00-13:15 New York time (US session after the open settles;
-//      8:30-11:30 PM IST in winter, 7:30-10:45 PM in summer)
+//   4. inside 10:30-13:15 New York time (after the US session's first, choppiest
+//      hour; 9:00-11:30 PM IST in winter, 8:00-10:45 PM in summer)
+//   5. not Wednesday 10:20-10:50 New York (the EIA crude report at 10:30:
+//      option premiums are pumped up before scheduled news and drop after it)
+// Plus no new call on the option's expiry day (see expiryBlock).
+// Re-audit (13 Nov 2026): starting at 10:30 instead of 10:00 did better on
+// both data sets and halved the worst losing run; booking half at T1 and an
+// ATR trailing stop did not beat the fixed T1/T2/T3 exits.
 // Levels: futures stop = 2 x ATR(14, 5-min); T1 = 1.5 x the stop distance;
 // T2 = 1.6 x T1; T3 = 2.25 x T1 -- moved to the option by its delta.
 
@@ -25,6 +31,7 @@ import type { Candle, OptionsAnalytics } from "../types";
 import { CURRENT_RULES, LAB_LOT, prepare, signalAt, simulate, statsOf, type LabRules, type LabStats, type LabSym, type LabTrade } from "./twentyLab";
 import { usDstForSession } from "./mcxSession";
 import { openNewEntry, type TradeLogEntry } from "./tradeLogCore";
+import { daysToExpiry } from "./oiBuildup";
 
 /** The lab's longer test (NYMEX 5-min candles, 1 Sep - 10 Nov 2026), shown on the page beside the live MCX record. */
 export const V2_LAB_FACTS = {
@@ -35,7 +42,7 @@ export const V2_LAB_FACTS = {
   gas: { v2Calls: 46, v2Avg: -113, oldCalls: 261, oldAvg: -433 },
 } as const;
 
-export const V2_RULES: LabRules = { signal: "score", mode: "fresh", minScore: 58, htf: "60", chop: "none", hours: "usopen", exits: "atr", stopAtr: 2, t1R: 1.5, timeStop: false };
+export const V2_RULES: LabRules = { signal: "score", mode: "fresh", minScore: 58, htf: "60", chop: "none", hours: "et", window: [10 * 60 + 30, 13 * 60 + 15], eiaPause: true, exits: "atr", stopAtr: 2, t1R: 1.5, timeStop: false };
 
 /** Markets that get NEW v2 calls. NG: every rule set lost money on 50 days of NYMEX gas. */
 export const V2_MARKETS: Record<LabSym, boolean> = { CRUDEOIL: true, NATURALGAS: false };
@@ -50,7 +57,7 @@ const IST_MS = 5.5 * 3600_000;
 /** ~7 sessions: room for 50 finished 1-hour candles and the 300-candle strength read. */
 const LIVE_BARS = 1200;
 const MIN_BARS = 650;
-const WIN_FROM = 10 * 60; // New York minutes
+const WIN_FROM = 10 * 60 + 30; // New York minutes -- the same window as V2_RULES
 const WIN_TO = 13 * 60 + 15;
 const IST_LAST_ENTRY = 23 * 60 + 30;
 
@@ -70,14 +77,14 @@ const istClock = (ms: number) => {
 
 export interface V2Window {
   open: boolean;
-  /** Today's window in IST, e.g. "8:30 PM – 11:30 PM IST". */
+  /** Today's window in IST, e.g. "9:00 PM – 11:30 PM IST". */
   label: string;
   /** When it next opens (null while open). */
   opensAt: number | null;
   closesAt: number;
 }
 
-/** The v2 entry window around `now`: 10:00-13:15 New York time, never after 23:30 IST, weekdays. */
+/** The v2 entry window around `now`: 10:30-13:15 New York time, never after 23:30 IST, weekdays. */
 export function v2Window(now: number = Date.now()): V2Window {
   const span = (dayStartEt: number) => {
     const from = dayStartEt + WIN_FROM * 60_000 + nyOffsetMs(dayStartEt + 12 * 3600_000);
@@ -151,7 +158,10 @@ export function readV2(candles: Candle[], sym: LabSym, now: number = Date.now())
     { label: "5-min strength", ok: lean !== null, detail: Number.isFinite(sc) ? `${Math.round(sc)} (CE needs 58+, PE 42 or less)` : "not ready" },
     { label: "Fresh turn, not a chase", ok: lean !== null && prevLean !== lean, detail: lean === null ? "no strong read" : prevLean === lean ? "already strong on the last candle" : "turned strong on this candle" },
     { label: "1-hour trend agrees", ok: lean !== null && p.htf60[i] === want, detail: p.htf60[i] === 1 ? "1-hour trend up" : p.htf60[i] === -1 ? "1-hour trend down" : "1-hour trend flat" },
-    { label: "US session window", ok: inWin, detail: `${w.label} (10:00 AM – 1:15 PM New York)` },
+    { label: "US session window", ok: inWin, detail: `${w.label} (10:30 AM – 1:15 PM New York)` },
+    ...(p.etWeekday[i] === 3 && p.etMinute[i] >= 10 * 60 + 20 && p.etMinute[i] < 10 * 60 + 50
+      ? [{ label: "EIA report pause", ok: false, detail: "Wednesday 10:20–10:50 New York — the weekly crude report comes out at 10:30" }]
+      : []),
   ];
   const side = signalAt(p, i, V2_RULES);
   const atr = p.atr[i];
@@ -224,6 +234,17 @@ export function v2Guard(log: TradeLogEntry[], side: "CE" | "PE" | null, now: num
   if (stopsToday >= V2_MAX_STOPS_PER_DAY) return { ...base, ok: false, reason: `${stopsToday} stop-losses today — no more Ai20-20 calls on this market today.` };
   if (last && last.status === "sl_hit" && last.optSide === side && now - (last.closedAt ?? last.openedAt) < REENTRY_COOLDOWN_MS) return { ...base, ok: false, reason: "Stopped out a few minutes ago on this side — 10-minute pause." };
   return { ...base, ok: true, reason: null };
+}
+
+/**
+ * No new calls on the option's expiry day: an at-the-money option loses value
+ * fastest in its last session, and in-the-money MCX crude options turn into
+ * futures (with futures margin) if still held at expiry.
+ */
+export function expiryBlock(options: OptionsAnalytics | undefined, now: number = Date.now()): string | null {
+  if (!options || options.error || !options.expiry) return null;
+  const d = daysToExpiry(options.expiry, now);
+  return d !== null && d <= 0 ? "The option expires today — no new Ai20-20 calls (fastest time decay; in-the-money options turn into futures at expiry)." : null;
 }
 
 /**

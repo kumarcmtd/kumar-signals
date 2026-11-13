@@ -139,13 +139,28 @@ function RunningCall({ sym, s, open, legacy, expiry }: { sym: LabSym; s: TwentyV
   );
 }
 
+/**
+ * What the Trade Card says about this side -- its own component so its
+ * queries (several candle timeframes, news) only run while there is a call
+ * to show it for, not all the time on both markets.
+ */
+function TradeCardLine({ sym, side }: { sym: LabSym; side: "CE" | "PE" }) {
+  const master = useTradeVerdict(sym).verdict;
+  return (
+    <p className="text-[11px] text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-2.5 py-2">
+      <span className="font-black">Trade Card says:</span> {master.headline}
+      {master.action === `TRADE_${side}` ? " — agrees ✅" : ""}
+      <span className="block text-[10px] text-slate-400">For information. The v2 record above is for Ai20-20's own rules.</span>
+    </p>
+  );
+}
+
 export function TwentyCallCard({ sym, s, expiry }: { sym: LabSym; s: TwentyV2State; expiry: string | undefined }) {
   const name = sym === "CRUDEOIL" ? "🛢️ Crude Oil" : "🔥 Natural Gas";
   const v2Open = [...s.log].reverse().find((e) => !e.closed) ?? null;
   const oldOpen = [...s.legacy].reverse().find((e) => !e.closed) ?? null;
   const open = v2Open ?? oldOpen;
   const r = s.read;
-  const master = useTradeVerdict(sym).verdict;
   const side = open?.optSide ?? r.side;
   const pill = open ? "CALL RUNNING" : r.state === "call" ? "NEW CALL" : r.state === "watch" ? "WATCHING" : r.state === "window_closed" ? "WAITING FOR WINDOW" : r.state === "off" ? "CALLS OFF" : "LOADING";
   const hot = !!open || r.state === "call";
@@ -190,17 +205,12 @@ export function TwentyCallCard({ sym, s, expiry }: { sym: LabSym; s: TwentyV2Sta
           </div>
         )}
 
-        {r.state === "call" && !open && <p className="text-[11.5px] font-bold text-amber-700">Every check passed, but there is no live option premium to price the call — nothing to enter.</p>}
+        {s.expiry && !open && <p className="text-[11.5px] font-bold text-amber-800 rounded-xl bg-amber-50 border border-amber-200 px-2.5 py-2">📅 {s.expiry}</p>}
+        {r.state === "call" && !open && !s.expiry && <p className="text-[11.5px] font-bold text-amber-700">Every check passed, but there is no live option premium to price the call — nothing to enter.</p>}
 
         {open && <RunningCall sym={sym} s={s} open={open} legacy={!v2Open} expiry={expiry} />}
 
-        {(open || r.state === "call") && (
-          <p className="text-[11px] text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-2.5 py-2">
-            <span className="font-black">Trade Card says:</span> {master.headline}
-            {master.action === `TRADE_${side}` ? " — agrees ✅" : ""}
-            <span className="block text-[10px] text-slate-400">For information. The v2 record above is for Ai20-20's own rules.</span>
-          </p>
-        )}
+        {(open || r.state === "call") && side && <TradeCardLine sym={sym} side={side} />}
 
         {r.state !== "off" && (
           <p className="flex items-center gap-1.5 text-[11px] text-slate-500">

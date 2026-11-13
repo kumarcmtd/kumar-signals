@@ -337,7 +337,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
                           { label: "5-min strength", ok: true, detail: "64 (CE needs 58+, PE 42 or less)" },
                           { label: "Fresh turn, not a chase", ok: true, detail: "turned strong on this candle" },
                           { label: "1-hour trend agrees", ok: true, detail: "1-hour trend up" },
-                          { label: "US session window", ok: true, detail: "8:30 PM – 11:30 PM IST (10:00 AM – 1:15 PM New York)" },
+                          { label: "US session window", ok: true, detail: "9:00 PM – 11:30 PM IST (10:30 AM – 1:15 PM New York)" },
                         ],
                       },
                       record: { trades: 11, avgRs: 2420, days: 15 },

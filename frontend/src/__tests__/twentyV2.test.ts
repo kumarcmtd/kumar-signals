@@ -1,32 +1,33 @@
 import { describe, expect, test } from "vitest";
-import { measureV2, openV2Entry, planV2, readV2, v2Guard, v2PushText, v2Window, V2_RULES, type V2Read } from "../utils/twentyV2";
+import { expiryBlock, measureV2, openV2Entry, planV2, readV2, v2Guard, v2PushText, v2Window, V2_RULES, type V2Read } from "../utils/twentyV2";
+import { measureV2Async } from "../utils/twentyRecordClient";
 import { prepare, signalAt } from "../utils/twentyLab";
 import { openNewEntry, type TradeLogEntry } from "../utils/tradeLogCore";
 import type { Candle, OptionsAnalytics } from "../types";
 
 const utc = (s: string) => Date.parse(s);
 
-describe("v2 window: 10:00-13:15 New York, never after 23:30 IST, weekdays", () => {
-  test("winter (EST): 8:30 PM - 11:30 PM IST", () => {
+describe("v2 window: 10:30-13:15 New York, never after 23:30 IST, weekdays", () => {
+  test("winter (EST): 9:00 PM - 11:30 PM IST", () => {
     const before = v2Window(utc("2026-11-11T14:00:00Z")); // 7:30 PM IST Wed
     expect(before.open).toBe(false);
-    expect(before.opensAt).toBe(utc("2026-11-11T15:00:00Z"));
-    expect(before.label).toBe("8:30 PM – 11:30 PM IST");
+    expect(before.opensAt).toBe(utc("2026-11-11T15:30:00Z"));
+    expect(before.label).toBe("9:00 PM – 11:30 PM IST");
     const during = v2Window(utc("2026-11-11T16:00:00Z"));
     expect(during.open).toBe(true);
     expect(during.closesAt).toBe(utc("2026-11-11T18:00:00Z")); // capped at 23:30 IST
     const after = v2Window(utc("2026-11-11T18:30:00Z")); // midnight IST
     expect(after.open).toBe(false);
-    expect(after.opensAt).toBe(utc("2026-11-12T15:00:00Z"));
+    expect(after.opensAt).toBe(utc("2026-11-12T15:30:00Z"));
   });
-  test("summer (EDT): 7:30 PM - 10:45 PM IST", () => {
+  test("summer (EDT): 8:00 PM - 10:45 PM IST", () => {
     const w = v2Window(utc("2026-10-14T10:00:00Z"));
-    expect(w.label).toBe("7:30 PM – 10:45 PM IST");
-    expect(w.opensAt).toBe(utc("2026-10-14T14:00:00Z"));
+    expect(w.label).toBe("8:00 PM – 10:45 PM IST");
+    expect(w.opensAt).toBe(utc("2026-10-14T14:30:00Z"));
   });
   test("weekend: next window is Monday", () => {
     const w = v2Window(utc("2026-11-14T12:00:00Z")); // Saturday
-    expect(w.opensAt).toBe(utc("2026-11-16T15:00:00Z"));
+    expect(w.opensAt).toBe(utc("2026-11-16T15:30:00Z"));
   });
 });
 
@@ -155,7 +156,7 @@ describe("v2 live read matches the lab's rules exactly", () => {
     // Market shut (no candles) outside the window: say when calls can come, not "loading".
     const shut = readV2([], "CRUDEOIL", utc("2026-11-11T00:30:00Z"));
     expect(shut.state).toBe("window_closed");
-    expect(shut.headline).toContain("Next window opens 8:30 PM");
+    expect(shut.headline).toContain("Next window opens 9:00 PM");
     expect(readV2([], "NATURALGAS", inWindow).state).toBe("off");
   });
   test("the measured record re-runs the v2 rules and the old rules", () => {
@@ -164,5 +165,24 @@ describe("v2 live read matches the lab's rules exactly", () => {
     expect(m.old!.trades).toBeGreaterThan(m.v2.trades);
     expect(m.caution).toBe(m.recent.trades >= 8 && (m.recent.avgRs ?? 0) < -300);
     expect(m.recent.trades).toBeLessThanOrEqual(m.v2.trades);
+  });
+});
+
+describe("expiry day and the background record", () => {
+  test("no new calls on the option's expiry day (IST date); the day before is fine", () => {
+    const at = utc("2026-11-17T14:00:00Z"); // 19:30 IST on 17 Nov
+    expect(expiryBlock({ ...chain(0.5), expiry: "2026-11-17" } as OptionsAnalytics, at)).toContain("expires today");
+    expect(expiryBlock({ ...chain(0.5), expiry: "2026-11-18" } as OptionsAnalytics, at)).toBeNull();
+    expect(expiryBlock(undefined, at)).toBeNull();
+  });
+
+  test("the record worked out off the page (no Worker in tests -> main-thread fallback) matches measureV2", async () => {
+    const c = walk(12, 7);
+    const direct = measureV2(c, "CRUDEOIL")!;
+    const viaClient = (await measureV2Async(c, "CRUDEOIL"))!;
+    expect(viaClient.v2).toEqual(direct.v2);
+    expect(viaClient.old).toEqual(direct.old);
+    expect(viaClient.caution).toBe(direct.caution);
+    expect(viaClient.trades).toEqual([]); // the heavy list stays behind
   });
 });

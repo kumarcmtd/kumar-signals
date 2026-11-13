@@ -149,6 +149,8 @@ export function AiTwentyTwenty() {
   const { data: market } = useMarketStatus();
   const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // Fresh start for v2: calls from the old rules stay saved but are hidden unless asked for.
+  const [showOld, setShowOld] = useState(false);
   const crude = useTwentyV2("CRUDEOIL");
   const gas = useTwentyV2("NATURALGAS");
   const board: Record<TradableSymbol, typeof crude> = { CRUDEOIL: crude, NATURALGAS: gas };
@@ -226,7 +228,7 @@ export function AiTwentyTwenty() {
         <div className="flex-1">
           <p className="text-[12.5px] font-black text-white">{win.open ? "Calls window OPEN now" : "Calls window closed"}</p>
           <p className="text-[10.5px] text-white/85">
-            {win.label} · 10:00 AM – 1:15 PM New York
+            {win.label} · 10:30 AM – 1:15 PM New York
             {win.open ? ` · closes in ${countdown(win.closesAt - now)}` : win.opensAt ? ` · opens in ${countdown(win.opensAt - now)}` : ""}
           </p>
         </div>
@@ -267,33 +269,40 @@ export function AiTwentyTwenty() {
             </div>
           </div>
         )}
-        {oldPerf.totalClosed > 0 && (
-          <p className="text-[10.5px] text-slate-400">
-            Old rules before v2: {oldPerf.totalClosed} closed calls, {oldPerf.accuracyPct ?? "—"}% accuracy, {oldPerf.netPoints >= 0 ? "+" : ""}
-            {oldPerf.netPoints} premium points.
-          </p>
-        )}
       </div>
 
-      {allCalls.length > 0 && (
-        <div className="rounded-3xl bg-white shadow-md p-4">
-          <p className="text-xs font-bold mb-1 text-slate-700 flex items-center gap-1.5">
-            <Info size={13} className="text-sky-500" /> Call history
-          </p>
-          <p className="text-[10px] text-slate-400 mb-3">Every Ai20-20 call, newest first — tap one for its chart and why it was called.</p>
-          <div className="space-y-2">
-            {(historyOpen ? allCalls : allCalls.slice(0, 6)).map(({ key, symbol, v2, entry, verified }) => (
-              <CallHistoryRow key={`${key}-${entry.id}`} symbol={symbol} entry={entry} verified={verified} v2={v2} onOpen={() => setDetail({ symbol, entry })} />
-            ))}
-            {allCalls.length > 6 && (
-              <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-sky-600 py-1.5">
-                {historyOpen ? "Show less" : `Show all ${allCalls.length}`}
-                <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+      {(() => {
+        const v2Calls = allCalls.filter((c) => c.v2);
+        const oldCount = allCalls.length - v2Calls.length;
+        const shownCalls = showOld ? allCalls : v2Calls;
+        return (
+          <div className="rounded-3xl bg-white shadow-md p-4">
+            <p className="text-xs font-bold mb-1 text-slate-700 flex items-center gap-1.5">
+              <Info size={13} className="text-sky-500" /> Call history{showOld ? "" : " — v2"}
+            </p>
+            <p className="text-[10px] text-slate-400 mb-3">Newest first — tap one for its chart and why it was called.</p>
+            {shownCalls.length === 0 && <p className="text-[11.5px] text-slate-500 text-center py-2">No v2 calls yet. Each one appears here the moment it is made.</p>}
+            <div className="space-y-2">
+              {(historyOpen ? shownCalls : shownCalls.slice(0, 6)).map(({ key, symbol, v2, entry, verified }) => (
+                <CallHistoryRow key={`${key}-${entry.id}`} symbol={symbol} entry={entry} verified={verified} v2={v2} onOpen={() => setDetail({ symbol, entry })} />
+              ))}
+              {shownCalls.length > 6 && (
+                <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-sky-600 py-1.5">
+                  {historyOpen ? "Show less" : `Show all ${shownCalls.length}`}
+                  <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
+                </button>
+              )}
+            </div>
+            {oldCount > 0 && (
+              <button onClick={() => setShowOld((o) => !o)} className="mt-2 w-full text-[10.5px] font-bold text-slate-400 underline underline-offset-2 py-1">
+                {showOld
+                  ? "Hide the old-rules calls"
+                  : `Show ${oldCount} call${oldCount === 1 ? "" : "s"} from the old rules (${oldPerf.totalClosed} closed, ${oldPerf.netPoints >= 0 ? "+" : ""}${oldPerf.netPoints} premium points)`}
               </button>
             )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
 
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">

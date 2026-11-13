@@ -23,6 +23,13 @@ const MARKETS: { k: ReportMarket; t: string }[] = [
   { k: "CRUDEOIL", t: "🛢️ Crude" },
   { k: "NATURALGAS", t: "🔥 NG" },
 ];
+/**
+ * Pages whose report counts only some of their keys. Ai20-20 started fresh
+ * with v2: the old rules' calls stay saved but are not mixed into its report.
+ */
+const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string }> = {
+  "/ai-20-20": { only: (k) => k.endsWith("-V2"), label: "Ai20-20 v2" },
+};
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
 const PREF = "pageReport.period";
@@ -82,9 +89,13 @@ function Table({ title, rows }: { title: string; rows: ReportRow[] }) {
   );
 }
 
-export function PageTradeReport({ engine, logs, note }: { engine: EngineDef; logs?: Record<string, TradeLogEntry[]>; note?: string }) {
+export function PageTradeReport({ engine, logs, note, keyFilter }: { engine: EngineDef; logs?: Record<string, TradeLogEntry[]>; note?: string; keyFilter?: (key: string) => boolean }) {
   const storeLogs = useAppStore((s) => s.tradeLogs);
-  const tradeLogs = logs ?? storeLogs;
+  const tradeLogs = useMemo(() => {
+    const base = logs ?? storeLogs;
+    if (!keyFilter) return base;
+    return Object.fromEntries(Object.entries(base).filter(([k]) => keyFilter(k)));
+  }, [logs, storeLogs, keyFilter]);
   const [period, setPeriodState] = useState<ReportPeriod>(readPeriod);
   const [market, setMarket] = useState<ReportMarket>("ALL");
   const [open, setOpen] = useState(false);
@@ -206,5 +217,7 @@ export function PageReportStrip() {
   if (clean === TRUST_ENGINE.route) return <TrustPageReport />;
   const route = ROUTE_ALIAS[clean] ?? clean;
   const engine = ENGINES.find((e) => e.route === route);
-  return engine ? <PageTradeReport key={engine.id} engine={engine} /> : null;
+  if (!engine) return null;
+  const only = ROUTE_KEYS[route];
+  return <PageTradeReport key={engine.id} engine={only ? { ...engine, label: only.label } : engine} keyFilter={only?.only} />;
 }

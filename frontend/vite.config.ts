@@ -10,6 +10,8 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Registered in src/pwaUpdate.ts, which also reloads onto a new version.
+      injectRegister: false,
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Kumar Signals Pro',
