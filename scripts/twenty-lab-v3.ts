@@ -174,6 +174,7 @@ async function main() {
   console.log(head.join("\n"));
   const synthMode = process.env.LAB_SYNTH === "1";
   for (const [sym, duka, yh, label] of [["CRUDEOIL", "lightcmdusd", "CL=F", "WTI crude"], ["NATURALGAS", "gascmdusd", "NG=F", "Henry Hub gas"]] as const) {
+    if (process.env.LAB_MARKET && process.env.LAB_MARKET !== sym) continue;
     const lines: string[] = [];
     let years: Data | null = null;
     try {
