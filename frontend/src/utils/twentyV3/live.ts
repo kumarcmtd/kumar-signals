@@ -86,6 +86,13 @@ function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean): strin
   return p.etWeekday[i] === 3 ? "Wednesday 10:45 AM New York: a big move after the EIA report?" : "Only on Wednesdays (EIA report day).";
 }
 
+const istDate = (ms: number) => new Date(ms + IST_MS).toISOString().slice(0, 10);
+/** "today at 8:00 PM IST" / "Monday at 8:00 PM IST" for the next window start. */
+function whenNext(from: number, now: number): string {
+  const day = istDate(from) === istDate(now) ? "today" : new Date(from + IST_MS).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" });
+  return `${day} at ${istClock(from)} IST`;
+}
+
 export function finishedCandles(c: Candle[], now: number): Candle[] {
   return c.filter((k) => Date.parse(k.date) + BAR_MS <= now);
 }
@@ -132,10 +139,18 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
     }
   }
   const callEnd = Date.parse(p.c[at].date) + BAR_MS;
-  const statuses = setups.map((id) => ({ id, name: SETUP_NAMES[id], fired: entry?.setup === id, line: statusLine(ctx, i, id, entry?.setup === id) }));
+  // After the bell or on a weekend the latest candle is from an earlier session:
+  // say when the next check is, not what "today" did.
+  const oldCandle = istDate(barEnd) !== istDate(now) || (w !== null && !w.open && w.from > now && istDate(w.from) !== istDate(barEnd));
+  const statuses = setups.map((id) => ({
+    id,
+    name: SETUP_NAMES[id],
+    fired: entry?.setup === id,
+    line: oldCandle && w && SETUP_WINDOWS[id][0] === SETUP_WINDOWS[id][1] ? `Next check ${whenNext(w.from, now)}: is the first half hour moving well beyond its usual range?` : statusLine(ctx, i, id, entry?.setup === id),
+  }));
   const base = { barEnd, fut: p.c[i].close, setups: statuses, regime: readRegime(p, ctx.f) };
   if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
-  if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: `Calls only ${w.label}.${w.from > now ? ` Next window opens ${istClock(w.from)}.` : ""}` };
+  if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: w.from > now ? `Next check ${whenNext(w.from, now)} (${nyLabel(Math.min(...setups.map((id) => SETUP_WINDOWS[id][0])))}).` : `Calls only ${w.label}.` };
   return { ...base, state: "watch", entry: null, headline: "Watching — no setup has fired yet." };
 }
 

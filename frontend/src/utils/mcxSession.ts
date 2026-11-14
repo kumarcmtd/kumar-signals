@@ -199,3 +199,21 @@ export function lastRunStart<T>(items: T[], key: (item: T) => number): number {
   return i;
 }
 
+
+/**
+ * When MCX next opens (9:00 AM IST on the next weekday at or after `ms`), with a
+ * label such as "today 9:00 AM IST" or "Monday 9:00 AM IST". No holiday
+ * calendar (see the note at the top of this file).
+ */
+export function nextMcxOpen(ms: number = Date.now()): { at: number; label: string } {
+  const today = istParts(ms);
+  for (let k = 0; k < 8; k++) {
+    const p = istParts(ms + k * DAY_MS);
+    if (!isTradingWeekday(p.weekday)) continue;
+    const at = mcxOpenInstant(p.y, p.m, p.d);
+    if (at <= ms) continue;
+    const day = p.date === today.date ? "today" : ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][p.weekday];
+    return { at, label: `${day} 9:00 AM IST` };
+  }
+  return { at: ms, label: "the next trading day, 9:00 AM IST" };
+}

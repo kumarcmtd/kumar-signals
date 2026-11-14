@@ -10,10 +10,11 @@
 // four timeframes of candles for itself.
 
 import { useLocation, useNavigate } from "react-router-dom";
-import { usePullback } from "../api/hooks";
+import { useMarketStatus, usePullback } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { isAlwaysLivePage } from "../config/livePages";
 import { PullbackStatusCard } from "../components/PullbackKit";
+import { MarketClosedCard } from "../components/MarketClosedCard";
 
 export function PullbackStrip() {
   const { pathname } = useLocation();
@@ -23,8 +24,19 @@ export function PullbackStrip() {
   // Hooks must run unconditionally, so the query is declared before the route
   // check and simply goes unused on pages that do not show the strip.
   const { data, isLoading, error } = usePullback(tradable);
+  const { data: market } = useMarketStatus();
 
   if (!isAlwaysLivePage(pathname)) return null;
+
+  // MCX shut: the live read has no intraday candles, so show the last session
+  // and the next open instead of blank fields and a "wait for a 1H close" line.
+  if (market && !market.isOpen) {
+    return (
+      <div className="mb-4">
+        <MarketClosedCard symbol={tradable} preOpen={market.session === "PRE_OPEN"} onOpen={() => navigate("/ai-pullback")} />
+      </div>
+    );
+  }
 
   return (
     <div className="mb-4">

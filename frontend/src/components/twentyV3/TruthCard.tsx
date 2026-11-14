@@ -36,7 +36,7 @@ export function TruthCard() {
             <b>Natural gas:</b> every strategy lost money over 2022–26. No gas calls.
           </p>
           <p>
-            <b>Why it is so hard:</b> every option trade pays spread, charges and time decay — about ₹300–350 a lot for a trade held a few hours. Most 5-minute patterns are smaller than that.
+            <b>Why it is so hard:</b> every option trade has <b>direct costs</b> — spread, brokerage and taxes, about ₹150 a lot on crude (₹200 on gas) — and then <b>time decay</b> of about ₹50 a lot for each hour you hold. For a trade held 3–4 hours that is about <b>₹300–350 a lot in total</b>. Most 5-minute patterns move less than that.
           </p>
           <p>
             <b>What the page does for you now:</b> it guards your capital (your plan, lot size and a hard daily stop), shows the exact order and every step, and keeps an honest practice record. If the practice record stays positive over 20+ calls, that is real evidence — and it will show here.

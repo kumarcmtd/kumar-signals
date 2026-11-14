@@ -18,6 +18,8 @@ import { isPracticeSetup } from "../../utils/twentyV3/live";
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${inr(n)}`;
 const NAME = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" } as const;
+/** "1 call", "0 calls" -- one text piece, so a phone translator or reader cannot split "call" from "s". */
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 function Level({ label, value, sub, color }: { label: string; value: string; sub?: string; color: string }) {
   return (
@@ -83,7 +85,7 @@ function RunningCall({ s, open, older }: { s: TwentyV3State; open: TradeLogEntry
       <div className="rounded-2xl p-3" style={{ background: open.optSide === "CE" ? "#ECFDF5" : "#FFF1F2" }}>
         <p className="text-[10px] font-black uppercase text-slate-500">{open.meta?.label ?? "Ai20-20"}{older ? " · earlier rules" : ""}</p>
         <p className="text-[16px] font-black text-slate-800">
-          {open.practice ? "PAPER BUY" : "BUY"} {lots} lot{lots > 1 ? "s" : ""} · {open.strike} {open.optSide} @ ₹{open.entry}
+          {`${open.practice ? "PAPER BUY" : "BUY"} ${plural(lots, "lot")} · ${open.strike} ${open.optSide} @ ₹${open.entry}`}
         </p>
         <p className="text-[10.5px] text-slate-500">
           {qty} qty · called {fmtWhen(open.openedAt)} · {open.practice ? `sized as your plan would size it (${s.lots.lots > 0 ? s.lots.why : "0 lots — stop wider than your per-trade limit"})` : s.lots.lots > 0 ? s.lots.why : "Your plan allows 0 lots for this stop — shown at 1 lot."}
@@ -96,7 +98,7 @@ function RunningCall({ s, open, older }: { s: TwentyV3State; open: TradeLogEntry
         <Level label="Target 2" value={`₹${open.targets[1]}`} sub={signed((open.targets[1] - open.entry) * qty)} color="#059669" />
         <Level label="Target 3" value={`₹${open.targets[2]}`} sub={signed((open.targets[2] - open.entry) * qty)} color="#059669" />
         <Level label="Live premium" value={ltp !== null ? `₹${ltp}` : "—"} color="#4F46E5" />
-        <Level label="P&L now" value={ltp !== null ? signed((ltp - open.entry) * qty) : "—"} sub={`${lots} lot${lots > 1 ? "s" : ""}`} color={ltp !== null && ltp >= open.entry ? "#059669" : "#E11D48"} />
+        <Level label="P&L now" value={ltp !== null ? signed((ltp - open.entry) * qty) : "—"} sub={plural(lots, "lot")} color={ltp !== null && ltp >= open.entry ? "#059669" : "#E11D48"} />
       </div>
       <p className="text-[10.5px] text-slate-500 leading-snug">
         If your broker exits by profit/loss in rupees: loss exit at <b>{signed((open.stop - open.entry) * qty)}</b>, first profit at <b>{signed((open.targets[0] - open.entry) * qty)}</b>.
@@ -144,12 +146,25 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
   const practice = open ? !!open.practice : r.entry ? isPracticeSetup(r.entry.setup) : false;
   const pill = open ? (practice ? "PRACTICE RUNNING" : "CALL RUNNING") : r.state === "call" ? (practice ? "PRACTICE CALL" : "NEW CALL") : r.state === "watch" ? "WATCHING" : r.state === "window_closed" ? "WAITING" : r.state === "off" ? "NO CALLS" : "LOADING";
   const hot = !!open || r.state === "call";
-  const accent = hot ? (side === "CE" ? "#059669" : "#E11D48") : r.state === "off" ? "#64748B" : "#0EA5E9";
+  // Badge colours by meaning: blue = practice, green/red = a real CE/PE call,
+  // teal = watching live, amber = waiting for the window, gray = off / loading.
+  const accent = hot ? (practice ? "#2563EB" : side === "CE" ? "#059669" : "#E11D48") : r.state === "watch" ? "#0D9488" : r.state === "window_closed" ? "#D97706" : "#94A3B8";
+  const headBg = hot
+    ? practice
+      ? "linear-gradient(135deg,#EFF6FF,#FFFFFF)"
+      : side === "CE"
+        ? "linear-gradient(135deg,#ECFDF5,#FFFFFF)"
+        : "linear-gradient(135deg,#FFF1F2,#FFFFFF)"
+    : r.state === "window_closed"
+      ? "linear-gradient(135deg,#FFFBEB,#FFFFFF)"
+      : r.state === "watch"
+        ? "linear-gradient(135deg,#F0FDFA,#FFFFFF)"
+        : "linear-gradient(135deg,#F8FAFC,#FFFFFF)";
   const Dir = side === "PE" ? TrendingDown : TrendingUp;
   const blocked = r.state === "call" && !open ? (s.expiry ?? (s.guard.ok ? (s.ticket ? null : "No live option price to build the order — nothing to enter.") : s.guard.reason)) : null;
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
-      <div className="p-4 flex items-center gap-3" style={{ background: hot ? (side === "CE" ? "linear-gradient(135deg,#ECFDF5,#FFFFFF)" : "linear-gradient(135deg,#FFF1F2,#FFFFFF)") : "linear-gradient(135deg,#F0F9FF,#FFFFFF)" }}>
+      <div className="p-4 flex items-center gap-3" style={{ background: headBg }}>
         <div className="flex-1 min-w-0">
           <p className="text-[15px] font-black text-slate-800">{s.sym === "CRUDEOIL" ? "🛢️ Crude Oil" : "🔥 Natural Gas"}</p>
           <p className="text-[11px] text-slate-500 leading-snug">{open ? `${open.optSide} call running — follow the steps below.` : r.headline}</p>
@@ -183,7 +198,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
         {open && <RunningCall s={s} open={open} older={!s.running} />}
         {r.state !== "off" && (
           <p className="text-[11px] text-slate-500">
-            Today: {s.guard.callsToday} call{s.guard.callsToday === 1 ? "" : "s"} · {s.guard.stopsToday} stop{s.guard.stopsToday === 1 ? "" : "s"} · one call at a time; no more after 2 stops, 3 calls or −₹3,000 a lot.
+            {`Today: ${plural(s.guard.callsToday, "call")} · ${plural(s.guard.stopsToday, "stop")} · one call at a time; no more after 2 stops, 3 calls or −₹3,000 a lot.`}
           </p>
         )}
         {s.liveDataUnavailable && (

@@ -22,6 +22,8 @@ export function TodayPlanCard({ s }: { s: TwentyV3State }) {
   const istDate = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
   const nextDay = w && istDate(w.from) !== istDate(now) ? new Date(w.from + 5.5 * 3600_000).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" }) : null;
   const b = s.budget;
+  // Closed market: the regime read is from the last session's final candle.
+  const lastClose = s.read.barEnd && now - s.read.barEnd > 15 * 60_000 ? new Date(s.read.barEnd + 5.5 * 3600_000).toLocaleString("en-IN", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" }) : null;
   const usedPct = b.bookedRs < 0 ? Math.min(100, Math.round((-b.bookedRs / b.limitRs) * 100)) : 0;
   return (
     <section className="rounded-3xl shadow-md overflow-hidden bg-white">
@@ -45,7 +47,7 @@ export function TodayPlanCard({ s }: { s: TwentyV3State }) {
           <p className="text-[11.5px] text-slate-600 leading-snug flex gap-2">
             <Gauge size={14} className="shrink-0 mt-0.5 text-violet-500" />
             <span>
-              <span className="font-black text-slate-800">Market now: </span>
+              <span className="font-black text-slate-800">{lastClose ? `At the last close (${lastClose}): ` : "Market now: "}</span>
               {s.read.regime.text}.
             </span>
           </p>

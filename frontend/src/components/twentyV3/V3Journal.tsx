@@ -84,7 +84,7 @@ export function V3Journal({ rows, lots, onOpen }: { rows: JournalRow[]; lots: nu
       )}
       {stats.n > 0 && (
         <p className="text-[10px] text-slate-400">
-          *After estimated costs (₹150 crude / ₹200 gas a call). Rows show the premium move.{lots > 1 ? ` With your ${lots} lots: net ${signed(stats.net * lots)}.` : ""}
+          {`*After estimated direct costs (₹150 crude / ₹200 gas a call: spread, brokerage, taxes). Time decay is already inside the exit premium. Rows show the premium move before costs.${lots > 1 ? ` With your ${lots} lots: net ${signed(stats.net * lots)}.` : ""}`}
         </p>
       )}
       <div className="space-y-2">

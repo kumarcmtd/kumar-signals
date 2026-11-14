@@ -180,7 +180,7 @@ export function PageTradeReport({ engine, logs, note, keyFilter }: { engine: Eng
           </>
         )}
         <p className="text-[9.5px] text-slate-400 leading-snug">
-          At the recorded exit premium. Estimated costs (₹{EST_COST_RS.CRUDEOIL} Crude / ₹{EST_COST_RS.NATURALGAS} NG per call: spread, brokerage, taxes) taken off the net
+          {`Net = the real exit premium minus the entry (time decay is already inside that premium), less estimated direct costs of ₹${EST_COST_RS.CRUDEOIL} Crude / ₹${EST_COST_RS.NATURALGAS} NG per call (spread, brokerage, taxes)`}
           {r.duplicatesSkipped ? `; ${r.duplicatesSkipped} duplicate cop${r.duplicatesSkipped === 1 ? "y" : "ies"} from a second device not counted` : ""}.
           {note ? ` ${note}` : ""}
         </p>
