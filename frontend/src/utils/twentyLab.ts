@@ -202,9 +202,11 @@ const SCORE_WINDOW = 300;
 /**
  * @param withScore true: score every candle (the lab). A number n: only the
  * last n candles (the live engine needs just the latest two -- scoring each
- * candle runs the page's whole indicator read, the slow part).
+ * candle runs the page's whole indicator read, the slow part). An ET window:
+ * only candles from 5 minutes before `etFrom` up to `etTo` (New York minutes)
+ * -- enough for rules that only trade inside that window, years of data fast.
  */
-export function prepare(raw: Candle[], withScore: boolean | number = true): Prepared {
+export function prepare(raw: Candle[], withScore: boolean | number | { etFrom: number; etTo: number } = true): Prepared {
   const c = [...raw].sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
   const ist = c.map((k) => Date.parse(k.date) + IST_MS);
   const day = ist.map((t) => Math.floor(t / 86_400_000));
@@ -218,15 +220,6 @@ export function prepare(raw: Candle[], withScore: boolean | number = true): Prep
     for (let j = i - 20; j < i; j++) s += vols[j];
     return s / 20;
   });
-  const score: number[] = c.map(() => NaN);
-  if (withScore !== false) {
-    const from = typeof withScore === "number" ? Math.max(0, c.length - withScore) : 0;
-    for (let i = from; i < c.length; i++) {
-      if (i + 1 < 30) continue;
-      const a = analyzeImmediate(c.slice(Math.max(0, i + 1 - SCORE_WINDOW), i + 1), null, null);
-      score[i] = a.underlyingScore ?? NaN;
-    }
-  }
   const etMs = c.map((k) => {
     const ms = Date.parse(k.date);
     const d = new Date(ms);
@@ -235,6 +228,17 @@ export function prepare(raw: Candle[], withScore: boolean | number = true): Prep
   });
   const etMinute = etMs.map((et) => Math.floor((((et % 86_400_000) + 86_400_000) % 86_400_000) / 60_000));
   const etWeekday = etMs.map((et) => new Date(et).getUTCDay());
+  const score: number[] = c.map(() => NaN);
+  if (withScore !== false) {
+    const win = typeof withScore === "object" ? withScore : null;
+    const from = typeof withScore === "number" ? Math.max(0, c.length - withScore) : 0;
+    for (let i = from; i < c.length; i++) {
+      if (i + 1 < 30) continue;
+      if (win && (etMinute[i] < win.etFrom - 5 || etMinute[i] >= win.etTo)) continue;
+      const a = analyzeImmediate(c.slice(Math.max(0, i + 1 - SCORE_WINDOW), i + 1), null, null);
+      score[i] = a.underlyingScore ?? NaN;
+    }
+  }
   return {
     c,
     day,
@@ -302,7 +306,7 @@ export function signalAt(p: Prepared, i: number, r: LabRules): "CE" | "PE" | nul
   return side;
 }
 
-export type LabExit = "sl" | "breakeven" | "after_t1" | "t3" | "time" | "day_end";
+export type LabExit = "sl" | "breakeven" | "after_t1" | "t3" | "time" | "day_end" | "trail";
 export interface LabTrade {
   side: "CE" | "PE";
   openIdx: number;

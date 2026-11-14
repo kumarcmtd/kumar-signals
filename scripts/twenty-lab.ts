@@ -12,46 +12,7 @@
 import { CURRENT_RULES, gateTrades, prepare, ruleGrid, rulesLabel, sensitivityGrid, simulate, statsOf, type LabRules, type LabStats, type LabSym, type LabTrade, type Prepared } from "../frontend/src/utils/twentyLab";
 import { V2_RULES } from "../frontend/src/utils/twentyV2";
 import type { Candle } from "../frontend/src/types";
-
-const SITE = process.env.SITE ?? "https://kumar-signals.akumalla-kumar-sbh.workers.dev";
-const USDINR = 88;
-
-async function yahoo(ticker: string): Promise<Candle[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=5m&range=60d`;
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" } });
-  if (!res.ok) throw new Error(`Yahoo ${ticker}: HTTP ${res.status}`);
-  const j: any = await res.json();
-  const r = j?.chart?.result?.[0];
-  const ts: number[] = r?.timestamp ?? [];
-  const q = r?.indicators?.quote?.[0] ?? {};
-  const out: Candle[] = [];
-  for (let i = 0; i < ts.length; i++) {
-    const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
-    if ([o, h, l, c].some((x) => typeof x !== "number" || !Number.isFinite(x))) continue;
-    const ms = ts[i] * 1000;
-    const ist = new Date(ms + 5.5 * 3600_000);
-    const min = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-    const wd = ist.getUTCDay();
-    if (wd === 0 || wd === 6 || min < 9 * 60 || min >= 23 * 60 + 30) continue; // MCX hours only
-    out.push({ date: new Date(ms).toISOString(), open: o * USDINR, high: h * USDINR, low: l * USDINR, close: c * USDINR, volume: q.volume?.[i] ?? 0 });
-  }
-  return out;
-}
-
-async function mcx(symbol: LabSym): Promise<Candle[] | string> {
-  try {
-    // /api/history-5m answers while MCX is shut too; /api/candles only while it is open.
-    for (const path of [`/api/history-5m?symbol=${symbol}`, `/api/candles?symbol=${symbol}&tf=5`]) {
-      const res = await fetch(`${SITE}${path}`, { headers: { Accept: "application/json" } });
-      const j: any = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      if (!j.error && Array.isArray(j.candles) && j.candles.length >= 100) return j.candles as Candle[];
-      if (path.startsWith("/api/candles")) return String(j.error ?? `HTTP ${res.status}`);
-    }
-    return "no data";
-  } catch (e) {
-    return `${String(e)} ${String((e as any)?.cause?.message ?? "")}`;
-  }
-}
+import { mcx, yahoo } from "./lab-data";
 
 const fmt = (n: number | null) => (n === null ? "—" : String(n));
 const avgOf = (t: LabTrade[]) => (t.length ? Math.round(t.reduce((a, x) => a + x.rs, 0) / t.length) : null);

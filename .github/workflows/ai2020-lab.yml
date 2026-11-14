@@ -1,16 +1,20 @@
 name: Ai20-20 rules lab
 
-# Replays Ai20-20 rule sets on past 5-minute candles (NYMEX from Yahoo, and
-# the app's own MCX candles) and prints ONLY aggregate results to the log and
-# the run summary. No raw price data is stored. Runs by hand, or when the lab
-# code changes on the development branch.
+# Replays Ai20-20 setups on past 5-minute candles and prints ONLY aggregate
+# results to the log and the run summary. No raw price data is stored.
+# v3: years of Dukascopy history (crude + gas), the last 60 days of NYMEX
+# futures (Yahoo) and the app's own MCX candles. Runs by hand, or when the
+# lab code changes on the development branch.
 on:
   workflow_dispatch:
   push:
     branches: [claude/natural-gas-crude-oil-options-qkizj2]
     paths:
       - "scripts/twenty-lab.ts"
+      - "scripts/twenty-lab-v3.ts"
+      - "scripts/lab-data.ts"
       - "frontend/src/utils/twentyLab.ts"
+      - "frontend/src/utils/twentyV3/**"
       - "frontend/src/utils/aiTwentyTwentyEngine.ts"
       - "frontend/src/utils/twentyV2.ts"
       - ".github/workflows/ai2020-lab.yml"
@@ -22,14 +26,20 @@ concurrency:
 jobs:
   lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Run the lab
+      - name: Install the price-history downloader
         run: |
-          LAB_GRID=final npx -y tsx scripts/twenty-lab.ts > lab.md
+          mkdir -p /tmp/duka && cd /tmp/duka && npm init -y > /dev/null
+          npm install dukascopy-node@1.51.1 --no-audit --no-fund
+      - name: Run the v3 lab
+        env:
+          DUKA_DIR: /tmp/duka
+        run: |
+          npx -y tsx scripts/twenty-lab-v3.ts > lab.md
           cat lab.md
           cat lab.md >> "$GITHUB_STEP_SUMMARY"
