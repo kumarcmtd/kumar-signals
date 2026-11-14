@@ -24,11 +24,13 @@ import { dukascopy, mcx, yahoo } from "./lab-data";
 
 const CANDIDATES: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade"];
 /** Round 2: three research-motivated refinements of the best round-1 idea, judged by the same pick rule. */
-const ROUND2: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps"];
+const ROUND2: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps", "driveStrict"];
 const PICK = { minTrades: 80, minAvgRs: 100, minPf: 1.15 };
 const GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 };
-const FROM = process.env.LAB_FROM ?? "2022-01-01";
-const TO = process.env.LAB_TO ?? new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+const FROM = process.env.LAB_FROM || "2022-01-01";
+const TO = process.env.LAB_TO || new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+/** A holdout run (an explicit end date) skips the recent-data checks. */
+const HOLDOUT = !!process.env.LAB_TO;
 
 interface Data {
   name: string;
@@ -188,7 +190,7 @@ async function main() {
       lines.push(`\n## ${label} multi-year\n\nFailed: ${String(e)} ${String((e as any)?.cause?.message ?? "")}`);
     }
     const recent: Data[] = [];
-    if (!synthMode) {
+    if (!synthMode && !HOLDOUT) {
       try {
         recent.push(load(`${label} — last 60 days of NYMEX futures (Yahoo)`, sym, await yahoo(yh, true), false));
       } catch (e) {

@@ -8,7 +8,7 @@ import { signalAt, type Prepared } from "../twentyLab";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
 
-export type V3SetupId = "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps";
+export type V3SetupId = "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict";
 
 /**
  * steps: T1 -> stop to entry, T2 -> stop to T1, out at T3 (the page's way).
@@ -48,6 +48,7 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   driveTrend: "Opening drive + 1h trend",
   driveBusy: "Opening drive on busy days",
   driveSteps: "Opening drive, step exits",
+  driveStrict: "Big opening drive",
 };
 
 /** Today's ATR at candle i against its median at the same clock minute over the previous 10 sessions. */
@@ -113,9 +114,10 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
     return mk(side, stop, 1.5 * stop, "steps");
   }
 
-  if (id === "drive" || id === "drive60" || id === "driveTrend" || id === "driveBusy" || id === "driveSteps") {
+  if (id === "drive" || id === "drive60" || id === "driveTrend" || id === "driveBusy" || id === "driveSteps" || id === "driveStrict") {
     if (sm !== (id === "drive60" ? 55 : 25)) return null;
-    const b = bandAt(f, i, k);
+    // Big opening drive: the first half hour must move 1.2x its usual range, not 1x.
+    const b = bandAt(f, i, id === "driveStrict" ? 1.2 * k : k);
     if (!b) return null;
     const side = c.close > b.upper ? "CE" : c.close < b.lower ? "PE" : null;
     if (!side) return null;

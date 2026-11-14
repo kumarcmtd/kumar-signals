@@ -11,6 +11,9 @@ import type { Candle } from "../frontend/src/types";
 
 export const SITE = process.env.SITE ?? "https://kumar-signals.akumalla-kumar-sbh.workers.dev";
 export const USDINR = 88;
+/** Approximate yearly average USDINR, so older years are not scaled up to today's rupee. */
+const USDINR_BY_YEAR: Record<number, number> = { 2015: 64, 2016: 67, 2017: 65, 2018: 68, 2019: 70, 2020: 74, 2021: 74, 2022: 79, 2023: 82, 2024: 83, 2025: 86, 2026: 88 };
+export const usdinrAt = (ms: number) => USDINR_BY_YEAR[new Date(ms).getUTCFullYear()] ?? USDINR;
 
 /** True when a candle starting at `ms` falls inside MCX hours. `dstClose`: use the real US-winter 23:55 close (else always 23:30). */
 export function inMcxHours(ms: number, dstClose = true): boolean {
@@ -90,9 +93,10 @@ export async function dukascopy(instrument: "lightcmdusd" | "gascmdusd", fromIso
     let kept = 0;
     for (const r of rows ?? []) {
       const ms = Number(r.timestamp);
-      if (![r.open, r.high, r.low, r.close].every((x) => typeof x === "number" && Number.isFinite(x))) continue;
+      if (![r.open, r.high, r.low, r.close].every((x) => typeof x === "number" && Number.isFinite(x) && x > 0)) continue;
       if (!inMcxHours(ms)) continue;
-      out.push({ date: new Date(ms).toISOString(), open: r.open * USDINR, high: r.high * USDINR, low: r.low * USDINR, close: r.close * USDINR, volume: Number(r.volume) || 0 });
+      const fx = usdinrAt(ms);
+      out.push({ date: new Date(ms).toISOString(), open: r.open * fx, high: r.high * fx, low: r.low * fx, close: r.close * fx, volume: Number(r.volume) || 0 });
       kept++;
     }
     log(`${instrument} ${start.toISOString().slice(0, 10)}..${stop.toISOString().slice(0, 10)}: ${rows?.length ?? 0} rows, ${kept} in MCX hours, ${Math.round((Date.now() - t0) / 1000)}s`);

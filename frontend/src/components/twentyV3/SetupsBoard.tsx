@@ -10,7 +10,7 @@ import { SETUP_NAMES, type V3SetupId } from "../../utils/twentyV3/setups";
 import { V3_LIVE } from "../../utils/twentyV3/live";
 
 const signed = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`);
-const ORDER: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade", "driveTrend", "driveBusy", "driveSteps"];
+const ORDER: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade", "driveTrend", "driveBusy", "driveSteps", "driveStrict"];
 
 const ABOUT: Record<V3SetupId, string> = {
   trend: "v2's rule: the 5-minute strength turns strong on a finished candle, with the 1-hour trend, 10:30 AM–1:15 PM New York.",
@@ -26,6 +26,7 @@ const ABOUT: Record<V3SetupId, string> = {
   driveTrend: "Opening drive (9:30), only when the 1-hour trend points the same way.",
   driveBusy: "Opening drive (9:30), only on busy days (swings 1.2× normal) — research finds the first half hour predicts more on volatile days.",
   driveSteps: "Opening drive (9:30) managed like every other call: stop to entry at T1, out at T3.",
+  driveStrict: "Opening drive (9:30) only when the first half hour moved at least 1.2× its usual range — the bigger the opening move, the more often it kept going.",
 };
 
 function MarketBoard({ title, facts, live, s }: { title: string; facts: MarketFacts; live: V3SetupId[]; s: TwentyV3State }) {

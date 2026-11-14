@@ -32,7 +32,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        market: [CRUDEOIL]
+        include:
+          - { market: CRUDEOIL, from: "2022-01-01", to: "" }
+          # Holdout: five older years no rule was ever chosen on.
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -56,6 +59,8 @@ jobs:
           DUKA_DIR: /tmp/duka
           DUKA_CACHE: /tmp/duka-cache
           LAB_MARKET: ${{ matrix.market }}
+          LAB_FROM: ${{ matrix.from }}
+          LAB_TO: ${{ matrix.to }}
         run: |
           set -o pipefail
           npx -y tsx scripts/twenty-lab-v3.ts | tee lab.md

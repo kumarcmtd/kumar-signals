@@ -23,6 +23,7 @@ export const SETUP_WINDOWS: Record<V3SetupId, [number, number]> = {
   driveTrend: [9 * 60 + 30, 9 * 60 + 30],
   driveBusy: [9 * 60 + 30, 9 * 60 + 30],
   driveSteps: [9 * 60 + 30, 9 * 60 + 30],
+  driveStrict: [9 * 60 + 30, 9 * 60 + 30],
 };
 
 const IST_MS = 5.5 * 3600_000;

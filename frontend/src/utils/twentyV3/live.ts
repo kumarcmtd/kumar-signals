@@ -70,7 +70,7 @@ function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean): strin
     if (!Number.isFinite(f.orHigh[i])) return "No opening range today.";
     return et > to ? `Range ${inr(f.orLow[i])} – ${inr(f.orHigh[i])}; window over for today.` : `Range ${inr(f.orLow[i])} – ${inr(f.orHigh[i])}: waiting for the day's first close outside it (until ${nyLabel(to)}).`;
   }
-  if (id === "drive" || id === "drive60" || id === "driveTrend" || id === "driveBusy" || id === "driveSteps") return et > to ? "Checked once today — price was inside its normal range." : `Checks once at ${nyLabel(to)}: is price outside its normal range from the open?`;
+  if (id === "drive" || id === "drive60" || id === "driveTrend" || id === "driveBusy" || id === "driveSteps" || id === "driveStrict") return et > to ? "Checked once today — price was inside its normal range." : `Checks once at ${nyLabel(to)}: is price outside its normal range from the open?`;
   if (id === "vwapPull") return `Needs a 1-hour trend, price holding on one side of VWAP ${Number.isFinite(f.vwap[i]) ? inr(f.vwap[i]) : ""} and a dip back to it.`;
   return p.etWeekday[i] === 3 ? "Wednesday 10:45 AM New York: a big move after the EIA report?" : "Only on Wednesdays (EIA report day).";
 }
