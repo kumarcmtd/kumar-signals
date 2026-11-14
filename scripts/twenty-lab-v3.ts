@@ -165,12 +165,13 @@ function synth(days: number, start: number): Candle[] {
 async function main() {
   const t0 = Date.now();
   const log = (s: string) => console.error(`[${Math.round((Date.now() - t0) / 1000)}s] ${s}`);
-  const out: string[] = [
+  const head: string[] = [
     `# Ai20-20 v3 rules lab — ${new Date().toISOString()}`,
     "",
     "Rs per lot after costs (Rs 150 Crude / Rs 200 NG per trade + ~Rs 50 an hour time decay), option at delta 0.5. Estimates, not live fills.",
     `Pick rule (fixed before the run): ${PICK.minTrades}+ trades, average >= Rs ${PICK.minAvgRs}, both halves positive, profit factor >= ${PICK.minPf}, on the multi-year history.`,
   ];
+  console.log(head.join("\n"));
   const synthMode = process.env.LAB_SYNTH === "1";
   for (const [sym, duka, yh, label] of [["CRUDEOIL", "lightcmdusd", "CL=F", "WTI crude"], ["NATURALGAS", "gascmdusd", "NG=F", "Henry Hub gas"]] as const) {
     const lines: string[] = [];
@@ -202,14 +203,14 @@ async function main() {
       deepDive(years, picked, lines);
       ensemble(years, picked, lines, "Picked setups together");
       log(`${sym} years done`);
+      console.log(lines.splice(0).join("\n")); // printed now: a later failure cannot lose it
     }
     for (const d of recent) {
       candidateTable(d, lines);
       ensemble(d, picked, lines, "Picked setups together");
     }
-    out.push(...lines);
+    console.log(lines.join("\n"));
   }
-  console.log(out.join("\n"));
   log("done");
 }
 

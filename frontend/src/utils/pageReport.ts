@@ -67,6 +67,7 @@ const TF_LABEL: Record<string, string> = {
   "120": "2h",
   "240": "4h",
   "1D": "Daily",
+  V3: "v3 setups",
   V2: "v2 rules",
   LIVE: "old rules",
   // Ai-Trust tiers (its calls come from the Trade Card log, keyed TRUST-<SYMBOL>-<tier>)

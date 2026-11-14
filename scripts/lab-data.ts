@@ -79,11 +79,13 @@ export async function dukascopy(instrument: "lightcmdusd" | "gascmdusd", fromIso
       format: "json",
       priceType: "bid",
       volumes: true,
-      batchSize: 20,
-      pauseBetweenBatchesMs: 250,
+      batchSize: 10,
+      pauseBetweenBatchesMs: 600,
       retryCount: 4,
-      pauseBetweenRetriesMs: 1500,
+      pauseBetweenRetriesMs: 2000,
       failAfterRetryCount: false,
+      // Downloaded days are kept between lab runs (an Actions cache, never committed).
+      ...(process.env.DUKA_CACHE ? { useCache: true, cacheFolderPath: process.env.DUKA_CACHE } : {}),
     });
     let kept = 0;
     for (const r of rows ?? []) {

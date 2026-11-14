@@ -14,8 +14,9 @@ import { computeGlobalMarkets, computeOvernightTracker } from "./globalMarkets";
 import { type RequestGuard, requireToken } from "./guard";
 import { computeKumarAiAnalysis, type KumarAiAnalyzeRequest } from "./kumarAi";
 import { fetchEnergyNews, scanNewsNow } from "./news";
-import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, runTwentyTwentyNotificationCheck, sendNtfyNotification } from "./notify";
-import { v2PushText } from "../frontend/src/utils/twentyV2";
+import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification } from "./notify";
+import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
+import { v3CallPushText } from "../frontend/src/utils/twentyV3/push";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
 import { computeSeasonal } from "./seasonal";
@@ -320,29 +321,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
               : kind === "event"
                 ? eventWarningText({ name: "EIA Weekly Crude Inventories", affects: "CRUDEOIL", istLabel: "8:00 PM", minutesAway: 30 })
                 : kind === "twenty"
-                  ? v2PushText({
+                  ? v3CallPushText({
                       displayName: "Crude Oil",
-                      plan: { strike: 5400, optSide: "CE", entry: 182.4, targets: [200.4, 211.2, 222.9], stop: 170.4, delta: 0.5, lot: 100, riskRs: 1200, t1Rs: 1800, t2Rs: 2880 },
-                      read: {
-                        state: "call",
-                        side: "CE",
-                        barEnd: Date.now(),
-                        fut: 5412,
-                        atr: 12,
-                        stopPts: 24,
-                        t1Pts: 36,
-                        strength: 64,
-                        headline: "",
-                        checks: [
-                          { label: "5-min strength", ok: true, detail: "64 (CE needs 58+, PE 42 or less)" },
-                          { label: "Fresh turn, not a chase", ok: true, detail: "turned strong on this candle" },
-                          { label: "1-hour trend agrees", ok: true, detail: "1-hour trend up" },
-                          { label: "US session window", ok: true, detail: "9:00 PM – 11:30 PM IST (10:30 AM – 1:15 PM New York)" },
-                        ],
-                      },
-                      record: { trades: 11, avgRs: 2420, days: 15 },
-                      cardLine: "agrees (TRADE CE)",
-                      caution: false,
+                      t: { sym: "CRUDEOIL", side: "CE", strike: 5400, entry: 182.4, maxPay: 186.9, stop: 170.4, targets: [200.4, 211.2, 222.9], delta: 0.5, lotSize: 100, riskPerLot: 1200, premiumPerLot: 18240, targetRsPerLot: [1800, 2880, 4050], strikeWhy: "At the money, delta 0.50 — 9 days to expiry." },
+                      setup: "trend",
+                      regime: "1-hour trend up · normal swings for this hour",
+                      record: { trades: 11, avgRs: 950 },
                     })
                 : kind === "matched"
               ? matchedPushText({ displayName: "Crude Oil", strike: 8850, optSide: "CE", entry: 263.2, t1: 283.2, stop: 251.2, lot: 100, strength: 72, since: "21:15", liveHeadline: "HOLDING — still bullish right now", pulseTitle: "STEADY UP", newsText: "+38 bullish -- sample headline" })
@@ -367,7 +351,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // matched call is found, exactly like the Cron) and says why per market.
         if (url.pathname === "/api/notify/check-matched") {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-          return json({ report: await runTwentyTwentyNotificationCheck(env) });
+          return json({ report: [...(await runTwentyV3CallCheck(env)), ...(await runTwentyV3StepCheck(env))] });
         }
 
         if (url.pathname === "/api/notify/check-now") {

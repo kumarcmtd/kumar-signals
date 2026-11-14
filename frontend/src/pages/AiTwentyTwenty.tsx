@@ -1,214 +1,70 @@
 import { useMemo, useState } from "react";
-import { Target, TrendingUp, TrendingDown, Info, X, ChevronRight, ChevronDown, CandlestickChart, BellRing } from "lucide-react";
-import { useMarketStatus, useSignal } from "../api/hooks";
-import { useTwentyV2 } from "../hooks/useTwentyV2";
-import { effectiveStopFor } from "../hooks/useTradeLog";
-import { flattenClosedTrades, computePerformanceStats, exitPriceFor } from "../utils/tradeLogPnl";
-import { verifiedEntryIds } from "../utils/dedupeTradeLog";
-import { tickMarks, fmtWhen, DetailRow, CallChart, PriceScale, ProfitEstimate } from "../components/CallCardKit";
-import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
-import { TwentyCallCard } from "../components/twenty/TwentyCallCard";
-import { TwentyEdgePanel } from "../components/twenty/TwentyEdgePanel";
-import { LAB_LOT } from "../utils/twentyLab";
-import { v2Window } from "../utils/twentyV2";
-import { useAppStore, type TradeLogEntry } from "../store/appStore";
+import { Target, ChevronDown, BookOpen } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useMarketStatus } from "../api/hooks";
+import { useTwentyV3 } from "../hooks/useTwentyV3";
+import { useAppStore } from "../store/appStore";
 import { useSyncStatus } from "../syncTradeLogs";
 import { appVersionLabel } from "../utils/appVersion";
-import { Link } from "react-router-dom";
-import type { Candle } from "../types";
+import { v3Key } from "../utils/twentyV3/live";
+import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
+import { TodayPlanCard } from "../components/twentyV3/TodayPlanCard";
+import { V3CallCard } from "../components/twentyV3/V3CallCard";
+import { MyPlanPanel } from "../components/twentyV3/MyPlanPanel";
+import { SetupsBoard } from "../components/twentyV3/SetupsBoard";
+import { V3Journal, type JournalRow } from "../components/twentyV3/V3Journal";
+import { CallDetailModal } from "../components/twentyV3/CallDetailModal";
+import type { LabSym } from "../utils/twentyLab";
 
-// Ai20-20 v2. The page shows what the measured rules say now for each market,
-// the running call, and how the rules did on recent real candles. The rules
-// themselves and the evidence behind them live in utils/twentyV2.ts.
+// Ai20-20 v3 -- run the way a disciplined trade manager runs money: the plan
+// and the risk first, only setups that proved themselves on years of real
+// prices get to trade, one exact instruction per call, and every step of a
+// running call watched (and pushed to the phone) until it closes.
 
-type TradableSymbol = "CRUDEOIL" | "NATURALGAS";
-const DISPLAY_NAME: Record<TradableSymbol, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
-const PREFIX = "TWENTY20-";
+const SYMS: LabSym[] = ["CRUDEOIL", "NATURALGAS"];
 
-// Keys are "TWENTY20-<SYMBOL>-<LIVE|V2>"; the symbol is one plain word.
-function parseKey(key: string): { symbol: TradableSymbol; v2: boolean } {
-  const parts = key.split("-");
-  return { symbol: parts[1] as TradableSymbol, v2: parts[2] === "V2" };
-}
-
-const rs = (n: number) => `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
-
-function StatTile({ label, value, gradient }: { label: string; value: string; gradient: string }) {
+function HowBuilt() {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-2xl p-2.5 text-center text-white shadow-sm" style={{ background: gradient }}>
-      <p className="text-[9px] font-bold uppercase opacity-85">{label}</p>
-      <p className="text-[14px] font-black leading-tight">{value}</p>
-    </div>
+    <section className="rounded-3xl bg-white shadow-md overflow-hidden">
+      <button onClick={() => setOpen((o) => !o)} className="w-full p-4 flex items-center gap-3 text-left">
+        <BookOpen size={18} className="text-sky-500 shrink-0" />
+        <p className="flex-1 text-[13px] font-black text-slate-800">How v3 was built — the research</p>
+        <ChevronDown size={16} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-2 text-[11px] text-slate-600 leading-snug">
+          <p>
+            <b>Strategies.</b> The noise-band breakout with a VWAP trailing exit comes from Zarattini, Aziz & Barbon, <i>Beat the Market: An Effective Intraday Momentum Strategy</i> (Swiss Finance Institute, 2024). The opening-drive idea comes from crude-oil research finding the first half hour of the US session predicts later returns (Wen, Indriawan, Lien & Xu, <i>Economic Modelling</i>). Opening-range breakouts were tested because they are popular — recent cost-inclusive studies find most do not survive trading costs.
+          </p>
+          <p>
+            <b>EIA Wednesdays.</b> Studies of WTI around the 10:30 AM report find big jumps at release and a partial reversal in the hours after, so both following and fading the move were tested.
+          </p>
+          <p>
+            <b>Strike.</b> At the money or slightly in the money (delta about 0.5–0.65): far out-of-the-money options barely move and decay fast; near expiry one strike in the money loses less to time decay.
+          </p>
+          <p>
+            <b>Money rules.</b> Risk about 1% of capital a trade, stop for the day at about 3% lost, keep the number of trades small — the common professional rules, so one bad week cannot break the account.
+          </p>
+          <p>
+            <b>The test.</b> Every setup was replayed on years of 5-minute prices with the same trade management as the live page, costs (spread, charges, time decay) taken off every call. Only setups that passed a rule written before the test go live. Old test results never guarantee future ones.
+          </p>
+        </div>
+      )}
+    </section>
   );
-}
-
-function CallHistoryRow({ symbol, entry, verified, v2, onOpen }: { symbol: TradableSymbol; entry: TradeLogEntry; verified: boolean; v2: boolean; onOpen: () => void }) {
-  const exit = entry.closed ? exitPriceFor(entry) : null;
-  const pnl = exit !== null ? (exit - entry.entry) * LAB_LOT[symbol] : null;
-  const statusLabel = entry.closed ? entry.status.replace(/_/g, " ") : "Running";
-  const statusColor = !entry.closed ? "#B45309" : pnl !== null && pnl > 0 ? "#059669" : pnl !== null && pnl < 0 ? "#E11D48" : "#B45309";
-  const effStop = effectiveStopFor(entry);
-  return (
-    <button onClick={onOpen} className="w-full text-left rounded-xl border px-3 py-2.5 active:bg-slate-50" style={{ borderColor: verified ? "#E2E8F0" : "#FCA5A5", opacity: verified ? 1 : 0.6 }}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-bold truncate text-slate-700">
-            {DISPLAY_NAME[symbol]} · {entry.strike} {entry.optSide}{" "}
-            <span className={`ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full ${v2 ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{v2 ? "v2" : "old rules"}</span>
-          </p>
-          <p className="text-[10px] text-slate-400">
-            Called {fmtWhen(entry.openedAt)} at ₹{entry.entry}
-            {entry.closed && entry.closedAt !== null && <> · Closed {fmtWhen(entry.closedAt)} at ₹{exit}</>}
-          </p>
-          {!verified && <span className="inline-block mt-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700">Duplicate — not counted</span>}
-        </div>
-        <div className="text-right shrink-0 flex items-center gap-1">
-          <div>
-            <p className="text-xs font-bold" style={{ color: statusColor }}>
-              {statusLabel}
-            </p>
-            {pnl !== null && <p className="text-[10px] font-bold text-slate-500">{rs(pnl)}/lot</p>}
-          </div>
-          <ChevronRight size={14} className="text-slate-400 shrink-0" />
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px] text-slate-400">
-        {entry.targets.map((t, i) => (
-          <span key={i} className={entry.targetsHit[i] ? "text-emerald-600 font-semibold" : ""}>
-            {tickMarks(entry.targetTouches?.[i] ?? (entry.targetsHit[i] ? 1 : 0))} T{i + 1} ₹{t}
-          </span>
-        ))}
-        <span>
-          SL ₹{effStop}
-          {effStop !== entry.stop && <span className="opacity-60"> (was ₹{entry.stop})</span>}
-        </span>
-      </div>
-    </button>
-  );
-}
-
-function CallDetailModal({ symbol, entry, candles, candlesLoading, onClose }: { symbol: TradableSymbol; entry: TradeLogEntry; candles: Candle[]; candlesLoading: boolean; onClose: () => void }) {
-  const exit = entry.closed ? exitPriceFor(entry) : null;
-  const lot = LAB_LOT[symbol];
-  const pnl = exit !== null ? (exit - entry.entry) * lot : null;
-  const effStop = effectiveStopFor(entry);
-  const Bias = entry.optSide === "CE" ? TrendingUp : TrendingDown;
-  return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50" />
-      <div className="relative w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <p className="text-xl font-black flex items-center gap-2 text-slate-800">
-            <Bias size={20} style={{ color: entry.optSide === "CE" ? "#059669" : "#E11D48" }} />
-            {DISPLAY_NAME[symbol]} {entry.strike} {entry.optSide}
-          </p>
-          <button onClick={onClose} className="p-2 rounded-full bg-slate-100 shrink-0">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="rounded-2xl p-3.5 my-3 bg-slate-50">
-          <p className="text-lg font-black" style={{ color: pnl === null ? "#B45309" : pnl > 0 ? "#059669" : pnl < 0 ? "#E11D48" : "#B45309" }}>
-            {entry.closed ? entry.status.replace(/_/g, " ") : "Running"}
-          </p>
-          {pnl !== null && <p className="text-sm font-bold text-slate-500">{rs(pnl)} per lot</p>}
-        </div>
-        {entry.meta?.reasons?.length ? (
-          <div className="mb-3 space-y-1">
-            <p className="text-[10px] font-black uppercase text-slate-400">Why it was called</p>
-            {entry.meta.reasons.map((r) => (
-              <p key={r} className="text-[11px] text-slate-600">
-                ✓ {r}
-              </p>
-            ))}
-          </div>
-        ) : null}
-        <DetailRow label="Called" value={`${fmtWhen(entry.openedAt)} at ₹${entry.entry}`} />
-        {entry.closed && entry.closedAt !== null && <DetailRow label="Closed" value={`${fmtWhen(entry.closedAt)} at ₹${exit}`} />}
-        {entry.targets.map((t, i) => (
-          <DetailRow key={i} label={`Target ${i + 1}`} value={`₹${t}  ${tickMarks(entry.targetTouches?.[i] ?? (entry.targetsHit[i] ? 1 : 0))}`} valueColor={entry.targetsHit[i] ? "#059669" : undefined} />
-        ))}
-        <DetailRow label="Stop Loss" value={effStop !== entry.stop ? `₹${effStop} (was ₹${entry.stop})` : `₹${entry.stop}`} valueColor="#E11D48" />
-        <div className="mt-4 -mx-5">
-          <PriceScale entry={entry} current={entry.closed ? exit : null} />
-          <ProfitEstimate trade={entry} current={entry.closed ? exit : null} lotSize={lot} />
-        </div>
-        <div className="mt-4">
-          <p className="text-xs font-bold uppercase text-slate-400 mb-2 flex items-center gap-1.5">
-            <CandlestickChart size={13} /> Chart
-          </p>
-          <CallChart candles={candles} entry={entry} loading={candlesLoading} errorReason={null} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function countdown(ms: number): string {
-  const m = Math.max(0, Math.round(ms / 60_000));
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 
 export function AiTwentyTwenty() {
   const { data: market } = useMarketStatus();
-  const [detail, setDetail] = useState<{ symbol: TradableSymbol; entry: TradeLogEntry } | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  // Fresh start for v2: calls from the old rules stay saved but are hidden unless asked for.
-  const [showOld, setShowOld] = useState(false);
-  const crude = useTwentyV2("CRUDEOIL");
-  const gas = useTwentyV2("NATURALGAS");
-  const board: Record<TradableSymbol, typeof crude> = { CRUDEOIL: crude, NATURALGAS: gas };
-  const { data: crudeSignal } = useSignal("CRUDEOIL");
-  const { data: gasSignal } = useSignal("NATURALGAS");
+  const crude = useTwentyV3("CRUDEOIL");
+  const gas = useTwentyV3("NATURALGAS");
+  const board = { CRUDEOIL: crude, NATURALGAS: gas };
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const sync = useSyncStatus();
-  // Re-worked out whenever the live read refreshes (every 15 s).
-  const win = useMemo(() => v2Window(Date.now()), [crude.read]);
-  const now = Date.now();
+  const [detail, setDetail] = useState<JournalRow | null>(null);
 
-  const twentyLogs = useMemo(() => {
-    const out: Record<string, TradeLogEntry[]> = {};
-    for (const [k, v] of Object.entries(tradeLogs)) if (k.startsWith(PREFIX)) out[k] = v;
-    return out;
-  }, [tradeLogs]);
-  const verifiedIds = useMemo(() => {
-    const out: Record<string, Set<string>> = {};
-    for (const [k, v] of Object.entries(twentyLogs)) out[k] = verifiedEntryIds(v);
-    return out;
-  }, [twentyLogs]);
-
-  // The live record of real v2 calls, in Rs per lot.
-  const v2Live = useMemo(() => {
-    let closed = 0;
-    let t1 = 0;
-    let wins = 0;
-    let net = 0;
-    for (const [k, v] of Object.entries(twentyLogs)) {
-      const { symbol, v2 } = parseKey(k);
-      if (!v2) continue;
-      for (const e of v) {
-        if (!e.closed || !verifiedIds[k]?.has(e.id)) continue;
-        const pnl = (exitPriceFor(e) - e.entry) * LAB_LOT[symbol];
-        closed++;
-        net += pnl;
-        if (e.targetsHit[0]) t1++;
-        if (pnl > 0) wins++;
-      }
-    }
-    return { closed, t1, wins, net };
-  }, [twentyLogs, verifiedIds]);
-  const oldPerf = useMemo(() => {
-    const old: Record<string, TradeLogEntry[]> = {};
-    for (const [k, v] of Object.entries(twentyLogs)) if (!parseKey(k).v2) old[k] = v.filter((e) => verifiedIds[k]?.has(e.id));
-    return computePerformanceStats(flattenClosedTrades(old));
-  }, [twentyLogs, verifiedIds]);
-  const allCalls = useMemo(() => {
-    const out: { key: string; symbol: TradableSymbol; v2: boolean; entry: TradeLogEntry; verified: boolean }[] = [];
-    for (const [k, v] of Object.entries(twentyLogs)) {
-      const { symbol, v2 } = parseKey(k);
-      for (const entry of v) out.push({ key: k, symbol, v2, entry, verified: verifiedIds[k]?.has(entry.id) ?? true });
-    }
-    return out.sort((a, b) => b.entry.openedAt - a.entry.openedAt);
-  }, [twentyLogs, verifiedIds]);
+  const rows = useMemo(() => SYMS.flatMap((sym) => (tradeLogs[v3Key(sym)] ?? []).map((entry) => ({ sym, entry }))).sort((a, b) => b.entry.openedAt - a.entry.openedAt), [tradeLogs]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 min-h-screen space-y-4" style={{ background: "linear-gradient(180deg,#ECFDF5,#F0F9FF 40%,#F8FAFC)" }}>
@@ -216,10 +72,10 @@ export function AiTwentyTwenty() {
         <div className="flex items-center justify-center gap-2">
           <Target size={24} className="text-emerald-500" />
           <h1 className="text-2xl font-black bg-gradient-to-r from-emerald-500 via-teal-500 to-sky-500 bg-clip-text text-transparent">Ai20-20</h1>
-          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white">v2 · measured</span>
+          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-gradient-to-r from-emerald-600 to-sky-600 text-white">v3 · trade manager</span>
         </div>
         <p className="text-[11.5px] text-slate-600 px-3 leading-snug">
-          Crude only, about one call a day, in the US session. Every call is on a finished 5-minute candle and must pass 4 checks. Calls reach your phone even with the app closed, and are tracked to target, stop or day end.
+          Few calls, only from setups that made money on years of real prices. Each call says exactly what to buy, how many lots for your plan, and where to get out — then guides every step and alerts your phone even with the app closed.
         </p>
         <p className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
           <span className={`w-1.5 h-1.5 rounded-full ${market?.isOpen ? "bg-emerald-500" : "bg-rose-500"}`} />
@@ -227,23 +83,12 @@ export function AiTwentyTwenty() {
         </p>
       </section>
 
-      <section className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 shadow-sm" style={{ background: win.open ? "linear-gradient(135deg,#059669,#10B981)" : "linear-gradient(135deg,#1E293B,#334155)" }}>
-        <BellRing size={18} className="text-white shrink-0" />
-        <div className="flex-1">
-          <p className="text-[12.5px] font-black text-white">{win.open ? "Calls window OPEN now" : "Calls window closed"}</p>
-          <p className="text-[10.5px] text-white/85">
-            {win.label} · 10:30 AM – 1:15 PM New York
-            {win.open ? ` · closes in ${countdown(win.closesAt - now)}` : win.opensAt ? ` · opens in ${countdown(win.opensAt - now)}` : ""}
-          </p>
-        </div>
-      </section>
-
       {(sync.pull === "failed" || sync.push === "failed") && (
         <section className="rounded-2xl px-3 py-2.5 bg-amber-50 border border-amber-300">
           <p className="text-[12px] font-black text-amber-900">⚠️ This phone's call record is not syncing with the server</p>
           {sync.error && <p className="text-[11px] text-amber-900 leading-snug mt-0.5">{sync.error}</p>}
           <p className="text-[10.5px] text-amber-800 leading-snug mt-1">
-            Until it syncs, calls the server records while the app is closed — and the server's day-end closes — will not show on this phone.{" "}
+            Calls the server records while the app is closed will not show here until it syncs.{" "}
             {sync.error && /access key/i.test(sync.error) && (
               <Link to="/settings" className="font-black underline">
                 Open Settings
@@ -253,83 +98,21 @@ export function AiTwentyTwenty() {
         </section>
       )}
 
-      <div className="grid grid-cols-3 gap-2">
-        <StatTile label="Calls today" value={String(crude.guard.callsToday)} gradient="linear-gradient(135deg,#0EA5E9,#06B6D4)" />
-        <StatTile label="Stops today" value={`${crude.guard.stopsToday} / 2`} gradient="linear-gradient(135deg,#F43F5E,#FB7185)" />
-        <StatTile label="v2 live record" value={v2Live.closed ? rs(v2Live.net) : "new"} gradient="linear-gradient(135deg,#10B981,#059669)" />
-      </div>
-
+      <TodayPlanCard s={crude} />
       <ExpiryAlertBanner />
-
-      <TwentyCallCard sym="CRUDEOIL" s={crude} expiry={crudeSignal?.expiry} />
-      <TwentyCallCard sym="NATURALGAS" s={gas} expiry={gasSignal?.expiry} />
-
-      <TwentyEdgePanel crude={{ record: crude.record, state: crude.recordState }} gas={{ record: gas.record, state: gas.recordState }} />
-
-      <div className="rounded-3xl bg-white shadow-md p-4 space-y-2">
-        <p className="text-xs font-black text-slate-700">v2 live record — real calls since v2 started</p>
-        {v2Live.closed === 0 ? (
-          <p className="text-[11px] text-slate-500">No v2 call has closed yet. Each one is added here with its result in rupees per lot.</p>
-        ) : (
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-xl bg-slate-50 py-2">
-              <p className="text-[9px] text-slate-400 font-bold">CLOSED</p>
-              <p className="text-sm font-black text-slate-700">{v2Live.closed}</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 py-2">
-              <p className="text-[9px] text-slate-400 font-bold">T1 HIT</p>
-              <p className="text-sm font-black text-slate-700">{Math.round((v2Live.t1 / v2Live.closed) * 100)}%</p>
-            </div>
-            <div className="rounded-xl bg-slate-50 py-2">
-              <p className="text-[9px] text-slate-400 font-bold">NET / LOT</p>
-              <p className="text-sm font-black" style={{ color: v2Live.net >= 0 ? "#059669" : "#E11D48" }}>
-                {rs(v2Live.net)}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {(() => {
-        const v2Calls = allCalls.filter((c) => c.v2);
-        const oldCount = allCalls.length - v2Calls.length;
-        const shownCalls = showOld ? allCalls : v2Calls;
-        return (
-          <div className="rounded-3xl bg-white shadow-md p-4">
-            <p className="text-xs font-bold mb-1 text-slate-700 flex items-center gap-1.5">
-              <Info size={13} className="text-sky-500" /> Call history{showOld ? "" : " — v2"}
-            </p>
-            <p className="text-[10px] text-slate-400 mb-3">Newest first — tap one for its chart and why it was called.</p>
-            {shownCalls.length === 0 && <p className="text-[11.5px] text-slate-500 text-center py-2">No v2 calls yet. Each one appears here the moment it is made.</p>}
-            <div className="space-y-2">
-              {(historyOpen ? shownCalls : shownCalls.slice(0, 6)).map(({ key, symbol, v2, entry, verified }) => (
-                <CallHistoryRow key={`${key}-${entry.id}`} symbol={symbol} entry={entry} verified={verified} v2={v2} onOpen={() => setDetail({ symbol, entry })} />
-              ))}
-              {shownCalls.length > 6 && (
-                <button onClick={() => setHistoryOpen((o) => !o)} className="w-full flex items-center justify-center gap-1 text-[11px] font-bold text-sky-600 py-1.5">
-                  {historyOpen ? "Show less" : `Show all ${shownCalls.length}`}
-                  <ChevronDown size={13} className={`transition-transform ${historyOpen ? "rotate-180" : ""}`} />
-                </button>
-              )}
-            </div>
-            {oldCount > 0 && (
-              <button onClick={() => setShowOld((o) => !o)} className="mt-2 w-full text-[10.5px] font-bold text-slate-400 underline underline-offset-2 py-1">
-                {showOld
-                  ? "Hide the old-rules calls"
-                  : `Show ${oldCount} call${oldCount === 1 ? "" : "s"} from the old rules (${oldPerf.totalClosed} closed, ${oldPerf.netPoints >= 0 ? "+" : ""}${oldPerf.netPoints} premium points)`}
-              </button>
-            )}
-          </div>
-        );
-      })()}
-
+      <V3CallCard s={crude} />
+      <V3CallCard s={gas} />
+      <MyPlanPanel />
+      <SetupsBoard crude={crude} gas={gas} />
+      <V3Journal rows={rows} lots={Math.max(1, crude.lots.lots)} onOpen={setDetail} />
+      <HowBuilt />
 
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">
-        Educational reference, not financial advice. Records are tests on past prices with costs taken off — real fills, spreads and fast markets differ. Never risk money you cannot afford to lose.
+        Educational reference, not financial advice. Test results are on past prices with costs taken off — real fills, spreads and fast markets differ, and no setup wins every day. Never risk money you cannot afford to lose.
       </p>
       <p className="text-[10px] text-slate-400 text-center -mt-2">App version: {appVersionLabel()}</p>
 
-      {detail && <CallDetailModal symbol={detail.symbol} entry={detail.entry} candles={board[detail.symbol].candles} candlesLoading={board[detail.symbol].loading} onClose={() => setDetail(null)} />}
+      {detail && <CallDetailModal symbol={detail.sym} entry={detail.entry} candles={board[detail.sym].candles} candlesLoading={board[detail.sym].loading} onClose={() => setDetail(null)} />}
     </div>
   );
 }

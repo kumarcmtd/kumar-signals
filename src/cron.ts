@@ -27,7 +27,8 @@ import { runExpiryAlertCheck } from "./expiryAlerts";
 import { captureOvernightAnchor } from "./globalMarkets";
 import { warmEnergyNews } from "./news";
 import { runNewsFlashCheck } from "./newsFlash";
-import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "./notify";
+import { runBestCallNotificationCheck } from "./notify";
+import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
@@ -48,6 +49,8 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
     ctx.waitUntil(
       (async () => {
         const busy = await runTradeLogAdvanceCheck(env);
+        // Ai20-20 v3: tell the phone each step the calls just reached (T1, stop, close).
+        await runTwentyV3StepCheck(env).catch(() => undefined);
         if (!busy) await warmTimeProfiles(env);
       })()
     );
@@ -68,11 +71,11 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   ctx.waitUntil(runBestCallNotificationCheck(env));
   ctx.waitUntil(runExpiryAlertCheck(env));
   // The Trade Card's own scorecard: log its TRADE calls, settle them on target / stop / day end,
-  // and push each. Then Ai20-20's MATCHED check, which skips a trade the card already pushed.
+  // and push each. Then Ai20-20 v3's call check (the setups the lab picked).
   ctx.waitUntil(
     runTradeCardTracker(env)
       .catch(() => undefined)
-      .then(() => runTwentyTwentyNotificationCheck(env))
+      .then(() => runTwentyV3CallCheck(env))
   );
   // EIA release in ~30 min; live data failing at the open.
   ctx.waitUntil(runImportantAlerts(env).catch(() => undefined));
