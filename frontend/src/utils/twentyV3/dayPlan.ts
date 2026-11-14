@@ -20,6 +20,9 @@ export const SETUP_WINDOWS: Record<V3SetupId, [number, number]> = {
   vwapPull: [10 * 60 + 5, 12 * 60 + 35],
   eia: [10 * 60 + 45, 10 * 60 + 45],
   eiaFade: [10 * 60 + 45, 10 * 60 + 45],
+  driveTrend: [9 * 60 + 30, 9 * 60 + 30],
+  driveBusy: [9 * 60 + 30, 9 * 60 + 30],
+  driveSteps: [9 * 60 + 30, 9 * 60 + 30],
 };
 
 const IST_MS = 5.5 * 3600_000;

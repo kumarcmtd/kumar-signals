@@ -10,7 +10,7 @@ import { SETUP_NAMES, type V3SetupId } from "../../utils/twentyV3/setups";
 import { V3_LIVE } from "../../utils/twentyV3/live";
 
 const signed = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`);
-const ORDER: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade"];
+const ORDER: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade", "driveTrend", "driveBusy", "driveSteps"];
 
 const ABOUT: Record<V3SetupId, string> = {
   trend: "v2's rule: the 5-minute strength turns strong on a finished candle, with the 1-hour trend, 10:30 AM–1:15 PM New York.",
@@ -23,6 +23,9 @@ const ABOUT: Record<V3SetupId, string> = {
   vwapPull: "In a 1-hour trend, buy the dip back to the day's VWAP.",
   eia: "Wednesday: follow a big move in the 15 minutes after the 10:30 EIA report.",
   eiaFade: "Wednesday: bet against a very big EIA move (research says the first jump partly reverses).",
+  driveTrend: "Opening drive (9:30), only when the 1-hour trend points the same way.",
+  driveBusy: "Opening drive (9:30), only on busy days (swings 1.2× normal) — research finds the first half hour predicts more on volatile days.",
+  driveSteps: "Opening drive (9:30) managed like every other call: stop to entry at T1, out at T3.",
 };
 
 function MarketBoard({ title, facts, live, s }: { title: string; facts: MarketFacts; live: V3SetupId[]; s: TwentyV3State }) {

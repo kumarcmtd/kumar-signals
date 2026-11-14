@@ -8,7 +8,7 @@ import { signalAt, type Prepared } from "../twentyLab";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
 
-export type V3SetupId = "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade";
+export type V3SetupId = "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps";
 
 /**
  * steps: T1 -> stop to entry, T2 -> stop to T1, out at T3 (the page's way).
@@ -45,7 +45,19 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   vwapPull: "VWAP pullback",
   eia: "EIA follow-through",
   eiaFade: "EIA fade",
+  driveTrend: "Opening drive + 1h trend",
+  driveBusy: "Opening drive on busy days",
+  driveSteps: "Opening drive, step exits",
 };
+
+/** Today's ATR at candle i against its median at the same clock minute over the previous 10 sessions. */
+export function busyRatio(p: Prepared, i: number): number | null {
+  const same: number[] = [];
+  for (let j = i - 1; j >= 0 && same.length < 10; j--) if (p.minute[j] === p.minute[i] && p.day[j] !== p.day[i] && Number.isFinite(p.atr[j])) same.push(p.atr[j]);
+  if (same.length < 5 || !Number.isFinite(p.atr[i])) return null;
+  const med = [...same].sort((a, b) => a - b)[Math.floor(same.length / 2)];
+  return med > 0 ? p.atr[i] / med : null;
+}
 
 const sameDay = (p: Prepared, a: number, b: number) => a >= 0 && p.day[a] === p.day[b];
 
@@ -101,12 +113,19 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
     return mk(side, stop, 1.5 * stop, "steps");
   }
 
-  if (id === "drive" || id === "drive60") {
-    if (sm !== (id === "drive" ? 25 : 55)) return null;
+  if (id === "drive" || id === "drive60" || id === "driveTrend" || id === "driveBusy" || id === "driveSteps") {
+    if (sm !== (id === "drive60" ? 55 : 25)) return null;
     const b = bandAt(f, i, k);
     if (!b) return null;
     const side = c.close > b.upper ? "CE" : c.close < b.lower ? "PE" : null;
-    return side ? mk(side, 2 * k * atr, 3 * k * atr, "hold") : null;
+    if (!side) return null;
+    // Round 2 (research-motivated): the 1-hour trend agrees; or a busy day (intraday
+    // predictability in crude is reported stronger on high-volatility days); or the
+    // page's step exits instead of holding to the close.
+    if (id === "driveTrend" && p.htf60[i] !== (side === "CE" ? 1 : -1)) return null;
+    if (id === "driveBusy" && !((busyRatio(p, i) ?? 0) >= 1.2)) return null;
+    if (id === "driveSteps") return mk(side, 2 * k * atr, 3 * k * atr, "steps");
+    return mk(side, 2 * k * atr, 3 * k * atr, "hold");
   }
 
   if (id === "vwapPull") {

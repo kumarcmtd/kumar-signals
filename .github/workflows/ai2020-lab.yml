@@ -20,8 +20,8 @@ on:
       - ".github/workflows/ai2020-lab.yml"
 
 concurrency:
-  group: ai2020-lab
-  cancel-in-progress: true
+  group: ai2020-lab-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   lab:
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        market: [CRUDEOIL, NATURALGAS]
+        market: [CRUDEOIL]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

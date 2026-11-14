@@ -23,6 +23,8 @@ import type { Candle } from "../frontend/src/types";
 import { dukascopy, mcx, yahoo } from "./lab-data";
 
 const CANDIDATES: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade"];
+/** Round 2: three research-motivated refinements of the best round-1 idea, judged by the same pick rule. */
+const ROUND2: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps"];
 const PICK = { minTrades: 80, minAvgRs: 100, minPf: 1.15 };
 const GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 };
 const FROM = process.env.LAB_FROM ?? "2022-01-01";
@@ -86,10 +88,10 @@ function header(d: Data): string {
 function candidateTable(d: Data, lines: string[]): Map<V3SetupId, V3Trade[]> {
   lines.push(header(d), HEAD);
   const res = new Map<V3SetupId, V3Trade[]>();
-  for (const id of CANDIDATES) {
+  for (const id of [...CANDIDATES, ...ROUND2]) {
     const t = run(d, [id]);
     res.set(id, t);
-    lines.push(row(SETUP_NAMES[id], t, d));
+    lines.push(row(`${ROUND2.includes(id) ? "R2 · " : ""}${SETUP_NAMES[id]}`, t, d));
   }
   // The v3 replay of "trend" must equal the v2 lab's own replay.
   const v2 = simulate(d.ctx.p, V2_RULES, d.sym);
@@ -197,9 +199,18 @@ async function main() {
       else recent.push(load(`MCX ${sym} 5-min (the app's own candles)`, sym, m, false));
     }
     let picked: V3SetupId[] = [];
+    let yearsRes: Map<V3SetupId, V3Trade[]> | null = null;
     if (years) {
       const res = candidateTable(years, lines);
       picked = pick(years, res);
+      lines.push("\n**Every setup by year** (calls / average Rs):");
+      for (const id of [...CANDIDATES, ...ROUND2]) lines.push(`- ${SETUP_NAMES[id]}: ${byYear(res.get(id)!)}`);
+      for (const kk of [0.8, 1.2]) {
+        const t = run(years, ["drive"], {}, kk);
+        const st = statsOf(t, years.ctx.p, "x");
+        lines.push(`- Opening drive with the band x${kk}: ${st.trades} calls, avg ${fmt(st.avgRs)}, PF ${st.profitFactor ?? "—"}, halves ${fmt(st.firstHalfAvg)} / ${fmt(st.secondHalfAvg)}`);
+      }
+      yearsRes = res;
       lines.push(`\n**Picked for ${sym}: ${picked.length ? picked.map((id) => SETUP_NAMES[id]).join(", ") : "none"}**`);
       deepDive(years, picked, lines);
       ensemble(years, picked, lines, "Picked setups together");
@@ -209,6 +220,16 @@ async function main() {
     for (const d of recent) {
       candidateTable(d, lines);
       ensemble(d, picked, lines, "Picked setups together");
+      // Same dates on the multi-year source: does the data source change the answer?
+      if (yearsRes && years) {
+        const from = d.ctx.p.c[0].date;
+        const to = d.ctx.p.c[d.ctx.p.c.length - 1].date;
+        lines.push(`\nSame dates (${from.slice(0, 10)} to ${to.slice(0, 10)}) on the multi-year source:`);
+        for (const id of [...CANDIDATES, ...ROUND2]) {
+          const t = yearsRes.get(id)!.filter((x) => x.openAt >= from && x.openAt <= to);
+          lines.push(`- ${SETUP_NAMES[id]}: ${t.length} calls, avg ${fmt(avg(t))}, win ${t.length ? Math.round((t.filter((x) => x.rs > 0).length / t.length) * 100) : 0}%`);
+        }
+      }
     }
     console.log(lines.join("\n"));
   }
