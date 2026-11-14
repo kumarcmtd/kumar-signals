@@ -11,9 +11,10 @@
 import { LAB_LOT, type LabSym } from "../frontend/src/utils/twentyLab";
 import { expiryBlock } from "../frontend/src/utils/twentyV2";
 import { callWindow } from "../frontend/src/utils/twentyV3/dayPlan";
-import { measureV3, openV3Entry, readV3, v3Guard, v3Key, V3_LIVE } from "../frontend/src/utils/twentyV3/live";
+import { isPracticeSetup, measureV3, openV3Entry, readV3, v3Guard, v3Key, V3_ACTIVE } from "../frontend/src/utils/twentyV3/live";
 import { stepsOf, v3CallPushText, v3DaySummaryText, v3StepPushText } from "../frontend/src/utils/twentyV3/push";
 import { buildTicket, pickStrike } from "../frontend/src/utils/twentyV3/ticket";
+import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
 import { cachePut, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
 import { NTFY_TOPIC_KV_KEY, sendNtfyNotification } from "./notify";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
@@ -27,7 +28,7 @@ const istDate = (ms: number) => new Date(ms + IST_MS).toISOString().slice(0, 10)
 
 /** The live setups re-measured on the prior days' real MCX candles; once a day, cached. */
 async function v3Record(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number): Promise<{ trades: number; avgRs: number | null } | null> {
-  const kvKey = `twenty3:rec:${sym}:${V3_LIVE[sym].join("+")}:${istDate(now)}`;
+  const kvKey = `twenty3:rec:${sym}:${V3_ACTIVE[sym].join("+")}:${istDate(now)}`;
   const cached = await env.COMMODITY_KV.get(kvKey);
   if (cached) {
     try {
@@ -52,7 +53,7 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): 
   for (const symbol of OPTION_SYMBOLS) {
     const sym = symbol as LabSym;
     const say = (t: string) => report.push(`${NAME[sym]}: ${t}`);
-    const setups = V3_LIVE[sym];
+    const setups = V3_ACTIVE[sym];
     if (!setups.length) {
       say("no v3 setup passed the lab for this market -- no calls.");
       continue;
@@ -119,7 +120,7 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): 
         continue;
       }
       const record = await v3Record(env, token, fut.instrument_key, sym, now).catch(() => null);
-      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record });
+      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup) });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {
@@ -136,11 +137,12 @@ export async function runTwentyV3StepCheck(env: Env, now: number = Date.now()): 
   if (!topic) return ["no ntfy topic saved."];
   for (const symbol of OPTION_SYMBOLS) {
     const sym = symbol as LabSym;
-    if (!V3_LIVE[sym].length) continue;
+    if (!V3_ACTIVE[sym].length) continue;
     const log = await readTradeLogKey(env, v3Key(sym));
     const last = log[log.length - 1];
     if (last && now - last.openedAt < 20 * 3600_000) {
-      for (const step of stepsOf(last)) {
+      const session = mcxSessionAt(now);
+      for (const step of stepsOf(last, session.isOpen ? session.closeMin - session.minutes : null)) {
         const mark = `notified:TWENTY3-STEP:${last.id}:${step}`;
         if (await env.COMMODITY_KV.get(mark)) continue;
         if (!(await cachePut(env.COMMODITY_KV, mark, "1", { expirationTtl: 2 * 86_400 }))) continue;
@@ -151,7 +153,7 @@ export async function runTwentyV3StepCheck(env: Env, now: number = Date.now()): 
     }
     // Day summary: once on a weekday, after today's window has closed and nothing is still running.
     // (callWindow moves on to the next weekday once today's window is over.)
-    const w = callWindow(V3_LIVE[sym], now);
+    const w = callWindow(V3_ACTIVE[sym], now);
     const wd = new Date(now + IST_MS).getUTCDay();
     const windowOver = wd >= 1 && wd <= 5 && (!w || istDate(w.from) !== istDate(now));
     const today = log.filter((e) => istDate(e.openedAt) === istDate(now));

@@ -15,7 +15,7 @@ import { useAppStore } from "../store/appStore";
 import { useMyPlan } from "../store/myPlanStore";
 import { advanceOpenEntry, liveLtpFor, MAX_HISTORY } from "../utils/tradeLogCore";
 import { expiryBlock } from "../utils/twentyV2";
-import { liveCtx, openV3Entry, readV3, v3Guard, v3Key, V3_LIVE, type V3Record } from "../utils/twentyV3/live";
+import { liveCtx, openV3Entry, readV3, v3Guard, v3Key, V3_ACTIVE, type V3Record } from "../utils/twentyV3/live";
 import { buildTicket, pickStrike } from "../utils/twentyV3/ticket";
 import { dayBudget, lotsFor } from "../utils/twentyV3/riskPlan";
 import { measureV3Async } from "../utils/twentyV3/recordClient";
@@ -35,7 +35,7 @@ export function useTwentyV3(sym: LabSym) {
   const log = useMemo(() => tradeLogs[key] ?? [], [tradeLogs, key]);
   const older = olderKeys(sym).flatMap((k) => tradeLogs[k] ?? []);
   const openNow = [...log, ...older].some((e) => !e.closed);
-  const on = V3_LIVE[sym].length > 0;
+  const on = V3_ACTIVE[sym].length > 0;
   const live = on || openNow;
 
   const candlesQ = useQuery({

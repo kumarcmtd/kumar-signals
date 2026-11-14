@@ -3,7 +3,7 @@ import { prepare, simulate, type Prepared } from "../utils/twentyLab";
 import { V2_RULES } from "../utils/twentyV2";
 import { computeFeatures, sessionMinute, NOISE_MIN_DAYS } from "../utils/twentyV3/features";
 import { entryAt, firstEntry, type V3Ctx } from "../utils/twentyV3/setups";
-import { readV3, V3_LIVE } from "../utils/twentyV3/live";
+import { readV3, V3_ACTIVE } from "../utils/twentyV3/live";
 import { simulateV3 } from "../utils/twentyV3/sim";
 import type { Candle } from "../types";
 
@@ -89,6 +89,11 @@ describe("v3 setups", () => {
     expect(e?.side).toBe("CE");
     expect(e?.manage).toBe("trail5");
     expect(entryAt(ctx, i + 1, "noise")).toBeNull(); // 9:35 is not a half hour
+    // The same strong first half hour is a big opening drive: hold to the close, stop only.
+    const drive = entryAt(ctx, i, "driveStrict");
+    expect(drive?.side).toBe("CE");
+    expect(drive?.manage).toBe("hold");
+    expect(entryAt(ctx, i + 6, "driveStrict")).toBeNull(); // only at 9:30
     const t = simulateV3(ctx, ["noise"], { sym: "CRUDEOIL" }).filter((x) => ctx.p.day[x.openIdx] === ctx.p.day[i]);
     expect(t[0].exit).toBe("trail");
     expect(t[0].openIdx).toBe(i);
@@ -145,7 +150,7 @@ describe("v3 setups", () => {
       }
     const p = prepare(c, true);
     const full: V3Ctx = { p, f: computeFeatures(p) };
-    const setups = V3_LIVE.CRUDEOIL;
+    const setups = V3_ACTIVE.CRUDEOIL;
     let compared = 0;
     let fired = 0;
     for (let i = c.length - 2 * 179; i < c.length; i++) {
@@ -154,8 +159,16 @@ describe("v3 setups", () => {
       if (!lab && !inWin) continue;
       const barEnd = Date.parse(c[i].date) + 5 * 60_000;
       const live = readV3(c.slice(0, i + 1), "CRUDEOIL", barEnd + 1000);
-      expect(live.entry?.setup ?? null).toBe(lab?.setup ?? null);
-      expect(live.entry?.side ?? null).toBe(lab?.side ?? null);
+      if (live.entry && live.barEnd !== barEnd) {
+        // A one-moment setup acted on its candle a few minutes late: the lab must have fired THERE.
+        const j = c.findIndex((k) => Date.parse(k.date) + 5 * 60_000 === live.barEnd);
+        const at = firstEntry(full, j, setups);
+        expect(at?.setup).toBe(live.entry.setup);
+        expect(at?.side).toBe(live.entry.side);
+      } else {
+        expect(live.entry?.setup ?? null).toBe(lab?.setup ?? null);
+        expect(live.entry?.side ?? null).toBe(lab?.side ?? null);
+      }
       compared++;
       if (lab) fired++;
     }

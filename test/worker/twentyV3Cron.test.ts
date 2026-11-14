@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { prepare } from "../../frontend/src/utils/twentyLab";
 import { computeFeatures } from "../../frontend/src/utils/twentyV3/features";
 import { firstEntry } from "../../frontend/src/utils/twentyV3/setups";
-import { V3_LIVE } from "../../frontend/src/utils/twentyV3/live";
+import { V3_ACTIVE } from "../../frontend/src/utils/twentyV3/live";
 import { callWindow } from "../../frontend/src/utils/twentyV3/dayPlan";
 import type { Candle } from "../../frontend/src/types";
 
@@ -84,9 +84,9 @@ function findCall(all: Candle[]) {
   const p = prepare(all, true);
   const ctx = { p, f: computeFeatures(p) };
   for (let i = all.length - 1; i > 2400; i--) {
-    const e = firstEntry(ctx, i, V3_LIVE.CRUDEOIL);
+    const e = firstEntry(ctx, i, V3_ACTIVE.CRUDEOIL);
     const barEnd = Date.parse(all[i].date) + 5 * 60_000;
-    if (e && callWindow(V3_LIVE.CRUDEOIL, barEnd + 20_000)?.open) return { i, barEnd, e };
+    if (e && callWindow(V3_ACTIVE.CRUDEOIL, barEnd + 20_000)?.open) return { i, barEnd, e };
   }
   return null;
 }

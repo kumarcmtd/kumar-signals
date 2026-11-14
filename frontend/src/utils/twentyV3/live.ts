@@ -12,8 +12,19 @@ import { entryAt, SETUP_NAMES, type V3Ctx, type V3Entry, type V3SetupId } from "
 import { simulateV3, type V3Trade } from "./sim";
 import type { V3Ticket } from "./ticket";
 
-/** Setups that make live calls, best first (set from the lab's pick). */
-export const V3_LIVE: Record<LabSym, V3SetupId[]> = { CRUDEOIL: ["trend"], NATURALGAS: [] };
+/**
+ * Setups the engine runs, best first. The 10-year lab (labFacts.ts) found no
+ * setup with a proven edge after costs: the big opening drive made +Rs 205 a
+ * call over ten years in total, but it was flat on the five years no rule was
+ * chosen on. So it runs as PRACTICE -- tracked and alerted like a real call,
+ * marked "no real money" -- until it proves itself live. Gas: nothing came close.
+ */
+export const V3_ACTIVE: Record<LabSym, V3SetupId[]> = { CRUDEOIL: ["driveStrict"], NATURALGAS: [] };
+
+/** Active setups that are practice only (paper trades): not proven on the holdout years. */
+export const V3_PRACTICE: ReadonlySet<V3SetupId> = new Set<V3SetupId>(["driveStrict"]);
+
+export const isPracticeSetup = (id: V3SetupId) => V3_PRACTICE.has(id);
 
 /** Same day guards as the lab's "together" replay. */
 export const V3_GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 } as const;
@@ -89,9 +100,9 @@ export function liveCtx(candles: Candle[], now: number): V3Ctx | null {
 }
 
 export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(), ctxIn?: V3Ctx | null): V3Read {
-  const setups = V3_LIVE[sym];
+  const setups = V3_ACTIVE[sym];
   const none = (headline: string, state: V3Read["state"]): V3Read => ({ state, entry: null, barEnd: null, fut: null, setups: [], regime: null, headline });
-  if (!setups.length) return none("No setup passed the lab for this market — no calls here. Use the crude oil calls.", "off");
+  if (!setups.length) return none("Every setup lost money on years of gas prices — no gas calls.", "off");
   const w = callWindow(setups, now);
   const ctx = ctxIn === undefined ? liveCtx(candles, now) : ctxIn;
   if (!ctx) return none(w && !w.open ? `Calls only ${w.label}.` : "Waiting for the 5-minute candles to load.", w && !w.open ? "window_closed" : "no_data");
@@ -100,15 +111,30 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
   const barEnd = Date.parse(p.c[i].date) + BAR_MS;
   const stale = now - barEnd > 15 * 60_000;
   let entry: V3Entry | null = null;
+  let at = i;
   if (!stale) {
     for (const id of setups) {
       entry = entryAt(ctx, i, id);
       if (entry) break;
     }
+    // One-moment setups (the 9:30 opening drive): if that candle was already
+    // passed by a newer one (a late check or feed), still act on it for 15 minutes.
+    for (let j = i - 1; !entry && j >= i - 2 && j >= 0 && p.day[j] === p.day[i]; j--) {
+      if (now - (Date.parse(p.c[j].date) + BAR_MS) > 15 * 60_000) break;
+      for (const id of setups) {
+        if (SETUP_WINDOWS[id][0] !== SETUP_WINDOWS[id][1]) continue;
+        entry = entryAt(ctx, j, id);
+        if (entry) {
+          at = j;
+          break;
+        }
+      }
+    }
   }
+  const callEnd = Date.parse(p.c[at].date) + BAR_MS;
   const statuses = setups.map((id) => ({ id, name: SETUP_NAMES[id], fired: entry?.setup === id, line: statusLine(ctx, i, id, entry?.setup === id) }));
   const base = { barEnd, fut: p.c[i].close, setups: statuses, regime: readRegime(p, ctx.f) };
-  if (entry) return { ...base, state: "call", entry, headline: `${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(barEnd)} candle.` };
+  if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
   if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: `Calls only ${w.label}.${w.from > now ? ` Next window opens ${istClock(w.from)}.` : ""}` };
   return { ...base, state: "watch", entry: null, headline: "Watching — no setup has fired yet." };
 }
@@ -144,11 +170,13 @@ export function v3Guard(log: TradeLogEntry[], side: "CE" | "PE" | null, sym: Lab
 export function openV3Entry(t: V3Ticket, read: V3Read): TradeLogEntry {
   const e = read.entry!;
   const why = read.setups.find((s) => s.id === e.setup);
-  return openNewEntry({ strike: t.strike, optSide: t.side, entry: t.entry, targets: t.targets, stop: t.stop }, read.barEnd ?? Date.now(), {
-    label: `Ai20-20 v3 · ${SETUP_NAMES[e.setup]}`,
+  const entry = openNewEntry({ strike: t.strike, optSide: t.side, entry: t.entry, targets: t.targets, stop: t.stop }, read.barEnd ?? Date.now(), {
+    label: `Ai20-20 v3 · ${SETUP_NAMES[e.setup]}${isPracticeSetup(e.setup) ? " (practice)" : ""}`,
     reasons: [why?.name ?? e.setup, read.regime?.text ?? ""].filter(Boolean),
     confirmingTimeframes: ["5m", "1h"],
   });
+  // Hold setups keep their first stop and sell at the close, as the lab replayed them.
+  return { ...entry, ...(e.manage === "hold" ? { manage: "hold" as const } : {}), ...(isPracticeSetup(e.setup) ? { practice: true } : {}) };
 }
 
 // ---- the measured record on recent real candles ----
@@ -162,7 +190,7 @@ export interface V3Record {
 }
 
 export function measureV3(history: Candle[], sym: LabSym): V3Record | null {
-  const setups = V3_LIVE[sym];
+  const setups = V3_ACTIVE[sym];
   if (history.length < MIN_BARS || !setups.length) return null;
   const p = prepare(history, { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
   const ctx: V3Ctx = { p, f: computeFeatures(p) };

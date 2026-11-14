@@ -187,8 +187,11 @@ test("each trigger runs only its own jobs; Best Call pushes run with Ai20-20", a
   vi.resetModules();
   const calls: string[] = [];
   vi.doMock("../../src/notify", () => ({
-    runTwentyTwentyNotificationCheck: async () => { calls.push("twenty"); },
     runBestCallNotificationCheck: async () => { calls.push("bestcall"); },
+  }));
+  vi.doMock("../../src/twentyV3Cron", () => ({
+    runTwentyV3CallCheck: async () => { calls.push("twenty"); },
+    runTwentyV3StepCheck: async () => { calls.push("steps"); },
   }));
   vi.doMock("../../src/expiryAlerts", () => ({ runExpiryAlertCheck: async () => { calls.push("expiry"); } }));
   vi.doMock("../../src/globalMarkets", () => ({ captureOvernightAnchor: async () => { calls.push("anchor"); } }));
@@ -203,11 +206,12 @@ test("each trigger runs only its own jobs; Best Call pushes run with Ai20-20", a
 
   expect(await run(cron.CRON_FAST)).toEqual(["anchor", "bestcall", "expiry", "twenty"]);
   // Trades open -> the run's CPU goes to them, and the profile waits.
-  expect(await run(cron.CRON_TRADES)).toEqual(["trades"]);
+  // Ai20-20 v3's step alerts follow every trade advance (T1, stop, close).
+  expect(await run(cron.CRON_TRADES)).toEqual(["steps", "trades"]);
   tradesOpen = false;
-  expect(await run(cron.CRON_TRADES)).toEqual(["profile", "trades"]);
+  expect(await run(cron.CRON_TRADES)).toEqual(["profile", "steps", "trades"]);
   expect(await run(cron.CRON_WARM)).toEqual(["news"]);
-  vi.doUnmock("../../src/notify"); vi.doUnmock("../../src/expiryAlerts"); vi.doUnmock("../../src/globalMarkets");
+  vi.doUnmock("../../src/notify"); vi.doUnmock("../../src/twentyV3Cron"); vi.doUnmock("../../src/expiryAlerts"); vi.doUnmock("../../src/globalMarkets");
   vi.doUnmock("../../src/tradeLogCron"); vi.doUnmock("../../src/news"); vi.doUnmock("../../src/profiles");
   vi.resetModules();
 });

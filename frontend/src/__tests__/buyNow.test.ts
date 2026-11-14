@@ -74,3 +74,14 @@ describe("Can I buy now?", () => {
     expect(minutesToMcxClose(Date.parse("2026-11-11T19:00:00Z"))).toBeNull(); // 00:30 IST: shut
   });
 });
+
+describe("hold-to-close calls", () => {
+  test("after T1 the advice keeps the first stop instead of moving it to entry", () => {
+    const a = buyNowAdvice({ entry: 178.5, stop: 170.5, targets: [190.5, 197.7, 205.5], targetsHit: [true, false, false], closed: false, live: 186.4, lot: 100, minutesToClose: 200, hold: true });
+    expect(a.holding).toMatch(/Keep your stop at ₹170.50/);
+    expect(a.holding).not.toMatch(/Move your stop/);
+    // Back at entry is not "stop reached" for a hold call.
+    const b = buyNowAdvice({ entry: 178.5, stop: 170.5, targets: [190.5, 197.7, 205.5], targetsHit: [true, false, false], closed: false, live: 178, lot: 100, minutesToClose: 200, hold: true });
+    expect(b.state).not.toBe("over");
+  });
+});

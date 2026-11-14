@@ -55,15 +55,25 @@ export function buyNowAdvice(p: {
   signalNow?: string | null;
   /** Minutes until a time-limited call (Ai-Trust quick trade) closes itself. */
   exitByMinutes?: number | null;
+  /** A hold-to-close call: the stop never moves and targets are only profit marks. */
+  hold?: boolean;
 }): BuyNowAdvice {
   const { entry, stop, targets, targetsHit, live, lot } = p;
   const t1 = targets[0];
   const buyUpTo = Number((entry + BUY_UP_TO_SHARE * (t1 - entry)).toFixed(2));
-  const holdStop = targetsHit[1] ? `Already in? Your stop is now T1 (${p2(t1)}) — profit locked.` : targetsHit[0] ? `Already in? Move your stop to your entry (${p2(entry)}) — no loss from here. Book some near T2 (${p2(targets[1])}).` : null;
+  const holdStop = p.hold
+    ? targetsHit[0]
+      ? `Already in? Keep your stop at ${p2(stop)} — this call holds to the close (booking some profit is your choice).`
+      : null
+    : targetsHit[1]
+      ? `Already in? Your stop is now T1 (${p2(t1)}) — profit locked.`
+      : targetsHit[0]
+        ? `Already in? Move your stop to your entry (${p2(entry)}) — no loss from here. Book some near T2 (${p2(targets[1])}).`
+        : null;
 
   if (p.closed) return { state: "over", title: "CALL OVER — don't enter", detail: "This call has already closed. Wait for the next one.", buyUpTo: null, holding: null };
   if (live === null) return { state: "no_price", title: "CAN'T CHECK — no live price", detail: "The option price is not available right now. Don't enter blind.", buyUpTo: null, holding: null };
-  const effStop = targetsHit[1] ? t1 : targetsHit[0] ? entry : stop;
+  const effStop = p.hold ? stop : targetsHit[1] ? t1 : targetsHit[0] ? entry : stop;
   if (live <= effStop) {
     return { state: "over", title: "STOP REACHED — don't enter", detail: `${p2(live)} is at the stop (${p2(effStop)}). This call is finishing — wait for the next one.`, buyUpTo: null, holding: "Already in? Exit — the stop is hit." };
   }

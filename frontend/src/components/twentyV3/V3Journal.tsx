@@ -59,10 +59,10 @@ export function V3Journal({ rows, lots, onOpen }: { rows: JournalRow[]; lots: nu
   return (
     <section className="rounded-3xl bg-white shadow-md p-4 space-y-3">
       <p className="text-[13px] font-black text-slate-800 flex items-center gap-1.5">
-        <NotebookPen size={15} className="text-amber-500" /> My v3 journal — real calls
+        <NotebookPen size={15} className="text-amber-500" /> My v3 journal{rows.length && rows.every((r) => r.entry.practice) ? " — practice calls" : ""}
       </p>
       {stats.n === 0 ? (
-        <p className="text-[11.5px] text-slate-500">No v3 call has closed yet. Each call lands here with its result, so you can judge v3 on real results, not promises.</p>
+        <p className="text-[11.5px] text-slate-500">No v3 call has closed yet. Each one lands here with its result — practice calls too — so v3 is judged on what really happens, not on promises.</p>
       ) : (
         <div className="grid grid-cols-3 gap-2 text-center">
           {[
@@ -98,7 +98,8 @@ export function V3Journal({ rows, lots, onOpen }: { rows: JournalRow[]; lots: nu
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-xs font-bold truncate text-slate-700">
-                    {r.sym === "CRUDEOIL" ? "Crude" : "Gas"} {e.strike} {e.optSide} <span className="text-[10px] font-semibold text-slate-400">· {(e.meta?.label ?? "").replace("Ai20-20 v3 · ", "")}</span>
+                    {e.practice && <span className="mr-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">PAPER</span>}
+                    {r.sym === "CRUDEOIL" ? "Crude" : "Gas"} {e.strike} {e.optSide} <span className="text-[10px] font-semibold text-slate-400">· {(e.meta?.label ?? "").replace("Ai20-20 v3 · ", "").replace(" (practice)", "")}</span>
                   </p>
                   <p className="text-[10px] text-slate-400">
                     {fmtWhen(e.openedAt)} at ₹{e.entry}

@@ -11,34 +11,43 @@ import type { V3Ticket } from "./ticket";
 const inr = (n: number) => `Rs ${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "-"}${inr(n)}`;
 
-export function v3CallPushText(p: { displayName: string; t: V3Ticket; setup: V3SetupId; regime: string | null; record: { trades: number; avgRs: number | null } | null }): { title: string; body: string } {
+export function v3CallPushText(p: { displayName: string; t: V3Ticket; setup: V3SetupId; regime: string | null; record: { trades: number; avgRs: number | null } | null; hold?: boolean; practice?: boolean }): { title: string; body: string } {
   const { t } = p;
   const lots = lotsFor(DEFAULT_PLAN, t.riskPerLot, t.premiumPerLot);
   const lines = [
+    p.practice ? "PRACTICE CALL — paper only. This setup has not proven itself on 10 years of prices; no real money until its live record does." : "",
     `BUY ${p.displayName} ${t.strike} ${t.side} @ Rs ${t.entry} (don't pay above Rs ${t.maxPay}) · 1 lot = ${t.lotSize}`,
-    `Stop Rs ${t.stop} (${signed(-t.riskPerLot)}/lot) | T1 Rs ${t.targets[0]} (${signed(t.targetRsPerLot[0])}/lot) | T2 Rs ${t.targets[1]} | T3 Rs ${t.targets[2]}`,
-    `Size: ${lots.lots > 0 ? `${lots.lots} lot${lots.lots > 1 ? "s" : ""}` : "skip (stop too wide)"} for a Rs 1,00,000 account risking 1% (${inr(perTradeRs(DEFAULT_PLAN))}) — the app uses your own plan.`,
+    p.hold
+      ? `Stop Rs ${t.stop} (${signed(-t.riskPerLot)}/lot), fixed | profit marks Rs ${t.targets[0]} (${signed(t.targetRsPerLot[0])}/lot) · Rs ${t.targets[1]} · Rs ${t.targets[2]}`
+      : `Stop Rs ${t.stop} (${signed(-t.riskPerLot)}/lot) | T1 Rs ${t.targets[0]} (${signed(t.targetRsPerLot[0])}/lot) | T2 Rs ${t.targets[1]} | T3 Rs ${t.targets[2]}`,
+    p.practice ? "" : `Size: ${lots.lots > 0 ? `${lots.lots} lot${lots.lots > 1 ? "s" : ""}` : "skip (stop too wide)"} for a Rs 1,00,000 account risking 1% (${inr(perTradeRs(DEFAULT_PLAN))}) — the app uses your own plan.`,
     `Setup: ${SETUP_NAMES[p.setup]}. ${t.strikeWhy}`,
     p.regime ? `Market: ${p.regime}.` : "",
     p.record && p.record.trades > 0 && p.record.avgRs !== null ? `Live setups on recent MCX candles: ${p.record.trades} test calls, average ${signed(p.record.avgRs)}/lot (a test, not live fills).` : "",
-    "At T1 move the stop to your entry. Sell before MCX close — never overnight.",
+    p.hold ? "HOLD TO THE CLOSE: the stop stays fixed; targets are profit marks only. Sell at the MCX close — never overnight." : "At T1 move the stop to your entry. Sell before MCX close — never overnight.",
   ];
-  return { title: `⚡ Ai20-20 v3: ${p.displayName} ${t.strike} ${t.side} @ Rs ${t.entry}`, body: lines.filter(Boolean).join("\n") };
+  return { title: `${p.practice ? "📝 PRACTICE · " : "⚡ "}Ai20-20 v3: ${p.displayName} ${t.strike} ${t.side} @ Rs ${t.entry}`, body: lines.filter(Boolean).join("\n") };
 }
 
-export type V3Step = "t1" | "t2" | "closed";
+export type V3Step = "t1" | "t2" | "bell" | "closed";
 
-/** Steps of a call that deserve an alert and have happened. */
-export function stepsOf(e: TradeLogEntry): V3Step[] {
+/** Steps of a call that deserve an alert and have happened. minutesToClose: until the MCX bell (null = unknown). */
+export function stepsOf(e: TradeLogEntry, minutesToClose: number | null = null): V3Step[] {
   const out: V3Step[] = [];
   if (e.targetsHit[0]) out.push("t1");
   if (e.targetsHit[1]) out.push("t2");
+  if (!e.closed && e.manage === "hold" && minutesToClose !== null && minutesToClose <= 15) out.push("bell");
   if (e.closed) out.push("closed");
   return out;
 }
 
 export function v3StepPushText(displayName: string, e: TradeLogEntry, step: V3Step, lotSize: number): { title: string; body: string; priority: "urgent" | "high" } {
-  const name = `${displayName} ${e.strike} ${e.optSide}`;
+  const name = `${e.practice ? "practice " : ""}${displayName} ${e.strike} ${e.optSide}`;
+  if (step === "bell") return { title: `🔔 Sell before the bell: ${name}`, body: `MCX closes in about 15 minutes. This call holds to the close — SELL IT NOW if you hold it (stop was Rs ${e.stop}).`, priority: "urgent" };
+  if (e.manage === "hold" && (step === "t1" || step === "t2")) {
+    const mark = step === "t1" ? e.targets[0] : e.targets[1];
+    return { title: `📈 Profit mark reached: ${name}`, body: `Premium reached Rs ${mark} (${signed((mark - e.entry) * lotSize)}/lot).\nThis call HOLDS TO THE CLOSE: keep the stop at Rs ${e.stop}; sell at the MCX close. (Booking some profit here is your choice.)`, priority: "high" };
+  }
   if (step === "t1") return { title: `✅ T1 hit: ${name}`, body: `Premium reached T1 Rs ${e.targets[0]} (${signed((e.targets[0] - e.entry) * lotSize)}/lot).\nMOVE YOUR STOP UP TO YOUR ENTRY Rs ${e.entry} — no loss possible from here.\nNext: T2 Rs ${e.targets[1]}.`, priority: "urgent" };
   if (step === "t2") return { title: `✅ T2 hit: ${name}`, body: `Premium reached T2 Rs ${e.targets[1]}.\nMove your stop to T1 Rs ${e.targets[0]} — profit locked. Last target T3 Rs ${e.targets[2]}.`, priority: "urgent" };
   const exit = exitPriceFor(e);

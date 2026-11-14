@@ -13,6 +13,7 @@ import { buyNowAdvice, minutesToMcxClose } from "../../utils/buyNow";
 import { PriceScale, fmtWhen } from "../CallCardKit";
 import { BuyNowBanner } from "../BuyNowBanner";
 import { AiChart } from "../trust/AiChart";
+import { isPracticeSetup } from "../../utils/twentyV3/live";
 
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${inr(n)}`;
@@ -31,13 +32,19 @@ function Level({ label, value, sub, color }: { label: string; value: string; sub
 }
 
 function Steps({ open }: { open: TradeLogEntry }) {
-  const steps = [
+  const steps = open.manage === "hold"
+    ? [
+        { done: true, text: `Bought at ₹${open.entry}. Stop ₹${open.stop} — it stays there, it does not move.` },
+        { done: open.targetsHit[0], text: `Hold. ₹${open.targets[0]} / ₹${open.targets[1]} / ₹${open.targets[2]} are profit marks, not exits — big opening moves tend to run into the close.` },
+        { done: false, text: "Sell at the MCX close (the app alerts you 15 minutes before) — never carry it overnight." },
+      ]
+    : [
     { done: true, text: `Bought at ₹${open.entry}. Stop ₹${open.stop}.` },
     { done: open.targetsHit[0], text: `At T1 ₹${open.targets[0]}: move the stop up to your entry ₹${open.entry} — no loss possible after that.` },
     { done: open.targetsHit[1], text: `At T2 ₹${open.targets[1]}: move the stop to T1 ₹${open.targets[0]} — profit locked.` },
     { done: open.targetsHit[2], text: `At T3 ₹${open.targets[2]}: sell everything.` },
     { done: false, text: "Still open near MCX close? Sell at the close — never carry it overnight." },
-  ];
+      ];
   const next = steps.findIndex((s) => !s.done);
   return (
     <div className="space-y-1">
@@ -62,21 +69,29 @@ function RunningCall({ s, open, older }: { s: TwentyV3State; open: TradeLogEntry
   const [logged, setLogged] = useState(false);
   const [chart, setChart] = useState(false);
   const createTrade = useCreateTrade();
-  const order = `BUY ${NAME[s.sym]} ${open.strike} ${open.optSide} — ${lots} lot${lots > 1 ? "s" : ""} (${qty} qty) @ ₹${open.entry}\nStop ₹${stop} · T1 ₹${open.targets[0]} · T2 ₹${open.targets[1]} · T3 ₹${open.targets[2]}\nAfter T1 move the stop to entry. Sell before MCX close.`;
+  const order =
+    open.manage === "hold"
+      ? `BUY ${NAME[s.sym]} ${open.strike} ${open.optSide} — ${lots} lot${lots > 1 ? "s" : ""} (${qty} qty) @ ₹${open.entry}\nStop ₹${stop} (fixed). Hold — sell at the MCX close.`
+      : `BUY ${NAME[s.sym]} ${open.strike} ${open.optSide} — ${lots} lot${lots > 1 ? "s" : ""} (${qty} qty) @ ₹${open.entry}\nStop ₹${stop} · T1 ₹${open.targets[0]} · T2 ₹${open.targets[1]} · T3 ₹${open.targets[2]}\nAfter T1 move the stop to entry. Sell before MCX close.`;
   return (
     <div className="space-y-2.5">
+      {open.practice && (
+        <p className="text-[11.5px] font-black text-amber-900 rounded-xl bg-amber-100 border border-amber-300 px-2.5 py-2">
+          📝 PRACTICE CALL — paper only. Follow it on paper to learn the moves; this setup has not proven itself on 10 years of prices, so no real money.
+        </p>
+      )}
       <div className="rounded-2xl p-3" style={{ background: open.optSide === "CE" ? "#ECFDF5" : "#FFF1F2" }}>
         <p className="text-[10px] font-black uppercase text-slate-500">{open.meta?.label ?? "Ai20-20"}{older ? " · earlier rules" : ""}</p>
         <p className="text-[16px] font-black text-slate-800">
-          BUY {lots} lot{lots > 1 ? "s" : ""} · {open.strike} {open.optSide} @ ₹{open.entry}
+          {open.practice ? "PAPER BUY" : "BUY"} {lots} lot{lots > 1 ? "s" : ""} · {open.strike} {open.optSide} @ ₹{open.entry}
         </p>
         <p className="text-[10.5px] text-slate-500">
-          {qty} qty · called {fmtWhen(open.openedAt)} · {s.lots.lots > 0 ? s.lots.why : "Your plan allows 0 lots for this stop — shown at 1 lot."}
+          {qty} qty · called {fmtWhen(open.openedAt)} · {open.practice ? `sized as your plan would size it (${s.lots.lots > 0 ? s.lots.why : "0 lots — stop wider than your per-trade limit"})` : s.lots.lots > 0 ? s.lots.why : "Your plan allows 0 lots for this stop — shown at 1 lot."}
         </p>
       </div>
-      <BuyNowBanner advice={buyNowAdvice({ entry: open.entry, stop: open.stop, targets: open.targets, targetsHit: open.targetsHit, closed: open.closed, live: ltp, lot, minutesToClose: minutesToMcxClose() })} />
+      <BuyNowBanner advice={buyNowAdvice({ entry: open.entry, stop: open.stop, targets: open.targets, targetsHit: open.targetsHit, closed: open.closed, live: ltp, lot, minutesToClose: minutesToMcxClose(), hold: open.manage === "hold" })} />
       <div className="grid grid-cols-3 gap-2">
-        <Level label={open.targetsHit[0] ? "Stop (moved)" : "Stop"} value={`₹${stop}`} sub={signed((stop - open.entry) * qty)} color="#E11D48" />
+        <Level label={open.targetsHit[0] && open.manage !== "hold" ? "Stop (moved)" : "Stop"} value={`₹${stop}`} sub={signed((stop - open.entry) * qty)} color="#E11D48" />
         <Level label="Target 1" value={`₹${open.targets[0]}`} sub={signed((open.targets[0] - open.entry) * qty)} color="#059669" />
         <Level label="Target 2" value={`₹${open.targets[1]}`} sub={signed((open.targets[1] - open.entry) * qty)} color="#059669" />
         <Level label="Target 3" value={`₹${open.targets[2]}`} sub={signed((open.targets[2] - open.entry) * qty)} color="#059669" />
@@ -103,14 +118,14 @@ function RunningCall({ s, open, older }: { s: TwentyV3State; open: TradeLogEntry
           disabled={logged}
           onClick={() =>
             createTrade.mutate(
-              { symbol: s.sym, optSide: open.optSide, strike: open.strike, entryPrice: open.entry, stopLoss: open.stop, target: open.targets[0], quantity: lots, lotSize: lot, source: "master-ai", notes: `Logged from ${open.meta?.label ?? "Ai20-20 v3"}` },
+              { symbol: s.sym, optSide: open.optSide, strike: open.strike, entryPrice: open.entry, stopLoss: open.stop, target: open.targets[0], quantity: lots, lotSize: lot, source: "master-ai", notes: `${open.practice ? "PAPER trade — " : ""}Logged from ${open.meta?.label ?? "Ai20-20 v3"}` },
               { onSuccess: () => setLogged(true) }
             )
           }
           className="flex-1 px-3 py-2 rounded-xl text-xs font-black text-white disabled:opacity-60"
           style={{ background: open.optSide === "CE" ? "#059669" : "#E11D48" }}
         >
-          {logged ? "Logged in portfolio ✓" : "I took it — log in portfolio"}
+          {logged ? "Logged in portfolio ✓" : open.practice ? "Log my paper trade" : "I took it — log in portfolio"}
         </button>
       </div>
       <button onClick={() => setChart((v) => !v)} className="w-full py-2.5 rounded-xl text-xs font-black text-white" style={{ background: "linear-gradient(135deg,#7C3AED,#DB2777)" }}>
@@ -126,7 +141,8 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
   const olderOpen = [...s.older].reverse().find((e) => !e.closed) ?? null;
   const open = s.running ?? olderOpen;
   const side = open?.optSide ?? r.entry?.side ?? null;
-  const pill = open ? "CALL RUNNING" : r.state === "call" ? "NEW CALL" : r.state === "watch" ? "WATCHING" : r.state === "window_closed" ? "WAITING" : r.state === "off" ? "NO CALLS" : "LOADING";
+  const practice = open ? !!open.practice : r.entry ? isPracticeSetup(r.entry.setup) : false;
+  const pill = open ? (practice ? "PRACTICE RUNNING" : "CALL RUNNING") : r.state === "call" ? (practice ? "PRACTICE CALL" : "NEW CALL") : r.state === "watch" ? "WATCHING" : r.state === "window_closed" ? "WAITING" : r.state === "off" ? "NO CALLS" : "LOADING";
   const hot = !!open || r.state === "call";
   const accent = hot ? (side === "CE" ? "#059669" : "#E11D48") : r.state === "off" ? "#64748B" : "#0EA5E9";
   const Dir = side === "PE" ? TrendingDown : TrendingUp;
@@ -146,7 +162,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
       <div className="p-4 space-y-3">
         {r.state === "off" && !open && (
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 space-y-1.5">
-            <p className="text-[11px] text-slate-600 leading-snug">None of the 10 setups made money on years of gas prices, so v3 makes no gas calls. Gas moves cleaner on the 1-hour chart.</p>
+            <p className="text-[11px] text-slate-600 leading-snug">Every strategy tested lost money on 2022–26 gas prices, so v3 makes no gas calls. Gas moves cleaner on the 1-hour chart.</p>
             <Link to="/ai-today" className="inline-block mt-1 text-[11.5px] font-black text-white px-3 py-1.5 rounded-xl" style={{ background: "linear-gradient(135deg,#F97316,#DB2777)" }}>
               🎯 Open Ai-Today — gas 1-hour plan
             </Link>
@@ -154,7 +170,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
         )}
         {!open && r.setups.length > 0 && (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-black uppercase text-slate-400">Live setups — what each is waiting for</p>
+            <p className="text-[10px] font-black uppercase text-slate-400">{r.setups.some((x) => isPracticeSetup(x.id)) ? "Practice setup — what it is waiting for" : "Live setups — what each is waiting for"}</p>
             {r.setups.map((x) => (
               <div key={x.id} className="rounded-xl bg-slate-50 border border-slate-100 px-2.5 py-2">
                 <p className="text-[11.5px] font-black text-slate-800">{x.fired ? "✅ " : ""}{x.name}</p>

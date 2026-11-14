@@ -78,6 +78,13 @@ export interface TradeLogEntry {
   // entries closed before this field existed fall back to the level-based
   // exitPriceFor() approximation.
   exitPrice?: number;
+  // "hold": a call whose rules keep the ORIGINAL stop and hold to the session
+  // close (Ai20-20 v3's opening drive) -- targets are profit marks only, the
+  // stop never moves and T3 does not close it. Absent = the usual steps.
+  manage?: "hold";
+  // A practice (paper) call: tracked and alerted like any other, but from a
+  // setup that has not proven itself -- no real money is suggested for it.
+  practice?: boolean;
 }
 
 // Every page's own trade log is a rolling window capped at this many entries
@@ -98,6 +105,7 @@ export interface ProjLike {
 // to breakeven closes it neutral; once Target 2 is touched the floor rises
 // to the Target 1 level. Every card/row showing "SL ₹..." should show THIS.
 export function effectiveStopFor(entry: TradeLogEntry): number {
+  if (entry.manage === "hold") return entry.stop;
   return entry.targetsHit[1] ? entry.targets[0] : entry.targetsHit[0] ? entry.entry : entry.stop;
 }
 
@@ -161,14 +169,15 @@ export function advanceOpenEntry(entry: TradeLogEntry, liveLtp: number | null, n
   const highWaterMark = Math.max(priorHigh, liveLtp);
   const highChanged = highWaterMark !== priorHigh;
 
-  if (targetsHit[2]) {
+  if (targetsHit[2] && entry.manage !== "hold") {
     if (entry.status === "target3_hit") return entry;
     return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status: "target3_hit", closed: true, closedAt: entry.closedAt ?? now, exitPrice: liveLtp };
   }
 
-  const effectiveStop = targetsHit[1] ? entry.targets[0] : targetsHit[0] ? entry.entry : entry.stop;
+  const hold = entry.manage === "hold";
+  const effectiveStop = hold ? entry.stop : targetsHit[1] ? entry.targets[0] : targetsHit[0] ? entry.entry : entry.stop;
   if (liveLtp <= effectiveStop) {
-    const status: TradeLogStatus = targetsHit[1] ? "stopped_after_t1" : targetsHit[0] ? "stopped_breakeven" : "sl_hit";
+    const status: TradeLogStatus = hold ? "sl_hit" : targetsHit[1] ? "stopped_after_t1" : targetsHit[0] ? "stopped_breakeven" : "sl_hit";
     return { ...entry, targetsHit, targetTouches, targetAboveState: aboveNow, highWaterMark, status, closed: true, closedAt: now, exitPrice: liveLtp };
   }
 

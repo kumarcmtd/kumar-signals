@@ -4,9 +4,9 @@
 
 import type { Candle } from "../../types";
 import type { LabSym } from "../twentyLab";
-import { measureV3, V3_LIVE, type V3Record } from "./live";
+import { measureV3, V3_ACTIVE, type V3Record } from "./live";
 
-const CACHE = (sym: LabSym) => `twenty.v3record.${V3_LIVE[sym].join("+")}.${sym}`;
+const CACHE = (sym: LabSym) => `twenty.v3record.${V3_ACTIVE[sym].join("+")}.${sym}`;
 let worker: Worker | null = null;
 let broken = false;
 let seq = 0;

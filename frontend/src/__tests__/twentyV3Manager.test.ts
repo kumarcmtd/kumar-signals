@@ -137,3 +137,30 @@ describe("phone alerts", () => {
     expect(v3DaySummaryText("Crude Oil", [], 100).title).toMatch(/no call today/);
   });
 });
+
+describe("hold-to-close calls (opening drive)", () => {
+  test("the stop never moves, T3 does not close it, the first stop does", async () => {
+    const { advanceOpenEntry, effectiveStopFor } = await import("../utils/tradeLogCore");
+    const now = ist("2026-11-16T20:10:00");
+    let e = entry({ manage: "hold" });
+    e = advanceOpenEntry(e, 163, now); // past T1
+    expect(e.targetsHit[0]).toBe(true);
+    expect(effectiveStopFor(e)).toBe(142);
+    e = advanceOpenEntry(e, 180, now + 60_000); // past T3: still running
+    expect(e.closed).toBe(false);
+    e = advanceOpenEntry(e, 150, now + 120_000); // back at entry: a steps call would be out
+    expect(e.closed).toBe(false);
+    e = advanceOpenEntry(e, 141, now + 180_000);
+    expect(e.closed).toBe(true);
+    expect(e.status).toBe("sl_hit");
+  });
+
+  test("alerts: profit marks say hold; 15 minutes before the bell says sell", () => {
+    const e = entry({ manage: "hold", targetsHit: [true, false, false] });
+    expect(stepsOf(e, 40)).toEqual(["t1"]);
+    expect(stepsOf(e, 12)).toEqual(["t1", "bell"]);
+    expect(v3StepPushText("Crude Oil", e, "t1", 100).body).toMatch(/HOLDS TO THE CLOSE/);
+    expect(v3StepPushText("Crude Oil", e, "bell", 100).body).toMatch(/SELL IT NOW/);
+    expect(stepsOf(entry({ targetsHit: [true, false, false] }), 12)).toEqual(["t1"]); // steps calls: no bell alert
+  });
+});

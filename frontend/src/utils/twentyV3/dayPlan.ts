@@ -60,6 +60,9 @@ export function callWindow(setups: readonly V3SetupId[], now: number = Date.now(
   if (!setups.length) return null;
   const fromEt = Math.min(...setups.map((s) => SETUP_WINDOWS[s][0]));
   const toEt = Math.max(...setups.map((s) => SETUP_WINDOWS[s][1]));
+  // A one-moment setup (the 9:30 opening drive) stays "open" 10 minutes so the
+  // 5-minute server check and a late data feed can still act on that candle.
+  const grace = fromEt === toEt ? 10 : 0;
   let dayStart = Math.floor((now - nyOffsetMs(now)) / 86_400_000) * 86_400_000;
   for (let k = 0; k < 8; k++, dayStart += 86_400_000) {
     const wd = new Date(dayStart).getUTCDay();
@@ -67,7 +70,8 @@ export function callWindow(setups: readonly V3SetupId[], now: number = Date.now(
     const from = etInstant(dayStart, fromEt);
     const istMidnight = Math.floor((from + IST_MS) / 86_400_000) * 86_400_000 - IST_MS;
     const to = Math.min(etInstant(dayStart, toEt), istMidnight + IST_LAST_CALL * 60_000);
-    if (now <= to) return { open: now >= from, from, to, label: `${istClock(from)} – ${istClock(to)} IST` };
+    const until = to + grace * 60_000;
+    if (now <= until) return { open: now >= from, from, to: until, label: grace ? `at ${istClock(from)} IST` : `${istClock(from)} – ${istClock(to)} IST` };
   }
   return null;
 }
@@ -86,7 +90,7 @@ export function dayEvents(options: OptionsAnalytics | undefined, now: number = D
   const dayStartEt = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
   if (istWd === 3) {
     const at = etInstant(dayStartEt, 10 * 60 + 30);
-    out.push({ label: `EIA weekly crude stocks report at ${istClock(at)} IST — prices jump; no new trend calls 10 minutes before to 20 after.`, tone: "warn" });
+    out.push({ label: `EIA weekly crude stocks report at ${istClock(at)} IST — prices can jump hard; a running call can swing either way.`, tone: "warn" });
   }
   if (istWd === 2) out.push({ label: "API's crude stock estimate comes out after MCX closes tonight — tomorrow can open with a jump.", tone: "info" });
   if (options && !options.error && options.expiry) {
