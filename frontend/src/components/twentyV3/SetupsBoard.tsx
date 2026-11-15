@@ -6,11 +6,12 @@ import { useState } from "react";
 import { FlaskConical, ChevronDown } from "lucide-react";
 import type { TwentyV3State } from "../../hooks/useTwentyV3";
 import { V3_LAB, type PeriodFact, type SetupFact } from "../../utils/twentyV3/labFacts";
+import type { EngineDef } from "../../utils/twentyV3/engines";
 import { SETUP_NAMES, type V3SetupId } from "../../utils/twentyV3/setups";
-import { isPracticeSetup, V3_ACTIVE } from "../../utils/twentyV3/live";
+import { isPracticeSetup } from "../../utils/twentyV3/live";
 
 const signed = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`);
-const ORDER: V3SetupId[] = ["driveStrict", "drive", "trend", "driveTrend", "driveBusy", "driveSteps", "drive60", "noise", "noise30", "orb", "orbTrend", "vwapPull", "eia", "eiaFade"];
+const ORDER: V3SetupId[] = ["driveStrict", "drive", "trend", "driveTrend", "driveBusy", "driveSteps", "drive60", "noise", "noise30", "orb", "orbTrend", "vwapPull", "eia", "eiaFade", "fastTurnUS", "fastTurnDay", "fastBreakUS", "fastBreakDay", "fastNoiseUS"];
 
 const ABOUT: Record<V3SetupId, string> = {
   trend: "The v2 rule: the 5-minute strength turns strong on a finished candle, with the 1-hour trend, 10:30 AM–1:15 PM New York.",
@@ -50,7 +51,7 @@ const CHIP: Record<"LIVE" | "PRACTICE" | "NOT USED", string> = {
 };
 
 function SetupCard({ id, f, s, gas, market }: { id: V3SetupId; f: SetupFact; s: TwentyV3State; gas?: boolean; market: string }) {
-  const on = V3_ACTIVE[gas ? "NATURALGAS" : "CRUDEOIL"].includes(id);
+  const on = s.def.active[gas ? "NATURALGAS" : "CRUDEOIL"].includes(id);
   const chip = on ? (isPracticeSetup(id) ? "PRACTICE" : "LIVE") : "NOT USED";
   const rec = on ? s.record?.bySetup[id] : undefined;
   return (
@@ -66,7 +67,7 @@ function SetupCard({ id, f, s, gas, market }: { id: V3SetupId; f: SetupFact; s: 
       <Period label="2017–21 (never used to choose)" p={f.holdout} />
       {rec && (
         <p className="text-[10.5px] text-slate-600">
-          {`Last ${rec.days} days of real MCX: ${rec.trades} test calls, avg `}
+          {`Last ${rec.days} days of real MCX: ${rec.trades} test call${rec.trades === 1 ? "" : "s"}, avg `}
           <b style={{ color: (rec.avgRs ?? 0) >= 0 ? "#059669" : "#E11D48" }}>{signed(rec.avgRs)}</b>
         </p>
       )}
@@ -77,10 +78,11 @@ function SetupCard({ id, f, s, gas, market }: { id: V3SetupId; f: SetupFact; s: 
 type Row = { id: V3SetupId; f: SetupFact; gas: boolean };
 const rowsOf = (facts: Partial<Record<V3SetupId, SetupFact>>, gas: boolean): Row[] => ORDER.filter((id) => facts[id]).map((id) => ({ id, f: facts[id]!, gas }));
 
-export function SetupsBoard({ crude, gas }: { crude: TwentyV3State; gas: TwentyV3State }) {
+export function SetupsBoard({ crude, gas, facts = V3_LAB, years = 10 }: { crude: TwentyV3State; gas: TwentyV3State; facts?: { crude: Partial<Record<V3SetupId, SetupFact>>; gas: Partial<Record<V3SetupId, SetupFact>> }; years?: number }) {
   const [showRejected, setShowRejected] = useState(false);
-  const all = [...rowsOf(V3_LAB.crude, false), ...rowsOf(V3_LAB.gas, true)];
-  const isOn = (r: Row) => V3_ACTIVE[r.gas ? "NATURALGAS" : "CRUDEOIL"].includes(r.id);
+  const def: EngineDef = crude.def;
+  const all = [...rowsOf(facts.crude, false), ...rowsOf(facts.gas, true)];
+  const isOn = (r: Row) => def.active[r.gas ? "NATURALGAS" : "CRUDEOIL"].includes(r.id);
   const active = all.filter(isOn);
   const rejected = all.filter((r) => !isOn(r));
   const card = (r: Row) => <SetupCard key={`${r.gas ? "g" : "c"}-${r.id}`} id={r.id} f={r.f} s={r.gas ? gas : crude} gas={r.gas} market={r.gas ? "Gas" : "Crude"} />;
@@ -96,7 +98,7 @@ export function SetupsBoard({ crude, gas }: { crude: TwentyV3State; gas: TwentyV
       <div className="p-4 pt-2 space-y-2">
         {active.length ? active.map(card) : <p className="text-[11px] text-slate-500">No setup is active.</p>}
         <button onClick={() => setShowRejected((o) => !o)} className="w-full flex items-center justify-between gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-left">
-          <span className="text-[11.5px] font-bold text-slate-600">{`${rejected.length} setups rejected after the 10-year cost audit — ${showRejected ? "tap to hide" : "tap to inspect"}`}</span>
+          <span className="text-[11.5px] font-bold text-slate-600">{`${rejected.length} setups rejected after the ${years}-year cost audit — ${showRejected ? "tap to hide" : "tap to inspect"}`}</span>
           <ChevronDown size={15} className={`text-slate-400 shrink-0 transition-transform ${showRejected ? "rotate-180" : ""}`} />
         </button>
         {showRejected && (

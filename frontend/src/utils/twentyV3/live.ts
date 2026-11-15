@@ -11,25 +11,18 @@ import { callWindow, istClock, readRegime, SETUP_WINDOWS, type Regime } from "./
 import { entryAt, SETUP_NAMES, type V3Ctx, type V3Entry, type V3SetupId } from "./setups";
 import { simulateV3, type V3Trade } from "./sim";
 import type { V3Ticket } from "./ticket";
+import { ENGINE_V3, isPracticeAnywhere, type EngineDef } from "./engines";
 
-/**
- * Setups the engine runs, best first. The 10-year lab (labFacts.ts) found no
- * setup with a proven edge after costs: the big opening drive made +Rs 205 a
- * call over ten years in total, but it was flat on the five years no rule was
- * chosen on. So it runs as PRACTICE -- tracked and alerted like a real call,
- * marked "no real money" -- until it proves itself live. Gas: nothing came close.
- */
-export const V3_ACTIVE: Record<LabSym, V3SetupId[]> = { CRUDEOIL: ["driveStrict"], NATURALGAS: [] };
-
-/** Active setups that are practice only (paper trades): not proven on the holdout years. */
-export const V3_PRACTICE: ReadonlySet<V3SetupId> = new Set<V3SetupId>(["driveStrict"]);
-
-export const isPracticeSetup = (id: V3SetupId) => V3_PRACTICE.has(id);
+// Which setups run, and which are practice only, is decided per page in
+// engines.ts (from the lab). These names keep Ai20-20's existing callers working.
+export const V3_ACTIVE = ENGINE_V3.active;
+export const V3_PRACTICE = ENGINE_V3.practice;
+export const isPracticeSetup = (id: V3SetupId) => isPracticeAnywhere(id);
 
 /** Same day guards as the lab's "together" replay. */
 export const V3_GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 } as const;
 
-export const v3Key = (sym: LabSym) => `TWENTY20-${sym}-V3`;
+export const v3Key = (sym: LabSym) => ENGINE_V3.key(sym);
 
 const BAR_MS = 5 * 60_000;
 const IST_MS = 5.5 * 3600_000;
@@ -64,6 +57,13 @@ function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean): strin
   const [from, to] = SETUP_WINDOWS[id];
   const et = p.etMinute[i] + 5; // the candle's end
   if (fired) return "Fired on this candle.";
+  if (id.startsWith("fast")) {
+    const sp = f.speed[i];
+    const speedTxt = Number.isFinite(sp) ? `Speed ${sp}${sp >= 70 ? " ✓" : " — needs 70+"}` : "Speed not ready";
+    const trend = p.htf60[i] === 1 ? "1-hour trend up" : p.htf60[i] === -1 ? "1-hour trend down" : "1-hour trend flat";
+    const what = id.startsWith("fastBreak") ? "a 15-minute close beyond the last hour's range" : id.startsWith("fastTurn") ? "a fresh 5-minute strength turn" : "a half-hour close outside the normal range";
+    return `${speedTxt} · waiting for ${what} with the trend · ${trend}.`;
+  }
   if (id === "trend") {
     const sc = p.score[i];
     const s = Number.isFinite(sc) ? Math.round(sc) : null;
@@ -106,10 +106,10 @@ export function liveCtx(candles: Candle[], now: number): V3Ctx | null {
   return { p, f };
 }
 
-export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(), ctxIn?: V3Ctx | null): V3Read {
-  const setups = V3_ACTIVE[sym];
+export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(), ctxIn?: V3Ctx | null, def: EngineDef = ENGINE_V3): V3Read {
+  const setups = def.active[sym];
   const none = (headline: string, state: V3Read["state"]): V3Read => ({ state, entry: null, barEnd: null, fut: null, setups: [], regime: null, headline });
-  if (!setups.length) return none("Every setup lost money on years of gas prices — no gas calls.", "off");
+  if (!setups.length) return none(def.offText, "off");
   const w = callWindow(setups, now);
   const ctx = ctxIn === undefined ? liveCtx(candles, now) : ctxIn;
   if (!ctx) return none(w && !w.open ? `Calls only ${w.label}.` : "Waiting for the 5-minute candles to load.", w && !w.open ? "window_closed" : "no_data");
@@ -182,11 +182,11 @@ export function v3Guard(log: TradeLogEntry[], side: "CE" | "PE" | null, sym: Lab
 }
 
 /** The log entry for a call; id and time come from the signal candle so page and server write the same one. */
-export function openV3Entry(t: V3Ticket, read: V3Read): TradeLogEntry {
+export function openV3Entry(t: V3Ticket, read: V3Read, def: EngineDef = ENGINE_V3): TradeLogEntry {
   const e = read.entry!;
   const why = read.setups.find((s) => s.id === e.setup);
   const entry = openNewEntry({ strike: t.strike, optSide: t.side, entry: t.entry, targets: t.targets, stop: t.stop }, read.barEnd ?? Date.now(), {
-    label: `Ai20-20 v3 · ${SETUP_NAMES[e.setup]}${isPracticeSetup(e.setup) ? " (practice)" : ""}`,
+    label: `${def.name} · ${SETUP_NAMES[e.setup]}${isPracticeSetup(e.setup) ? " (practice)" : ""}`,
     reasons: [why?.name ?? e.setup, read.regime?.text ?? ""].filter(Boolean),
     confirmingTimeframes: ["5m", "1h"],
   });
@@ -204,13 +204,14 @@ export interface V3Record {
   trades: V3Trade[];
 }
 
-export function measureV3(history: Candle[], sym: LabSym): V3Record | null {
-  const setups = V3_ACTIVE[sym];
+export function measureV3(history: Candle[], sym: LabSym, def: EngineDef = ENGINE_V3): V3Record | null {
+  const setups = def.active[sym];
   if (history.length < MIN_BARS || !setups.length) return null;
-  const p = prepare(history, { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
+  // All-day setups need the strength score on every candle; the rest only in v2's window.
+  const p = prepare(history, setups.some((id) => id.endsWith("Day")) ? true : { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
   const ctx: V3Ctx = { p, f: computeFeatures(p) };
   const trades = simulateV3(ctx, setups, { sym, ...V3_GUARDS });
   const bySetup: Partial<Record<V3SetupId, LabStats>> = {};
   for (const id of setups) bySetup[id] = statsOf(simulateV3(ctx, [id], { sym }), p, SETUP_NAMES[id]);
-  return { from: p.c[0].date, to: p.c[p.c.length - 1].date, together: statsOf(trades, p, "Ai20-20 v3"), bySetup, trades };
+  return { from: p.c[0].date, to: p.c[p.c.length - 1].date, together: statsOf(trades, p, def.name), bySetup, trades };
 }

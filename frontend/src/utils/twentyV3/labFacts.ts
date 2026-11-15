@@ -60,3 +60,34 @@ export const V3_LAB = {
   /** The practice setup over all ten years. */
   bigDriveTenYears: { calls: 449, netRs: 92045, avgRs: 205, recentAvgRs: 441, holdoutAvgRs: -10, winningMonths: "26 of 56" },
 };
+
+/** Ai-Super Fast (Speed 70+), same lab, 15 Nov 2026. */
+export const FAST_LAB = {
+  ranAt: "15 Nov 2026",
+  crude: {
+    fastTurnUS: { recent: f(880, 35, -65, 0.94), holdout: f(1069, 31, -201, 0.7) },
+    fastTurnDay: { recent: f(1238, 34, 5, 1), holdout: f(1386, 28, -236, 0.65) },
+    fastBreakUS: { recent: f(908, 33, -153, 0.87), holdout: f(992, 31, -148, 0.78) },
+    fastBreakDay: { recent: f(1431, 33, -49, 0.96), holdout: f(1529, 30, -141, 0.78) },
+    fastNoiseUS: { recent: f(753, 33, -209, 0.84), holdout: f(865, 34, -126, 0.82) },
+  } as Partial<Record<V3SetupId, SetupFact>>,
+  gas: {
+    fastTurnUS: { recent: f(866, 36, -217, 0.83) },
+    fastTurnDay: { recent: f(1654, 31, -173, 0.85) },
+    fastBreakUS: { recent: f(817, 37, -112, 0.91) },
+    fastBreakDay: { recent: f(1693, 31, -160, 0.86) },
+    fastNoiseUS: { recent: f(701, 38, -108, 0.91) },
+  } as Partial<Record<V3SetupId, SetupFact>>,
+  /** How often the Speed gauge read 70+ (share of 5-minute candles), crude 2022-26. */
+  speed70Share: 21,
+  /** The live setup on the last 50 days of real NYMEX futures. */
+  liveLast50: { calls: 16, avgRs: 510 },
+  /** The live setup by year, crude 2022-26 (Rs a call). */
+  liveByYear: [
+    ["2022", -125],
+    ["2023", 48],
+    ["2024", -250],
+    ["2025", -342],
+    ["2026", 975],
+  ] as [string, number][],
+};

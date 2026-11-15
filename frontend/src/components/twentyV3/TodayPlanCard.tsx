@@ -4,7 +4,7 @@
 import { CalendarClock, Gauge, ShieldCheck, AlertTriangle, Info } from "lucide-react";
 import type { TwentyV3State } from "../../hooks/useTwentyV3";
 import { callWindow, dayEvents } from "../../utils/twentyV3/dayPlan";
-import { isPracticeSetup, V3_ACTIVE } from "../../utils/twentyV3/live";
+import { isPracticeSetup } from "../../utils/twentyV3/live";
 import { perTradeRs } from "../../utils/twentyV3/riskPlan";
 
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
@@ -15,8 +15,9 @@ const countdown = (ms: number) => {
 
 export function TodayPlanCard({ s }: { s: TwentyV3State }) {
   const now = Date.now();
-  const w = callWindow(V3_ACTIVE[s.sym], now);
-  const noun = V3_ACTIVE[s.sym].every(isPracticeSetup) ? "Practice call" : "Calls";
+  const active = s.def.active[s.sym];
+  const w = callWindow(active, now);
+  const noun = active.every(isPracticeSetup) ? (active.length > 1 || w?.label.includes("–") ? "Practice calls" : "Practice call") : "Calls";
   const events = dayEvents(s.options, now);
   const day = new Date(now + 5.5 * 3600_000).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" });
   const istDate = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
@@ -33,7 +34,7 @@ export function TodayPlanCard({ s }: { s: TwentyV3State }) {
           <CalendarClock size={16} />
           {w ? (w.open ? `${noun} window OPEN · closes in ${countdown(w.to - now)}` : nextDay ? `Next ${noun.toLowerCase()} ${nextDay} ${w.label}` : `${noun} ${w.label}`) : "No calls on this market"}
         </p>
-        {w && !w.open && w.from > now && <p className="text-[11px] opacity-85">{nextDay ? "Nothing today. " : ""}In {countdown(w.from - now)} — the app alerts your phone the moment a call comes (only on days with a big opening move).</p>}
+        {w && !w.open && w.from > now && <p className="text-[11px] opacity-85">{nextDay ? "Nothing today. " : ""}In {countdown(w.from - now)} — the app alerts your phone the moment a call comes ({s.def.callsWhen}).</p>}
         {w?.open && <p className="text-[11px] opacity-85">{w.label} — the New York open, when crude moves most.</p>}
       </div>
       <div className="p-4 space-y-2.5">

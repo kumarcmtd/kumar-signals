@@ -10,32 +10,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { useHistory5m, useOptionsAnalytics } from "../api/hooks";
+import { useHistory5m, useNewsTrade, useOptionsAnalytics } from "../api/hooks";
 import { useAppStore } from "../store/appStore";
 import { useMyPlan } from "../store/myPlanStore";
 import { advanceOpenEntry, liveLtpFor, MAX_HISTORY } from "../utils/tradeLogCore";
 import { expiryBlock } from "../utils/twentyV2";
-import { liveCtx, openV3Entry, readV3, v3Guard, v3Key, V3_ACTIVE, type V3Record } from "../utils/twentyV3/live";
-import { buildTicket, pickStrike } from "../utils/twentyV3/ticket";
+import { liveCtx, openV3Entry, readV3, v3Guard, type V3Record } from "../utils/twentyV3/live";
+import { ENGINE_V3, type EngineDef } from "../utils/twentyV3/engines";
+import { liquidityGate, newsGate, type GateResult } from "../utils/twentyV3/gates";
+import { newsPulseFor } from "../utils/newsPulse";
+import { buildTicket, pickStrike, type StrikeChoice } from "../utils/twentyV3/ticket";
 import { dayBudget, lotsFor } from "../utils/twentyV3/riskPlan";
 import { measureV3Async } from "../utils/twentyV3/recordClient";
 import { LAB_LOT, type LabSym } from "../utils/twentyLab";
 
 /** Earlier rule sets' logs: a call still running there keeps being managed until it closes. */
-export const olderKeys = (sym: LabSym) => [`TWENTY20-${sym}-LIVE`, `TWENTY20-${sym}-V2`];
+export const olderKeys = (sym: LabSym) => ENGINE_V3.olderKeys(sym);
 
 const CANDLE_MS = 15_000;
 const LIVE_PRICE_MS = 8_000;
 
-export function useTwentyV3(sym: LabSym) {
+export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const setTradeLog = useAppStore((s) => s.setTradeLog);
   const plan = useMyPlan((s) => s.plan);
-  const key = v3Key(sym);
+  const key = def.key(sym);
   const log = useMemo(() => tradeLogs[key] ?? [], [tradeLogs, key]);
-  const older = olderKeys(sym).flatMap((k) => tradeLogs[k] ?? []);
+  const older = def.olderKeys(sym).flatMap((k) => tradeLogs[k] ?? []);
   const openNow = [...log, ...older].some((e) => !e.closed);
-  const on = V3_ACTIVE[sym].length > 0;
+  const on = def.active[sym].length > 0;
   const live = on || openNow;
 
   const candlesQ = useQuery({
@@ -65,12 +68,27 @@ export function useTwentyV3(sym: LabSym) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ctx = useMemo(() => (candles.length ? liveCtx(candles, Date.now()) : null), [candles, tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const read = useMemo(() => readV3(candles, sym, Date.now(), ctx), [ctx, sym]);
-  const ticket = useMemo(() => {
-    if (read.state !== "call" || !read.entry) return null;
-    const choice = pickStrike(options, read.entry.side);
-    return choice ? buildTicket(read.entry, choice, sym) : null;
-  }, [read, options, sym]);
+  const read = useMemo(() => readV3(candles, sym, Date.now(), ctx, def), [ctx, sym]);
+  const choice: StrikeChoice | null = useMemo(() => (read.state === "call" && read.entry ? pickStrike(options, read.entry.side) : null), [read, options]);
+  const ticket = useMemo(() => (read.entry && choice ? buildTicket(read.entry, choice, sym) : null), [read, choice, sym]);
+
+  // Live-only checks (Ai-Super Fast): a liquid strike and the news on the call's side.
+  const newsQ = useNewsTrade();
+  const news = useMemo(() => {
+    const d = newsQ.data;
+    if (!def.gates.news || !d?.news?.available) return null;
+    const eia = sym === "CRUDEOIL" ? (d.eia?.crude ?? null) : (d.eia?.ngStorage ?? null);
+    return newsPulseFor(sym, d.news.articles ?? [], eia, d.news.builtAt ?? d.fetchedAt ?? null, Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newsQ.data, sym, tick]);
+  const gates: GateResult[] = useMemo(() => {
+    if (read.state !== "call" || !read.entry) return [];
+    const out: GateResult[] = [];
+    if (def.gates.liquidity) out.push(liquidityGate(options, choice, read.entry.side));
+    if (def.gates.news) out.push(newsGate(news, read.entry.side));
+    return out;
+  }, [read, options, choice, news, def]);
+  const gatesOk = gates.every((g) => g.ok);
 
   // Open the call (the SAME entry the server writes) or move the running one along.
   useEffect(() => {
@@ -82,16 +100,16 @@ export function useTwentyV3(sym: LabSym) {
       if (next !== last) setTradeLog(key, [...history.slice(0, -1), next]);
       return;
     }
-    if (read.state !== "call" || !ticket || expiryBlock(options, now)) return;
-    const entry = openV3Entry(ticket, read);
+    if (read.state !== "call" || !ticket || !gatesOk || expiryBlock(options, now)) return;
+    const entry = openV3Entry(ticket, read, def);
     if (history.some((e) => e.id === entry.id)) return;
     if (!v3Guard(history, ticket.side, sym, now).ok) return;
     setTradeLog(key, [...history, entry].slice(-MAX_HISTORY));
-  }, [read, ticket, options, key, sym, setTradeLog]);
+  }, [read, ticket, gatesOk, options, key, sym, setTradeLog]);
 
   // Calls made under earlier rules keep moving until they close.
   useEffect(() => {
-    for (const k of olderKeys(sym)) {
+    for (const k of def.olderKeys(sym)) {
       const history = useAppStore.getState().tradeLogs[k] ?? [];
       const last = history[history.length - 1];
       if (!last || last.closed) continue;
@@ -111,7 +129,7 @@ export function useTwentyV3(sym: LabSym) {
       return;
     }
     let alive = true;
-    measureV3Async(c, sym).then((r) => {
+    measureV3Async(c, sym, def).then((r) => {
       if (!alive) return;
       setRecord(r);
       setRecordState(r ? "ready" : "error");
@@ -129,6 +147,10 @@ export function useTwentyV3(sym: LabSym) {
   const lots = lotsFor(plan, riskPerLot, premiumPerLot);
   const budget = dayBudget(plan, log, LAB_LOT[sym], Math.max(1, lots.lots), now);
   return {
+    def,
+    gates,
+    gatesOk,
+    news,
     sym,
     on,
     candles,

@@ -25,7 +25,7 @@ export interface JournalRow {
   entry: TradeLogEntry;
 }
 
-export function V3Journal({ rows, lots, onOpen }: { rows: JournalRow[]; lots: number; onOpen: (r: JournalRow) => void }) {
+export function V3Journal({ rows, lots, onOpen, name = "v3" }: { rows: JournalRow[]; lots: number; onOpen: (r: JournalRow) => void; name?: string }) {
   const [all, setAll] = useState(false);
   const stats = useMemo(() => {
     const closed = rows.filter((r) => r.entry.closed);
@@ -59,10 +59,10 @@ export function V3Journal({ rows, lots, onOpen }: { rows: JournalRow[]; lots: nu
   return (
     <section className="rounded-3xl bg-white shadow-md p-4 space-y-3">
       <p className="text-[13px] font-black text-slate-800 flex items-center gap-1.5">
-        <NotebookPen size={15} className="text-amber-500" /> My v3 journal{rows.length && rows.every((r) => r.entry.practice) ? " — practice calls" : ""}
+        <NotebookPen size={15} className="text-amber-500" /> {`My ${name} journal${rows.length && rows.every((r) => r.entry.practice) ? " — practice calls" : ""}`}
       </p>
       {stats.n === 0 ? (
-        <p className="text-[11.5px] text-slate-500">No v3 call has closed yet. Each one lands here with its result — practice calls too — so v3 is judged on what really happens, not on promises.</p>
+        <p className="text-[11.5px] text-slate-500">{`No ${name} call has closed yet. Each one lands here with its result — practice calls too — so ${name} is judged on what really happens, not on promises.`}</p>
       ) : (
         <div className="grid grid-cols-3 gap-2 text-center">
           {[

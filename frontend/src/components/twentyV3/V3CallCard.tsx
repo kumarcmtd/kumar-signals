@@ -161,7 +161,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
         ? "linear-gradient(135deg,#F0FDFA,#FFFFFF)"
         : "linear-gradient(135deg,#F8FAFC,#FFFFFF)";
   const Dir = side === "PE" ? TrendingDown : TrendingUp;
-  const blocked = r.state === "call" && !open ? (s.expiry ?? (s.guard.ok ? (s.ticket ? null : "No live option price to build the order — nothing to enter.") : s.guard.reason)) : null;
+  const blocked = r.state === "call" && !open ? (s.expiry ?? (s.guard.ok ? (s.ticket ? (s.gatesOk ? null : "The setup fired, but a live check failed — no call this time.") : "No live option price to build the order — nothing to enter.") : s.guard.reason)) : null;
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
       <div className="p-4 flex items-center gap-3" style={{ background: headBg }}>
@@ -177,7 +177,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
       <div className="p-4 space-y-3">
         {r.state === "off" && !open && (
           <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 space-y-1.5">
-            <p className="text-[11px] text-slate-600 leading-snug">Every strategy tested lost money on 2022–26 gas prices, so v3 makes no gas calls. Gas moves cleaner on the 1-hour chart.</p>
+            <p className="text-[11px] text-slate-600 leading-snug">{`Every strategy tested lost money on 2022–26 gas prices, so ${s.def.name} makes no gas calls. Gas moves cleaner on the 1-hour chart.`}</p>
             <Link to="/ai-today" className="inline-block mt-1 text-[11.5px] font-black text-white px-3 py-1.5 rounded-xl" style={{ background: "linear-gradient(135deg,#F97316,#DB2777)" }}>
               🎯 Open Ai-Today — gas 1-hour plan
             </Link>
@@ -191,6 +191,19 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
                 <p className="text-[11.5px] font-black text-slate-800">{x.fired ? "✅ " : ""}{x.name}</p>
                 <p className="text-[11px] text-slate-500 leading-snug">{x.line}</p>
               </div>
+            ))}
+          </div>
+        )}
+        {!open && s.gates.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-[10px] font-black uppercase text-slate-400">Live checks before the call opens</p>
+            {s.gates.map((g) => (
+              <p key={g.label} className={`text-[11.5px] leading-snug flex gap-2 ${g.ok ? "text-emerald-700" : "text-rose-700"}`}>
+                {g.ok ? <CheckCircle2 size={14} className="shrink-0 mt-0.5" /> : <Circle size={14} className="shrink-0 mt-0.5" />}
+                <span>
+                  <b>{g.label}:</b> {g.detail}
+                </span>
+              </p>
             ))}
           </div>
         )}

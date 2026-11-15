@@ -26,10 +26,9 @@ export const LIVE_PAGE_PATHS = [
 
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 
-// Live but NOT a bottom-bar tab: AI-Up (top of the More menu) logs its own
-// calls, so it must keep updating while it is open -- moving its button did
-// not change how the page works.
-export const EXTRA_LIVE_PATHS = ["/ai-up"] as const;
+// Live but NOT a bottom-bar tab: AI-Up and Ai-Super Fast (top of the More
+// menu) log their own calls, so they must keep updating while open.
+export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast"] as const;
 
 const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 

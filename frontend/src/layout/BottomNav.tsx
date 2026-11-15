@@ -43,8 +43,11 @@ const PRIMARY: NavItem[] = [
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "🔁 AI-Up (moved here from the bottom bar)",
-    items: [{ to: "/ai-up", label: "AI-Up", icon: Repeat }],
+    title: "⚡ Ai-Super Fast (new) · 🔁 AI-Up",
+    items: [
+      { to: "/ai-super-fast", label: "Super Fast", icon: Zap },
+      { to: "/ai-up", label: "AI-Up", icon: Repeat },
+    ],
   },
   {
     title: "Signals",

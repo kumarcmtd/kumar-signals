@@ -29,6 +29,7 @@ import { warmEnergyNews } from "./news";
 import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
+import { ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
@@ -51,6 +52,7 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
         const busy = await runTradeLogAdvanceCheck(env);
         // Ai20-20 v3: tell the phone each step the calls just reached (T1, stop, close).
         await runTwentyV3StepCheck(env).catch(() => undefined);
+        await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST).catch(() => undefined);
         if (!busy) await warmTimeProfiles(env);
       })()
     );
@@ -76,6 +78,9 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
     runTradeCardTracker(env)
       .catch(() => undefined)
       .then(() => runTwentyV3CallCheck(env))
+      .catch(() => undefined)
+      // Ai-Super Fast: Speed 70+ practice calls with live liquidity and news checks.
+      .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST))
   );
   // EIA release in ~30 min; live data failing at the open.
   ctx.waitUntil(runImportantAlerts(env).catch(() => undefined));

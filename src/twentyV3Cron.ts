@@ -11,7 +11,12 @@
 import { LAB_LOT, type LabSym } from "../frontend/src/utils/twentyLab";
 import { expiryBlock } from "../frontend/src/utils/twentyV2";
 import { callWindow } from "../frontend/src/utils/twentyV3/dayPlan";
-import { isPracticeSetup, measureV3, openV3Entry, readV3, v3Guard, v3Key, V3_ACTIVE } from "../frontend/src/utils/twentyV3/live";
+import { isPracticeSetup, measureV3, openV3Entry, readV3, v3Guard } from "../frontend/src/utils/twentyV3/live";
+import { ENGINE_V3, type EngineDef } from "../frontend/src/utils/twentyV3/engines";
+import { liquidityGate, newsGate } from "../frontend/src/utils/twentyV3/gates";
+import { newsPulseFor } from "../frontend/src/utils/newsPulse";
+import { fetchEiaData } from "./eiaCalendar";
+import { fetchEnergyNews } from "./news";
 import { stepsOf, v3CallPushText, v3DaySummaryText, v3StepPushText } from "../frontend/src/utils/twentyV3/push";
 import { buildTicket, pickStrike } from "../frontend/src/utils/twentyV3/ticket";
 import { mcxSessionAt } from "../frontend/src/utils/mcxSession";
@@ -27,8 +32,8 @@ const NAME: Record<LabSym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natur
 const istDate = (ms: number) => new Date(ms + IST_MS).toISOString().slice(0, 10);
 
 /** The live setups re-measured on the prior days' real MCX candles; once a day, cached. */
-async function v3Record(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number): Promise<{ trades: number; avgRs: number | null } | null> {
-  const kvKey = `twenty3:rec:${sym}:${V3_ACTIVE[sym].join("+")}:${istDate(now)}`;
+async function v3Record(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number, def: EngineDef): Promise<{ trades: number; avgRs: number | null } | null> {
+  const kvKey = `twenty3:rec:${def.id}:${sym}:${def.active[sym].join("+")}:${istDate(now)}`;
   const cached = await env.COMMODITY_KV.get(kvKey);
   if (cached) {
     try {
@@ -39,23 +44,23 @@ async function v3Record(env: Env, token: string, instrumentKey: string, sym: Lab
   }
   const bars = await getPriorDayBars(env, token, instrumentKey, 20, 5);
   if (!bars) return null;
-  const m = measureV3(bars, sym);
+  const m = measureV3(bars, sym, def);
   if (!m) return null;
   const out = { trades: m.together.trades, avgRs: m.together.avgRs };
   await cachePut(env.COMMODITY_KV, kvKey, JSON.stringify(out), { expirationTtl: 2 * 86_400 });
   return out;
 }
 
-export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): Promise<string[]> {
-  if (!getMarketStatus().isOpen) return ["MCX is closed -- Ai20-20 only runs while the market is open."];
+export async function runTwentyV3CallCheck(env: Env, now: number = Date.now(), def: EngineDef = ENGINE_V3): Promise<string[]> {
+  if (!getMarketStatus().isOpen) return [`MCX is closed -- ${def.name} only runs while the market is open.`];
   const report: string[] = [];
   let token: string | null | undefined;
   for (const symbol of OPTION_SYMBOLS) {
     const sym = symbol as LabSym;
-    const say = (t: string) => report.push(`${NAME[sym]}: ${t}`);
-    const setups = V3_ACTIVE[sym];
+    const say = (t: string) => report.push(`${def.name} ${NAME[sym]}: ${t}`);
+    const setups = def.active[sym];
     if (!setups.length) {
-      say("no v3 setup passed the lab for this market -- no calls.");
+      say("no setup runs on this market -- no calls.");
       continue;
     }
     const w = callWindow(setups, now);
@@ -76,17 +81,17 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): 
         say("no 5-minute candles yet.");
         continue;
       }
-      const read = readV3(candles, sym, now);
+      const read = readV3(candles, sym, now, undefined, def);
       if (read.state !== "call" || !read.entry || !read.barEnd) {
         say(read.headline);
         continue;
       }
-      const barKey = `notified:TWENTY3-${symbol}`;
+      const barKey = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-${symbol}`;
       if ((await env.COMMODITY_KV.get(barKey)) === String(read.barEnd)) {
         say(`${read.entry.side} call on this candle -- already handled.`);
         continue;
       }
-      const key = v3Key(sym);
+      const key = def.key(sym);
       const guard = v3Guard(await readTradeLogKey(env, key), read.entry.side, sym, now);
       if (!guard.ok) {
         say(`${read.entry.side} call skipped: ${guard.reason}`);
@@ -107,20 +112,38 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): 
         continue;
       }
       const ticket = buildTicket(read.entry, choice, sym);
+      // Live-only checks (Ai-Super Fast): a liquid strike and the news on the call's side.
+      const checks: string[] = [];
+      if (def.gates.liquidity || def.gates.news) {
+        const results = [];
+        if (def.gates.liquidity) results.push(liquidityGate(options, choice, read.entry.side));
+        if (def.gates.news) {
+          const [feed, eia] = await Promise.all([fetchEnergyNews(env).catch(() => null), fetchEiaData(env).catch(() => null)]);
+          const pulse = feed?.available ? newsPulseFor(sym, feed.articles, sym === "CRUDEOIL" ? (eia?.crude ?? null) : (eia?.ngStorage ?? null), feed.builtAt ?? null, now) : null;
+          results.push(newsGate(pulse, read.entry.side));
+        }
+        const failed = results.find((g) => !g.ok);
+        if (failed) {
+          say(`${read.entry.side} setup fired, skipped: ${failed.detail}`);
+          await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 });
+          continue;
+        }
+        for (const g of results) checks.push(`${g.label} ✓`);
+      }
       // Marker first: if it cannot be saved, acting anyway would repeat the call next tick.
       if (!(await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 }))) {
         say("call found, but the already-handled marker could not be saved -- skipped so it cannot repeat.");
         continue;
       }
-      await pushTradeLogs(env, { [key]: [openV3Entry(ticket, read)] });
+      await pushTradeLogs(env, { [key]: [openV3Entry(ticket, read, def)] });
       say(`${ticket.strike} ${ticket.side} @ Rs ${ticket.entry} (${read.entry.setup}) -- call recorded.`);
       const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
       if (!topic) {
         say("no ntfy topic saved -- recorded but not pushed.");
         continue;
       }
-      const record = await v3Record(env, token, fut.instrument_key, sym, now).catch(() => null);
-      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup) });
+      const record = await v3Record(env, token, fut.instrument_key, sym, now, def).catch(() => null);
+      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup), engineName: def.name, checks });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {
@@ -131,39 +154,39 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now()): 
 }
 
 /** Push every step the latest v3 call has reached, once each; then the day summary after the window. */
-export async function runTwentyV3StepCheck(env: Env, now: number = Date.now()): Promise<string[]> {
+export async function runTwentyV3StepCheck(env: Env, now: number = Date.now(), def: EngineDef = ENGINE_V3): Promise<string[]> {
   const report: string[] = [];
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
   if (!topic) return ["no ntfy topic saved."];
   for (const symbol of OPTION_SYMBOLS) {
     const sym = symbol as LabSym;
-    if (!V3_ACTIVE[sym].length) continue;
-    const log = await readTradeLogKey(env, v3Key(sym));
+    if (!def.active[sym].length) continue;
+    const log = await readTradeLogKey(env, def.key(sym));
     const last = log[log.length - 1];
     if (last && now - last.openedAt < 20 * 3600_000) {
       const session = mcxSessionAt(now);
       for (const step of stepsOf(last, session.isOpen ? session.closeMin - session.minutes : null)) {
-        const mark = `notified:TWENTY3-STEP:${last.id}:${step}`;
+        const mark = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-STEP:${last.id}:${step}`;
         if (await env.COMMODITY_KV.get(mark)) continue;
         if (!(await cachePut(env.COMMODITY_KV, mark, "1", { expirationTtl: 2 * 86_400 }))) continue;
-        const msg = v3StepPushText(NAME[sym], last, step, LAB_LOT[sym]);
+        const msg = v3StepPushText(NAME[sym], last, step, LAB_LOT[sym], def.id === "v3" ? "Ai20-20" : def.name);
         const sent = await sendNtfyNotification(topic, msg.title, msg.body, msg.priority, { token: env.NTFY_TOKEN });
-        report.push(`${NAME[sym]}: ${step} ${sent.ok ? "pushed" : "push failed"}.`);
+        report.push(`${def.name} ${NAME[sym]}: ${step} ${sent.ok ? "pushed" : "push failed"}.`);
       }
     }
     // Day summary: once on a weekday, after today's window has closed and nothing is still running.
     // (callWindow moves on to the next weekday once today's window is over.)
-    const w = callWindow(V3_ACTIVE[sym], now);
+    const w = callWindow(def.active[sym], now);
     const wd = new Date(now + IST_MS).getUTCDay();
     const windowOver = wd >= 1 && wd <= 5 && (!w || istDate(w.from) !== istDate(now));
     const today = log.filter((e) => istDate(e.openedAt) === istDate(now));
     if (!windowOver || today.some((e) => !e.closed)) continue;
-    const sumKey = `notified:TWENTY3-DAY:${sym}:${istDate(now)}`;
+    const sumKey = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-DAY:${sym}:${istDate(now)}`;
     if (await env.COMMODITY_KV.get(sumKey)) continue;
     if (!(await cachePut(env.COMMODITY_KV, sumKey, "1", { expirationTtl: 2 * 86_400 }))) continue;
-    const msg = v3DaySummaryText(NAME[sym], today, LAB_LOT[sym]);
+    const msg = v3DaySummaryText(NAME[sym], today, LAB_LOT[sym], def.id === "v3" ? "Ai20-20" : def.name);
     const sent = await sendNtfyNotification(topic, msg.title, msg.body, "default", { token: env.NTFY_TOKEN });
-    report.push(`${NAME[sym]}: day summary ${sent.ok ? "pushed" : "push failed"}.`);
+    report.push(`${def.name} ${NAME[sym]}: day summary ${sent.ok ? "pushed" : "push failed"}.`);
   }
   return report;
 }

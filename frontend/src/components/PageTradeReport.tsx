@@ -29,6 +29,7 @@ const MARKETS: { k: ReportMarket; t: string }[] = [
  */
 const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string }> = {
   "/ai-20-20": { only: (k) => k.endsWith("-V3"), label: "Ai20-20 v3" },
+  "/ai-super-fast": { only: (k) => k.startsWith("SUPERFAST-"), label: "Ai-Super Fast" },
 };
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
