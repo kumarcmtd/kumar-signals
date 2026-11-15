@@ -4,11 +4,15 @@
 // exact functions over years of prices; the page and the server call the same
 // functions live, so what was measured is what trades.
 
-import { signalAt, type Prepared } from "../twentyLab";
+import { signalAt, type LabRules, type Prepared } from "../twentyLab";
+import { SPEED_MIN } from "./speed";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
 
-export type V3SetupId = "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict";
+export type V3SetupId =
+  | "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict"
+  // Ai-Super Fast: only while the Speed gauge reads 70+ (see speed.ts).
+  | "fastTurnUS" | "fastTurnDay" | "fastBreakUS" | "fastBreakDay" | "fastNoiseUS";
 
 /**
  * steps: T1 -> stop to entry, T2 -> stop to T1, out at T3 (the page's way).
@@ -49,6 +53,11 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   driveBusy: "Opening drive on busy days",
   driveSteps: "Opening drive, step exits",
   driveStrict: "Big opening drive",
+  fastTurnUS: "Fast turn · US session",
+  fastTurnDay: "Fast turn · all day",
+  fastBreakUS: "Fast 15-min breakout · US session",
+  fastBreakDay: "Fast 15-min breakout · all day",
+  fastNoiseUS: "Fast noise breakout · US session",
 };
 
 /** Today's ATR at candle i against its median at the same clock minute over the previous 10 sessions. */
@@ -59,6 +68,9 @@ export function busyRatio(p: Prepared, i: number): number | null {
   const med = [...same].sort((a, b) => a - b)[Math.floor(same.length / 2)];
   return med > 0 ? p.atr[i] / med : null;
 }
+
+/** The v2 strength turn (fresh 58+/42-, 1-hour trend agrees) without v2's own time window. */
+const FAST_TURN: LabRules = { signal: "score", mode: "fresh", minScore: 58, htf: "60", chop: "none", hours: "all", exits: "atr", stopAtr: 2, t1R: 1.5, timeStop: false };
 
 const sameDay = (p: Prepared, a: number, b: number) => a >= 0 && p.day[a] === p.day[b];
 
@@ -82,6 +94,29 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
   if (!Number.isFinite(atr) || atr <= 0) return null;
   const sm = f.sessMin[i];
   const mk = (side: "CE" | "PE", stopPts: number, t1Pts: number, manage: V3Manage): V3Entry => ({ setup: id, side, stopPts, t1Pts, manage });
+
+  if (id.startsWith("fast")) {
+    // Ai-Super Fast: the Speed gauge must read 70+ on finished 15-minute candles.
+    if (!(f.speed[i] >= SPEED_MIN)) return null;
+    const us = id.endsWith("US");
+    const sm0 = f.sessMin[i];
+    // US: candles ending 9:30 AM - 1:20 PM New York. All day: 10:00 AM - 11:00 PM IST.
+    if (us ? !(sm0 >= 25 && sm0 <= 255) : !(p.minute[i] >= 10 * 60 && p.minute[i] < 23 * 60)) return null;
+    let side: "CE" | "PE" | null = null;
+    if (id === "fastTurnUS" || id === "fastTurnDay") side = signalAt(p, i, FAST_TURN);
+    else if (id === "fastBreakUS" || id === "fastBreakDay") {
+      const b = f.brk15[i];
+      side = b === 1 && p.htf60[i] === 1 ? "CE" : b === -1 && p.htf60[i] === -1 ? "PE" : null;
+    } else {
+      if (sm0 % 30 !== 25) return null;
+      const band = bandAt(f, i, k);
+      if (!band) return null;
+      side = c.close > band.upper && c.close > f.vwap[i] ? "CE" : c.close < band.lower && c.close < f.vwap[i] ? "PE" : null;
+    }
+    if (!side) return null;
+    const stop = 2 * k * atr;
+    return mk(side, stop, 1.5 * stop, "steps");
+  }
 
   if (id === "trend") {
     const side = signalAt(p, i, V2_RULES);

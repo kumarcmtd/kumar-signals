@@ -27,6 +27,11 @@ const ABOUT: Record<V3SetupId, string> = {
   driveBusy: "Opening drive only on busy days (swings 1.2× normal).",
   driveSteps: "Opening drive with the usual step exits instead of holding.",
   driveStrict: "Opening drive only when the first half hour moved at least 1.2× its usual range — hold to the close, stop only.",
+  fastTurnUS: "Speed 70+ and the v2 strength turn with the 1-hour trend, 9:30 AM–1:15 PM New York.",
+  fastTurnDay: "Speed 70+ and the v2 strength turn with the 1-hour trend, 10:00 AM–11:00 PM IST.",
+  fastBreakUS: "Speed 70+ and a 15-minute close beyond the last hour's range, with the 1-hour trend, US session.",
+  fastBreakDay: "Speed 70+ and a 15-minute close beyond the last hour's range, with the 1-hour trend, all day.",
+  fastNoiseUS: "Speed 70+ and a half-hour close outside the normal range from the New York open.",
 };
 
 function Period({ label, p }: { label: string; p: PeriodFact | undefined }) {

@@ -13,6 +13,7 @@
 // is a move bigger than usual noise.
 
 import type { Prepared } from "../twentyLab";
+import { speedSeries } from "./speed";
 
 export const NY_OPEN_MIN = 9 * 60;
 /** Days of history the noise band averages over (the paper's 14), and the fewest it accepts. */
@@ -36,6 +37,10 @@ export interface V3Features {
   /** 9:00-9:30 New York range, defined from the 9:30 candle on. */
   orHigh: number[];
   orLow: number[];
+  /** The Speed gauge on finished 15-minute candles (0-100), see speed.ts. */
+  speed: number[];
+  /** +1 / -1: the 15-minute candle that just finished closed above / below the previous hour. */
+  brk15: number[];
 }
 
 /** Minutes since the New York open for a New York clock minute, NaN before it (same IST day). */
@@ -46,7 +51,8 @@ export function sessionMinute(etMinute: number): number {
 export function computeFeatures(p: Prepared): V3Features {
   const n = p.c.length;
   const nan = () => new Array<number>(n).fill(NaN);
-  const f: V3Features = { sessMin: nan(), sessOpen: nan(), prevClose: nan(), vwap: nan(), sigma: nan(), upper: nan(), lower: nan(), orHigh: nan(), orLow: nan() };
+  const sp = speedSeries(p);
+  const f: V3Features = { sessMin: nan(), sessOpen: nan(), prevClose: nan(), vwap: nan(), sigma: nan(), upper: nan(), lower: nan(), orHigh: nan(), orLow: nan(), speed: sp.speed, brk15: sp.brk15 };
   const moves = new Map<number, Map<number, number>>(); // IST day -> session minute -> |move from open|
   const sessDays: number[] = [];
   let day = NaN;

@@ -24,6 +24,12 @@ export const SETUP_WINDOWS: Record<V3SetupId, [number, number]> = {
   driveBusy: [9 * 60 + 30, 9 * 60 + 30],
   driveSteps: [9 * 60 + 30, 9 * 60 + 30],
   driveStrict: [9 * 60 + 30, 9 * 60 + 30],
+  fastTurnUS: [9 * 60 + 30, 13 * 60 + 20],
+  fastBreakUS: [9 * 60 + 30, 13 * 60 + 20],
+  fastNoiseUS: [9 * 60 + 30, 12 * 60 + 30],
+  // All day: 10:00 AM - 11:00 PM IST, expressed in New York minutes for the clock (winter: IST - 10:30).
+  fastTurnDay: [-30, 12 * 60 + 30],
+  fastBreakDay: [-30, 12 * 60 + 30],
 };
 
 const IST_MS = 5.5 * 3600_000;

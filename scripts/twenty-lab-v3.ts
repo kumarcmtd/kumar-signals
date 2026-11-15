@@ -22,9 +22,14 @@ import { simulateV3, type V3SimOpts, type V3Trade } from "../frontend/src/utils/
 import type { Candle } from "../frontend/src/types";
 import { dukascopy, mcx, yahoo } from "./lab-data";
 
-const CANDIDATES: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade"];
+const CANDIDATES_V3: V3SetupId[] = ["trend", "noise", "noise30", "orb", "orbTrend", "drive", "drive60", "vwapPull", "eia", "eiaFade"];
 /** Round 2: three research-motivated refinements of the best round-1 idea, judged by the same pick rule. */
-const ROUND2: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps", "driveStrict"];
+const ROUND2_V3: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps", "driveStrict"];
+/** Ai-Super Fast (LAB_SET=fast): the trader's rule -- only while the Speed gauge reads 70+ -- with three ways to pick the side. */
+const FAST: V3SetupId[] = ["fastTurnUS", "fastTurnDay", "fastBreakUS", "fastBreakDay", "fastNoiseUS"];
+const IS_FAST = process.env.LAB_SET === "fast";
+const CANDIDATES: V3SetupId[] = IS_FAST ? FAST : CANDIDATES_V3;
+const ROUND2: V3SetupId[] = IS_FAST ? [] : ROUND2_V3;
 const PICK = { minTrades: 80, minAvgRs: 100, minPf: 1.15 };
 const GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 };
 const FROM = process.env.LAB_FROM || "2022-01-01";
@@ -43,7 +48,8 @@ const fmt = (n: number | null | undefined) => (n === null || n === undefined || 
 const avg = (t: V3Trade[]) => (t.length ? t.reduce((a, x) => a + x.rs, 0) / t.length : null);
 
 function load(name: string, sym: LabSym, candles: Candle[], years: boolean): Data {
-  const p: Prepared = prepare(candles, { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
+  // Super Fast's all-day setups need the strength score on every candle.
+  const p: Prepared = prepare(candles, IS_FAST ? true : { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
   return { name, sym, ctx: { p, f: computeFeatures(p) }, years };
 }
 
@@ -96,10 +102,17 @@ function candidateTable(d: Data, lines: string[]): Map<V3SetupId, V3Trade[]> {
     lines.push(row(`${ROUND2.includes(id) ? "R2 · " : ""}${SETUP_NAMES[id]}`, t, d));
   }
   // The v3 replay of "trend" must equal the v2 lab's own replay.
-  const v2 = simulate(d.ctx.p, V2_RULES, d.sym);
-  const v3 = res.get("trend")!;
-  const same = v2.length === v3.length && v2.every((x, i) => x.openIdx === v3[i].openIdx && x.rs === v3[i].rs);
-  lines.push(`\nCheck: v3 replay of the v2 rules ${same ? "matches" : "DIFFERS FROM"} the v2 lab (${v3.length} vs ${v2.length} trades).`);
+  const v3 = res.get("trend");
+  if (v3) {
+    const v2 = simulate(d.ctx.p, V2_RULES, d.sym);
+    const same = v2.length === v3.length && v2.every((x, i) => x.openIdx === v3[i].openIdx && x.rs === v3[i].rs);
+    lines.push(`\nCheck: v3 replay of the v2 rules ${same ? "matches" : "DIFFERS FROM"} the v2 lab (${v3.length} vs ${v2.length} trades).`);
+  }
+  if (IS_FAST) {
+    const sp = d.ctx.f.speed.filter((x) => Number.isFinite(x));
+    const at70 = sp.filter((x) => x >= 70).length;
+    lines.push(`\nSpeed gauge (finished 15-min candles): 70+ on ${sp.length ? Math.round((at70 / sp.length) * 100) : 0}% of 5-minute candles.`);
+  }
   return res;
 }
 
@@ -170,7 +183,7 @@ async function main() {
   const t0 = Date.now();
   const log = (s: string) => console.error(`[${Math.round((Date.now() - t0) / 1000)}s] ${s}`);
   const head: string[] = [
-    `# Ai20-20 v3 rules lab — ${new Date().toISOString()}`,
+    `# ${IS_FAST ? "Ai-Super Fast" : "Ai20-20 v3"} rules lab — ${new Date().toISOString()}`,
     "",
     "Rs per lot after costs (Rs 150 Crude / Rs 200 NG per trade + ~Rs 50 an hour time decay), option at delta 0.5. Estimates, not live fills.",
     `Pick rule (fixed before the run): ${PICK.minTrades}+ trades, average >= Rs ${PICK.minAvgRs}, both halves positive, profit factor >= ${PICK.minPf}, on the multi-year history.`,
@@ -207,7 +220,7 @@ async function main() {
       picked = pick(years, res);
       lines.push("\n**Every setup by year** (calls / average Rs):");
       for (const id of [...CANDIDATES, ...ROUND2]) lines.push(`- ${SETUP_NAMES[id]}: ${byYear(res.get(id)!)}`);
-      for (const kk of [0.8, 1.2]) {
+      for (const kk of IS_FAST ? [] : [0.8, 1.2]) {
         const t = run(years, ["drive"], {}, kk);
         const st = statsOf(t, years.ctx.p, "x");
         lines.push(`- Opening drive with the band x${kk}: ${st.trades} calls, avg ${fmt(st.avgRs)}, PF ${st.profitFactor ?? "—"}, halves ${fmt(st.firstHalfAvg)} / ${fmt(st.secondHalfAvg)}`);

@@ -33,10 +33,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { market: CRUDEOIL, from: "2022-01-01", to: "" }
-          - { market: NATURALGAS, from: "2022-01-01", to: "" }
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "" }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "" }
           # Holdout: five older years no rule was ever chosen on.
-          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "" }
+          # Ai-Super Fast: Speed 70+ rules on the same three data sets.
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "fast" }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "fast" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "fast" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,6 +66,7 @@ jobs:
           LAB_MARKET: ${{ matrix.market }}
           LAB_FROM: ${{ matrix.from }}
           LAB_TO: ${{ matrix.to }}
+          LAB_SET: ${{ matrix.set }}
         run: |
           set -o pipefail
           npx -y tsx scripts/twenty-lab-v3.ts | tee lab.md
