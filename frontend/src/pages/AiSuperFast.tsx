@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { Zap } from "lucide-react";
 import { Link } from "react-router-dom";
-import { useMarketStatus } from "../api/hooks";
+import { useCandles, useMarketStatus } from "../api/hooks";
 import { useTwentyV3 } from "../hooks/useTwentyV3";
 import { useAppStore } from "../store/appStore";
 import { useSyncStatus } from "../syncTradeLogs";
 import { appVersionLabel } from "../utils/appVersion";
 import { ENGINE_FAST } from "../utils/twentyV3/engines";
 import { FAST_LAB } from "../utils/twentyV3/labFacts";
-import { SPEED_MIN } from "../utils/twentyV3/speed";
+import { finishedSpeed, SPEED_MIN } from "../utils/twentyV3/speed";
 import { VolatilityMeter } from "../components/VolatilityMeter";
 import { FastTruthCard } from "../components/twentyV3/FastTruthCard";
 import { TodayPlanCard } from "../components/twentyV3/TodayPlanCard";
@@ -38,6 +38,9 @@ export function AiSuperFast() {
   const rows = useMemo(() => SYMS.flatMap((sym) => (tradeLogs[ENGINE_FAST.key(sym)] ?? []).map((entry) => ({ sym, entry }))).sort((a, b) => b.entry.openedAt - a.entry.openedAt), [tradeLogs]);
   const i = crude.ctx ? crude.ctx.p.c.length - 1 : -1;
   const speed = i >= 0 ? crude.ctx!.f.speed[i] : NaN;
+  // Gas: the same 15-minute candles its gauge loads (shared, no extra request).
+  const gas15 = useCandles("NATURALGAS", "15");
+  const gasSpeed = useMemo(() => (gas15.data && "candles" in gas15.data && gas15.data.candles?.length ? finishedSpeed(gas15.data.candles, Date.now()) : null), [gas15.data]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 min-h-screen space-y-4" style={{ background: "linear-gradient(180deg,#FFF7ED,#EFF6FF 40%,#F8FAFC)" }}>
@@ -69,12 +72,19 @@ export function AiSuperFast() {
       <FastTruthCard />
 
       <section className="space-y-1.5">
-        <VolatilityMeter symbol="CRUDEOIL" />
+        <div className="grid grid-cols-2 gap-2">
+          <VolatilityMeter symbol="CRUDEOIL" />
+          <VolatilityMeter symbol="NATURALGAS" />
+        </div>
         <p className="text-[10.5px] text-slate-500 px-1 leading-snug">
-          {Number.isFinite(speed)
-            ? `Calls use finished 15-minute candles: Speed ${speed} now — ${speed >= SPEED_MIN ? "fast enough ✓" : `needs ${SPEED_MIN}+`}.`
-            : "Calls use finished 15-minute candles; Speed appears once enough candles are loaded."}{" "}
+          <b className="text-slate-700">Crude (calls): </b>
+          {Number.isFinite(speed) ? `Speed ${speed} on finished 15-minute candles — ${speed >= SPEED_MIN ? "fast enough ✓" : `needs ${SPEED_MIN}+`}.` : "Speed appears once enough finished 15-minute candles are loaded."}{" "}
           {`It read ${SPEED_MIN}+ on about ${FAST_LAB.speed70Share}% of candles over the last five years.`}
+        </p>
+        <p className="text-[10.5px] text-slate-500 px-1 leading-snug">
+          <b className="text-slate-700">Natural gas (for information): </b>
+          {gasSpeed !== null ? `Speed ${gasSpeed} on finished 15-minute candles${gasSpeed >= SPEED_MIN ? " — moving fast" : ""}. ` : ""}
+          No gas calls — every Speed 70+ setup lost money on gas in 2022–26.
         </p>
       </section>
 

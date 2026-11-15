@@ -70,3 +70,17 @@ describe("Ai-Super Fast live checks", () => {
     expect(ENGINE_FAST.active.CRUDEOIL.every(isPracticeAnywhere)).toBe(true);
   });
 });
+
+describe("Speed from 15-minute candles (gas on the Super Fast page)", () => {
+  test("drops the forming candle and matches the engine's formula", async () => {
+    const { finishedSpeed } = await import("../utils/twentyV3/speed");
+    const t0 = Date.parse("2026-11-16T09:00:00+05:30");
+    const mk = (k: number, w: number) => ({ date: new Date(t0 + k * 15 * 60_000).toISOString(), high: 100 + w, low: 100, close: 100 });
+    const c = [...Array.from({ length: 41 }, (_, k) => mk(k, 10)), mk(41, 20), mk(42, 20), mk(43, 20)];
+    const now = t0 + 44 * 15 * 60_000;
+    expect(finishedSpeed(c, now)).toBe(100); // last 3 ranges 20, the 40 before them 10: 50 x 20 / 10
+    expect(finishedSpeed([...c, mk(44, 60)], now + 60_000)).toBe(100); // a forming candle is ignored
+    expect(finishedSpeed(c.slice(0, 43), now)).toBe(83); // last 3 = 10, 20, 20 -> 50 x 16.67 / 10
+    expect(finishedSpeed(c.slice(0, 20), now)).toBeNull();
+  });
+});

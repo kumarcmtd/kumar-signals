@@ -59,3 +59,17 @@ export function speedSeries(p: Prepared): { speed: number[]; brk15: number[] } {
   }
   return { speed, brk15 };
 }
+
+/**
+ * Speed from a market's own 15-minute candles, finished ones only (the
+ * forming candle is dropped) -- the same number the engine uses, for a market
+ * whose 5-minute candles are not loaded on the page (gas on Ai-Super Fast).
+ */
+export function finishedSpeed(candles15: { date: string; high: number; low: number; close: number }[], now: number): number | null {
+  const done = candles15.filter((c) => Date.parse(c.date) + 15 * 60_000 <= now);
+  if (done.length < SPEED_RECENT + SPEED_BASE) return null; // as the engine: 43 finished candles
+  const tr = done.map((c, i) => (i === 0 ? c.high - c.low : Math.max(c.high, done[i - 1].close) - Math.min(c.low, done[i - 1].close)));
+  const recent = tr.slice(-SPEED_RECENT).reduce((a, x) => a + x, 0) / SPEED_RECENT;
+  const base = tr.slice(-(SPEED_RECENT + SPEED_BASE), -SPEED_RECENT).reduce((a, x) => a + x, 0) / SPEED_BASE;
+  return base > 0 ? Math.max(0, Math.min(100, Math.round((50 * recent) / base))) : null;
+}
