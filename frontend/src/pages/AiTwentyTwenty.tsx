@@ -6,7 +6,8 @@ import { useTwentyV3 } from "../hooks/useTwentyV3";
 import { useAppStore } from "../store/appStore";
 import { useSyncStatus } from "../syncTradeLogs";
 import { appVersionLabel } from "../utils/appVersion";
-import { v3Key } from "../utils/twentyV3/live";
+import { ENGINE_DAY, ENGINE_V3, type EngineDef } from "../utils/twentyV3/engines";
+import { DAY_LAB } from "../utils/twentyV3/labFacts";
 import { ExpiryAlertBanner } from "../components/ExpiryAlertBanner";
 import { TodayPlanCard } from "../components/twentyV3/TodayPlanCard";
 import { TruthCard } from "../components/twentyV3/TruthCard";
@@ -48,6 +49,9 @@ function HowBuilt() {
             <b>Money rules.</b> Risk about 1% of capital a trade, stop for the day at about 3% lost, keep the number of trades small — the common professional rules, so one bad week cannot break the account.
           </p>
           <p>
+            <b>All day.</b> You asked for calls through the whole MCX day, so the original Ai20-20 signal — a fresh 5-minute strength turn with the 1-hour trend — runs from 9:00 AM IST to 30 minutes before the bell as its own practice line. Replayed on every 5-minute crude candle since 2017, it lost money in all ten years (about ₹{Math.abs(DAY_LAB.crude.trendDay.recent.avgRs)} a call after costs). It is kept separate so it never blocks the opening drive.
+          </p>
+          <p>
             <b>The test.</b> Every setup was replayed on 5-minute crude prices from 2017 to 2026 (gas 2022–26) with the same trade management as the live page, costs (spread, charges, time decay) taken off every call. Rules were chosen on 2022–26 and then checked on 2017–21, years never used to choose. Only a setup that passes both may trade real money — none did, so v3 starts with practice calls. Past results never guarantee future ones.
           </p>
         </div>
@@ -59,13 +63,19 @@ function HowBuilt() {
 export function AiTwentyTwenty() {
   const { data: market } = useMarketStatus();
   const crude = useTwentyV3("CRUDEOIL");
+  // The all-day line: its own log, one call at a time, own day limits.
+  const crudeDay = useTwentyV3("CRUDEOIL", ENGINE_DAY);
   const gas = useTwentyV3("NATURALGAS");
   const board = { CRUDEOIL: crude, NATURALGAS: gas };
   const tradeLogs = useAppStore((s) => s.tradeLogs);
   const sync = useSyncStatus();
   const [detail, setDetail] = useState<JournalRow | null>(null);
 
-  const rows = useMemo(() => SYMS.flatMap((sym) => (tradeLogs[v3Key(sym)] ?? []).map((entry) => ({ sym, entry }))).sort((a, b) => b.entry.openedAt - a.entry.openedAt), [tradeLogs]);
+  const rowsOf = (def: EngineDef) => SYMS.flatMap((sym) => (tradeLogs[def.key(sym)] ?? []).map((entry) => ({ sym, entry }))).sort((a, b) => b.entry.openedAt - a.entry.openedAt);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const driveRows = useMemo(() => rowsOf(ENGINE_V3), [tradeLogs]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const dayRows = useMemo(() => rowsOf(ENGINE_DAY), [tradeLogs]);
 
   return (
     <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 min-h-screen space-y-4" style={{ background: "linear-gradient(180deg,#ECFDF5,#F0F9FF 40%,#F8FAFC)" }}>
@@ -100,13 +110,15 @@ export function AiTwentyTwenty() {
       )}
 
       <TruthCard />
-      <TodayPlanCard s={crude} />
+      <TodayPlanCard s={crude} also={crudeDay} callsWhen="all day on a fresh strength turn with the 1-hour trend; at the New York open on a big opening move" />
       <ExpiryAlertBanner />
+      <V3CallCard s={crudeDay} />
       <V3CallCard s={crude} />
       <V3CallCard s={gas} />
       <MyPlanPanel />
-      <SetupsBoard crude={crude} gas={gas} />
-      <V3Journal rows={rows} lots={Math.max(1, crude.lots.lots)} onOpen={setDetail} />
+      <SetupsBoard crude={crude} gas={gas} also={crudeDay} />
+      <V3Journal rows={dayRows} lots={Math.max(1, crude.lots.lots)} onOpen={setDetail} name="all-day" />
+      <V3Journal rows={driveRows} lots={Math.max(1, crude.lots.lots)} onOpen={setDetail} name="opening-drive" />
       <HowBuilt />
 
       <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">

@@ -3,9 +3,10 @@
 
 import { CalendarClock, Gauge, ShieldCheck, AlertTriangle, Info } from "lucide-react";
 import type { TwentyV3State } from "../../hooks/useTwentyV3";
-import { callWindow, dayEvents } from "../../utils/twentyV3/dayPlan";
+import { callWindow, dayEvents, istClock } from "../../utils/twentyV3/dayPlan";
 import { isPracticeSetup } from "../../utils/twentyV3/live";
-import { perTradeRs } from "../../utils/twentyV3/riskPlan";
+import { dayBudget, perTradeRs } from "../../utils/twentyV3/riskPlan";
+import { LAB_LOT } from "../../utils/twentyLab";
 
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const countdown = (ms: number) => {
@@ -13,16 +14,17 @@ const countdown = (ms: number) => {
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 };
 
-export function TodayPlanCard({ s }: { s: TwentyV3State }) {
+/** `also`: a second line on the same page (Ai20-20's all-day line) -- one window and one day's risk for both. */
+export function TodayPlanCard({ s, also, callsWhen }: { s: TwentyV3State; also?: TwentyV3State; callsWhen?: string }) {
   const now = Date.now();
-  const active = s.def.active[s.sym];
+  const active = [...s.def.active[s.sym], ...(also?.def.active[s.sym] ?? [])];
   const w = callWindow(active, now);
   const noun = active.every(isPracticeSetup) ? (active.length > 1 || w?.label.includes("–") ? "Practice calls" : "Practice call") : "Calls";
   const events = dayEvents(s.options, now);
   const day = new Date(now + 5.5 * 3600_000).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short", timeZone: "UTC" });
   const istDate = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
   const nextDay = w && istDate(w.from) !== istDate(now) ? new Date(w.from + 5.5 * 3600_000).toLocaleDateString("en-IN", { weekday: "long", timeZone: "UTC" }) : null;
-  const b = s.budget;
+  const b = also ? dayBudget(s.plan, [...s.log, ...also.log], LAB_LOT[s.sym], Math.max(1, s.lots.lots), now) : s.budget;
   // Closed market: the regime read is from the last session's final candle.
   const lastClose = s.read.barEnd && now - s.read.barEnd > 15 * 60_000 ? new Date(s.read.barEnd + 5.5 * 3600_000).toLocaleString("en-IN", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: "UTC" }) : null;
   const usedPct = b.bookedRs < 0 ? Math.min(100, Math.round((-b.bookedRs / b.limitRs) * 100)) : 0;
@@ -34,8 +36,12 @@ export function TodayPlanCard({ s }: { s: TwentyV3State }) {
           <CalendarClock size={16} />
           {w ? (w.open ? `${noun} window OPEN · closes in ${countdown(w.to - now)}` : nextDay ? `Next ${noun.toLowerCase()} ${nextDay} ${w.label}` : `${noun} ${w.label}`) : "No calls on this market"}
         </p>
-        {w && !w.open && w.from > now && <p className="text-[11px] opacity-85">{nextDay ? "Nothing today. " : ""}In {countdown(w.from - now)} — the app alerts your phone the moment a call comes ({s.def.callsWhen}).</p>}
-        {w?.open && <p className="text-[11px] opacity-85">{w.label} — the New York open, when crude moves most.</p>}
+        {w && !w.open && w.from > now && <p className="text-[11px] opacity-85">{nextDay ? "No more calls today. " : ""}In {countdown(w.from - now)} — the app alerts your phone the moment a call comes ({callsWhen ?? s.def.callsWhen}).</p>}
+        {w?.open && (
+          <p className="text-[11px] opacity-85">
+            {w.bell ? `${w.label} — the whole MCX session. New calls until ${istClock(w.to)}: none in the last 30 minutes, and running calls close at the bell.` : `${w.label} — the New York open, when crude moves most.`}
+          </p>
+        )}
       </div>
       <div className="p-4 space-y-2.5">
         {events.map((e) => (

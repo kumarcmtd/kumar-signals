@@ -16,7 +16,7 @@ import { computeKumarAiAnalysis, type KumarAiAnalyzeRequest } from "./kumarAi";
 import { fetchEnergyNews, scanNewsNow } from "./news";
 import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
-import { ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
+import { ENGINE_DAY, ENGINE_FAST, ENGINE_V3 } from "../frontend/src/utils/twentyV3/engines";
 import { v3CallPushText } from "../frontend/src/utils/twentyV3/push";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { computePullback, serveTimeProfile } from "./profiles";
@@ -352,7 +352,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // matched call is found, exactly like the Cron) and says why per market.
         if (url.pathname === "/api/notify/check-matched") {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-          return json({ report: [...(await runTwentyV3CallCheck(env)), ...(await runTwentyV3StepCheck(env)), ...(await runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST)), ...(await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST))] });
+          const report: string[] = [];
+          for (const def of [ENGINE_V3, ENGINE_DAY, ENGINE_FAST]) report.push(...(await runTwentyV3CallCheck(env, Date.now(), def)), ...(await runTwentyV3StepCheck(env, Date.now(), def)));
+          return json({ report });
         }
 
         if (url.pathname === "/api/notify/check-now") {

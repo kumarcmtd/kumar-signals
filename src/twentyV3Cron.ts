@@ -86,7 +86,7 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now(), d
         say(read.headline);
         continue;
       }
-      const barKey = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-${symbol}`;
+      const barKey = `notified:${def.tag}-${symbol}`;
       if ((await env.COMMODITY_KV.get(barKey)) === String(read.barEnd)) {
         say(`${read.entry.side} call on this candle -- already handled.`);
         continue;
@@ -143,7 +143,7 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now(), d
         continue;
       }
       const record = await v3Record(env, token, fut.instrument_key, sym, now, def).catch(() => null);
-      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup), engineName: def.name, checks });
+      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup), engineName: def.name, checks, note: def.cardNote?.replace(/₹/g, "Rs ") });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {
@@ -166,10 +166,10 @@ export async function runTwentyV3StepCheck(env: Env, now: number = Date.now(), d
     if (last && now - last.openedAt < 20 * 3600_000) {
       const session = mcxSessionAt(now);
       for (const step of stepsOf(last, session.isOpen ? session.closeMin - session.minutes : null)) {
-        const mark = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-STEP:${last.id}:${step}`;
+        const mark = `notified:${def.tag}-STEP:${last.id}:${step}`;
         if (await env.COMMODITY_KV.get(mark)) continue;
         if (!(await cachePut(env.COMMODITY_KV, mark, "1", { expirationTtl: 2 * 86_400 }))) continue;
-        const msg = v3StepPushText(NAME[sym], last, step, LAB_LOT[sym], def.id === "v3" ? "Ai20-20" : def.name);
+        const msg = v3StepPushText(NAME[sym], last, step, LAB_LOT[sym], def.pushName);
         const sent = await sendNtfyNotification(topic, msg.title, msg.body, msg.priority, { token: env.NTFY_TOKEN });
         report.push(`${def.name} ${NAME[sym]}: ${step} ${sent.ok ? "pushed" : "push failed"}.`);
       }
@@ -181,10 +181,10 @@ export async function runTwentyV3StepCheck(env: Env, now: number = Date.now(), d
     const windowOver = wd >= 1 && wd <= 5 && (!w || istDate(w.from) !== istDate(now));
     const today = log.filter((e) => istDate(e.openedAt) === istDate(now));
     if (!windowOver || today.some((e) => !e.closed)) continue;
-    const sumKey = `notified:${def.id === "v3" ? "TWENTY3" : "SUPERFAST"}-DAY:${sym}:${istDate(now)}`;
+    const sumKey = `notified:${def.tag}-DAY:${sym}:${istDate(now)}`;
     if (await env.COMMODITY_KV.get(sumKey)) continue;
     if (!(await cachePut(env.COMMODITY_KV, sumKey, "1", { expirationTtl: 2 * 86_400 }))) continue;
-    const msg = v3DaySummaryText(NAME[sym], today, LAB_LOT[sym], def.id === "v3" ? "Ai20-20" : def.name);
+    const msg = v3DaySummaryText(NAME[sym], today, LAB_LOT[sym], def.pushName);
     const sent = await sendNtfyNotification(topic, msg.title, msg.body, "default", { token: env.NTFY_TOKEN });
     report.push(`${def.name} ${NAME[sym]}: day summary ${sent.ok ? "pushed" : "push failed"}.`);
   }

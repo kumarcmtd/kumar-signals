@@ -28,7 +28,7 @@ const MARKETS: { k: ReportMarket; t: string }[] = [
  * with v2: the old rules' calls stay saved but are not mixed into its report.
  */
 const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string }> = {
-  "/ai-20-20": { only: (k) => k.endsWith("-V3"), label: "Ai20-20 v3" },
+  "/ai-20-20": { only: (k) => k.startsWith("TWENTY20-") && (k.endsWith("-V3") || k.endsWith("-DAY")), label: "Ai20-20" },
   "/ai-super-fast": { only: (k) => k.startsWith("SUPERFAST-"), label: "Ai-Super Fast" },
 };
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */

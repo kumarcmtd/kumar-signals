@@ -61,6 +61,36 @@ export const V3_LAB = {
   bigDriveTenYears: { calls: 449, netRs: 92045, avgRs: 205, recentAvgRs: 441, holdoutAvgRs: -10, winningMonths: "26 of 56" },
 };
 
+/**
+ * Ai20-20 all day -- the v2 rule (fresh 5-minute strength turn + 1-hour trend)
+ * on every MCX hour, 9:00 AM IST to 30 minutes before the bell. Same lab,
+ * 16 Nov 2026. It lost money in every one of the ten years.
+ */
+export const DAY_LAB = {
+  ranAt: "16 Nov 2026",
+  crude: { trendDay: { recent: f(4952, 29, -193, 0.81), holdout: f(5082, 28, -194, 0.65) } } as Record<"trendDay", SetupFact>,
+  gas: { trendDay: { recent: f(4867, 29, -232, 0.76) } } as Partial<Record<V3SetupId, SetupFact>>,
+  /** Crude, Rs a call, each year. */
+  byYear: [
+    ["2017", -207],
+    ["2018", -172],
+    ["2019", -239],
+    ["2020", -159],
+    ["2021", -192],
+    ["2022", -210],
+    ["2023", -122],
+    ["2024", -200],
+    ["2025", -268],
+    ["2026", -156],
+  ] as [string, number][],
+  /** As the line runs (one call at a time, at most 2 stops / 3 calls / -Rs 3,000 a day), crude. */
+  line: { callsPerMonth: 52, recentAvgRs: -247, holdoutAvgRs: -215 },
+  /** Both Ai20-20 lines added up, crude 2022-26: profitable months. */
+  bothLines: { avgRs: -203, winningMonths: "12 of 59" },
+  /** The all-day signal on the last 50 days of real NYMEX futures. */
+  last50: { calls: 179, avgRs: -18 },
+};
+
 /** Ai-Super Fast (Speed 70+), same lab, 15 Nov 2026. */
 export const FAST_LAB = {
   ranAt: "15 Nov 2026",

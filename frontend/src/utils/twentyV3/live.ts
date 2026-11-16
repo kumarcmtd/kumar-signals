@@ -7,7 +7,7 @@ import { openNewEntry, type TradeLogEntry } from "../tradeLogCore";
 import { exitPriceFor } from "../tradeLogPnl";
 import { LAB_LOT, prepare, statsOf, type LabStats, type LabSym, type Prepared } from "../twentyLab";
 import { computeFeatures, type V3Features } from "./features";
-import { callWindow, istClock, readRegime, SETUP_WINDOWS, type Regime } from "./dayPlan";
+import { callWindow, isOneMoment, istClock, readRegime, SETUP_WINDOWS, type CallWindow, type Regime } from "./dayPlan";
 import { entryAt, SETUP_NAMES, type V3Ctx, type V3Entry, type V3SetupId } from "./setups";
 import { simulateV3, type V3Trade } from "./sim";
 import type { V3Ticket } from "./ticket";
@@ -51,24 +51,34 @@ export interface V3Read {
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const nyLabel = (etMin: number) => `${((Math.floor(etMin / 60) + 11) % 12) + 1}:${String(etMin % 60).padStart(2, "0")} ${etMin < 720 ? "AM" : "PM"} New York`;
 
-function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean): string {
+const trendText = (p: Prepared, i: number) => (p.htf60[i] === 1 ? "1-hour trend up" : p.htf60[i] === -1 ? "1-hour trend down" : "1-hour trend flat");
+
+function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean, own: CallWindow | null): string {
   const { p, f } = ctx;
   const sm = f.sessMin[i];
-  const [from, to] = SETUP_WINDOWS[id];
+  const sw = SETUP_WINDOWS[id];
+  const from = sw.from;
+  const to = typeof sw.to === "number" ? sw.to : 0;
   const et = p.etMinute[i] + 5; // the candle's end
   if (fired) return "Fired on this candle.";
+  if (id === "trendDay") {
+    const sc = p.score[i];
+    const s = Number.isFinite(sc) ? Math.round(sc) : null;
+    // v2's pause: no new call around the Wednesday EIA report.
+    if (p.etWeekday[i] === 3 && p.etMinute[i] >= 10 * 60 + 20 && p.etMinute[i] < 10 * 60 + 50) return "Paused for the EIA crude stocks report (10:20–10:50 AM New York) — no new call in it.";
+    return `Strength ${s ?? "—"} (CE needs a fresh 58+, PE 42 or less) · ${trendText(p, i)}${own?.open ? ` · new calls until ${istClock(own.to)} IST` : ""}.`;
+  }
   if (id.startsWith("fast")) {
     const sp = f.speed[i];
     const speedTxt = Number.isFinite(sp) ? `Speed ${sp}${sp >= 70 ? " ✓" : " — needs 70+"}` : "Speed not ready";
-    const trend = p.htf60[i] === 1 ? "1-hour trend up" : p.htf60[i] === -1 ? "1-hour trend down" : "1-hour trend flat";
+    const trend = trendText(p, i);
     const what = id.startsWith("fastBreak") ? "a 15-minute close beyond the last hour's range" : id.startsWith("fastTurn") ? "a fresh 5-minute strength turn" : "a half-hour close outside the normal range";
     return `${speedTxt} · waiting for ${what} with the trend · ${trend}.`;
   }
   if (id === "trend") {
     const sc = p.score[i];
     const s = Number.isFinite(sc) ? Math.round(sc) : null;
-    const trend = p.htf60[i] === 1 ? "1-hour trend up" : p.htf60[i] === -1 ? "1-hour trend down" : "1-hour trend flat";
-    return `Strength ${s ?? "—"} (CE needs a fresh 58+, PE 42 or less) · ${trend} · ${nyLabel(from)} – ${nyLabel(to)}.`;
+    return `Strength ${s ?? "—"} (CE needs a fresh 58+, PE 42 or less) · ${trendText(p, i)} · ${nyLabel(from)} – ${nyLabel(to)}.`;
   }
   if (!Number.isFinite(sm)) return `Starts after the 9:00 AM New York open (${nyLabel(from)}).`;
   if (id === "noise" || id === "noise30") {
@@ -129,7 +139,7 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
     for (let j = i - 1; !entry && j >= i - 2 && j >= 0 && p.day[j] === p.day[i]; j--) {
       if (now - (Date.parse(p.c[j].date) + BAR_MS) > 15 * 60_000) break;
       for (const id of setups) {
-        if (SETUP_WINDOWS[id][0] !== SETUP_WINDOWS[id][1]) continue;
+        if (!isOneMoment(id)) continue;
         entry = entryAt(ctx, j, id);
         if (entry) {
           at = j;
@@ -139,24 +149,25 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
     }
   }
   const callEnd = Date.parse(p.c[at].date) + BAR_MS;
-  // After the bell or on a weekend the latest candle is from an earlier session:
-  // say when the next check is, not what "today" did.
-  // Before today's window (or after it, overnight, weekends): say plainly when
-  // the next check is, in IST first -- not what a New York clock reads now.
-  const beforeWindow = w !== null && !w.open && w.from > now;
-  const waitLine = (id: V3SetupId) =>
-    SETUP_WINDOWS[id][0] === SETUP_WINDOWS[id][1]
-      ? `Checks once ${whenNext(w!.from, now)} (${nyLabel(SETUP_WINDOWS[id][0])}) — nothing to do before then.`
-      : `Watches from ${whenNext(w!.from, now)} until ${istClock(w!.to)} IST — nothing to do before then.`;
-  const statuses = setups.map((id) => ({
-    id,
-    name: SETUP_NAMES[id],
-    fired: entry?.setup === id,
-    line: beforeWindow ? waitLine(id) : statusLine(ctx, i, id, entry?.setup === id),
-  }));
+  // Before a setup's own window (or after it, overnight, weekends): say plainly
+  // when its next check is, in IST first -- not what a New York clock reads now,
+  // and not what an earlier session's last candle did.
+  const waitLine = (id: V3SetupId, own: CallWindow) =>
+    isOneMoment(id)
+      ? `Checks once ${whenNext(own.from, now)} (${nyLabel(SETUP_WINDOWS[id].from)}) — nothing to do before then.`
+      : own.bell
+        ? `Watches from ${whenNext(own.from, now)} until the ${istClock(own.bell)} IST bell (no new calls in its last 30 minutes) — nothing to do before then.`
+        : `Watches from ${whenNext(own.from, now)} until ${istClock(own.to)} IST — nothing to do before then.`;
+  const statuses = setups.map((id) => {
+    const own = callWindow([id], now);
+    const fired = entry?.setup === id;
+    return { id, name: SETUP_NAMES[id], fired, line: !fired && own && !own.open && own.from > now ? waitLine(id, own) : statusLine(ctx, i, id, fired, own) };
+  });
   const base = { barEnd, fut: p.c[i].close, setups: statuses, regime: readRegime(p, ctx.f) };
   if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
-  if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: w.from > now ? `Next check ${whenNext(w.from, now)} (${nyLabel(Math.min(...setups.map((id) => SETUP_WINDOWS[id][0])))}).` : `Calls only ${w.label}.` };
+  // The New York time only helps when every setup runs on the New York clock.
+  const nyNote = setups.every((id) => SETUP_WINDOWS[id].clock === "ny") ? ` (${nyLabel(Math.min(...setups.map((id) => SETUP_WINDOWS[id].from)))})` : "";
+  if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: w.from > now ? `Next check ${whenNext(w.from, now)}${nyNote}.` : `Calls only ${w.label}.` };
   return { ...base, state: "watch", entry: null, headline: "Watching — no setup has fired yet." };
 }
 

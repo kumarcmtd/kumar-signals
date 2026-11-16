@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { prepare } from "../../frontend/src/utils/twentyLab";
 import { computeFeatures } from "../../frontend/src/utils/twentyV3/features";
-import { firstEntry } from "../../frontend/src/utils/twentyV3/setups";
+import { entryAt, firstEntry } from "../../frontend/src/utils/twentyV3/setups";
+import { ENGINE_DAY } from "../../frontend/src/utils/twentyV3/engines";
 import { V3_ACTIVE } from "../../frontend/src/utils/twentyV3/live";
 import { callWindow } from "../../frontend/src/utils/twentyV3/dayPlan";
 import type { Candle } from "../../frontend/src/types";
@@ -115,6 +116,36 @@ test("a v3 call is recorded with the same entry the page writes and pushed once;
   const again = await runTwentyV3CallCheck(env);
   expect(again.join(" ")).toContain("already handled");
   expect(pushTradeLogs).toHaveBeenCalledTimes(1);
+}, 60_000);
+
+test("the all-day line calls in the Indian afternoon on its own log, alert marks and practice wording", async () => {
+  const all = walk(22, 42);
+  const p = prepare(all, true);
+  const ctx = { p, f: computeFeatures(p) };
+  let hit: { i: number; barEnd: number } | null = null;
+  for (let i = all.length - 1; i > 2400 && !hit; i--) {
+    const barEnd = Date.parse(all[i].date) + 5 * 60_000;
+    const istMin = Math.floor(((barEnd + 5.5 * 3600_000) % 86_400_000) / 60_000);
+    // Well outside the New York session: proof the line watches the whole MCX day.
+    if (istMin < 17 * 60 && entryAt(ctx, i, "trendDay") && callWindow(["trendDay"], barEnd + 20_000)?.open) hit = { i, barEnd };
+  }
+  expect(hit).not.toBeNull();
+  candles = all.slice(0, hit!.i + 1);
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(hit!.barEnd + 20_000));
+  const store = kv();
+  store.m.set("access_token", "t");
+  store.m.set("ntfy_topic", "topic");
+  const report = await runTwentyV3CallCheck({ COMMODITY_KV: store } as any, Date.now(), ENGINE_DAY);
+  expect(report.join(" ")).toContain("call recorded");
+  const body = pushTradeLogs.mock.calls[0][1] as Record<string, { practice?: boolean; meta?: { label: string } }[]>;
+  expect(Object.keys(body)).toEqual(["TWENTY20-CRUDEOIL-DAY"]);
+  expect(body["TWENTY20-CRUDEOIL-DAY"][0].meta?.label).toBe("Ai20-20 all day · Trend turn · all day (practice)");
+  expect(body["TWENTY20-CRUDEOIL-DAY"][0].practice).toBe(true);
+  expect(store.m.get("notified:TWENTY3DAY-CRUDEOIL")).toBe(String(hit!.barEnd));
+  expect(store.m.has("notified:TWENTY3-CRUDEOIL")).toBe(false);
+  const push = fetchMock.mock.calls.find((c) => String(c[0]).includes("ntfy"));
+  expect(JSON.stringify(push)).toContain("lost money in every year");
 }, 60_000);
 
 test("a running call blocks a new one (one at a time)", async () => {

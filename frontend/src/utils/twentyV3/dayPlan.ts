@@ -2,40 +2,58 @@
 // calls can come, what is on the calendar, and what kind of market it is.
 
 import type { OptionsAnalytics } from "../../types";
-import { usDstForSession } from "../mcxSession";
+import { mcxCloseMinutes, usDstForSession } from "../mcxSession";
 import { daysToExpiry } from "../oiBuildup";
 import type { Prepared } from "../twentyLab";
 import type { V3Features } from "./features";
-import type { V3SetupId } from "./setups";
+import { LAST_CALL_BEFORE_BELL_MIN, type V3SetupId } from "./setups";
 
-/** New York minutes [from, to] at which each setup can make a call (the candle's end). */
-export const SETUP_WINDOWS: Record<V3SetupId, [number, number]> = {
-  trend: [10 * 60 + 35, 13 * 60 + 20],
-  noise: [9 * 60 + 30, 12 * 60 + 30],
-  noise30: [9 * 60 + 30, 12 * 60 + 30],
-  orb: [9 * 60 + 35, 11 * 60],
-  orbTrend: [9 * 60 + 35, 11 * 60],
-  drive: [9 * 60 + 30, 9 * 60 + 30],
-  drive60: [10 * 60, 10 * 60],
-  vwapPull: [10 * 60 + 5, 12 * 60 + 35],
-  eia: [10 * 60 + 45, 10 * 60 + 45],
-  eiaFade: [10 * 60 + 45, 10 * 60 + 45],
-  driveTrend: [9 * 60 + 30, 9 * 60 + 30],
-  driveBusy: [9 * 60 + 30, 9 * 60 + 30],
-  driveSteps: [9 * 60 + 30, 9 * 60 + 30],
-  driveStrict: [9 * 60 + 30, 9 * 60 + 30],
-  fastTurnUS: [9 * 60 + 30, 13 * 60 + 20],
-  fastBreakUS: [9 * 60 + 30, 13 * 60 + 20],
-  fastNoiseUS: [9 * 60 + 30, 12 * 60 + 30],
-  // All day: 10:00 AM - 11:00 PM IST, expressed in New York minutes for the clock (winter: IST - 10:30).
-  fastTurnDay: [-30, 12 * 60 + 30],
-  fastBreakDay: [-30, 12 * 60 + 30],
-  trendDay: [-90, 12 * 60 + 55],
+/**
+ * When each setup can make a call. "ny": minutes on the New York clock, the
+ * signal candle's end (the 9:30 opening drive is one moment). "ist": minutes on
+ * the IST clock, from when watching starts to the last candle's end; "bell" =
+ * 30 minutes before that day's MCX close (11:00 PM in US summer, 11:25 PM in
+ * US winter) -- running calls are closed at the bell itself.
+ */
+export type SetupWindow = { clock: "ny"; from: number; to: number } | { clock: "ist"; from: number; to: number | "bell" };
+const ny = (from: number, to = from): SetupWindow => ({ clock: "ny", from, to });
+const ist = (from: number, to: number | "bell"): SetupWindow => ({ clock: "ist", from, to });
+
+export const SETUP_WINDOWS: Record<V3SetupId, SetupWindow> = {
+  trend: ny(10 * 60 + 35, 13 * 60 + 20),
+  noise: ny(9 * 60 + 30, 12 * 60 + 30),
+  noise30: ny(9 * 60 + 30, 12 * 60 + 30),
+  orb: ny(9 * 60 + 35, 11 * 60),
+  orbTrend: ny(9 * 60 + 35, 11 * 60),
+  drive: ny(9 * 60 + 30),
+  drive60: ny(10 * 60),
+  vwapPull: ny(10 * 60 + 5, 12 * 60 + 35),
+  eia: ny(10 * 60 + 45),
+  eiaFade: ny(10 * 60 + 45),
+  driveTrend: ny(9 * 60 + 30),
+  driveBusy: ny(9 * 60 + 30),
+  driveSteps: ny(9 * 60 + 30),
+  driveStrict: ny(9 * 60 + 30),
+  fastTurnUS: ny(9 * 60 + 30, 13 * 60 + 20),
+  fastBreakUS: ny(9 * 60 + 30, 13 * 60 + 20),
+  fastNoiseUS: ny(9 * 60 + 30, 12 * 60 + 30),
+  // The whole MCX day (setups.ts): from the 9:00 AM open to 30 minutes before the bell.
+  trendDay: ist(9 * 60, "bell"),
+  fastTurnDay: ist(10 * 60, 23 * 60),
+  fastBreakDay: ist(10 * 60, 23 * 60),
+};
+
+/** Checked on one candle only (the 9:30 opening drive). */
+export const isOneMoment = (id: V3SetupId) => {
+  const w = SETUP_WINDOWS[id];
+  return w.clock === "ny" && w.from === w.to;
 };
 
 const IST_MS = 5.5 * 3600_000;
-/** No call after 23:30 IST, whatever the setup: too close to the bell. */
+/** No New York-clock call after 23:30 IST: too close to the bell. */
 const IST_LAST_CALL = 23 * 60 + 30;
+/** A one-moment setup stays "open" 10 minutes so the 5-minute server check and a late data feed can still act on that candle. */
+const MOMENT_GRACE_MS = 10 * 60_000;
 
 const nyOffsetMs = (ms: number) => {
   const d = new Date(ms);
@@ -57,28 +75,44 @@ function etInstant(dayStartEt: number, etMin: number): number {
 export interface CallWindow {
   open: boolean;
   from: number;
+  /** When new calls stop (a one-moment setup: plus its 10-minute grace). */
   to: number;
-  /** e.g. "8:00 PM – 11:00 PM IST" */
+  /** e.g. "8:00 PM – 11:00 PM IST", "at 8:00 PM IST", "9:00 AM – 11:55 PM IST" */
   label: string;
+  /** The MCX close, when the window runs to the bell (all-day setups). */
+  bell: number | null;
 }
 
-/** Today's (or the next weekday's) call window for these setups. */
+/** One setup's window on the MCX day dated `day` (that date's UTC midnight): [from, last call, until, bell]. */
+function spanOn(id: V3SetupId, day: number): [number, number, number, number | null] {
+  const w = SETUP_WINDOWS[id];
+  const istMidnight = day - IST_MS;
+  if (w.clock === "ist") {
+    const d = new Date(day);
+    const bell = istMidnight + mcxCloseMinutes(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()) * 60_000;
+    const to = w.to === "bell" ? bell - LAST_CALL_BEFORE_BELL_MIN * 60_000 : istMidnight + w.to * 60_000;
+    return [istMidnight + w.from * 60_000, to, to, w.to === "bell" ? bell : null];
+  }
+  const to = Math.min(etInstant(day, w.to), istMidnight + IST_LAST_CALL * 60_000);
+  return [etInstant(day, w.from), to, to + (w.from === w.to ? MOMENT_GRACE_MS : 0), null];
+}
+
+/** Today's (or the next weekday's) call window for these setups: from the earliest start to the latest end. */
 export function callWindow(setups: readonly V3SetupId[], now: number = Date.now()): CallWindow | null {
   if (!setups.length) return null;
-  const fromEt = Math.min(...setups.map((s) => SETUP_WINDOWS[s][0]));
-  const toEt = Math.max(...setups.map((s) => SETUP_WINDOWS[s][1]));
-  // A one-moment setup (the 9:30 opening drive) stays "open" 10 minutes so the
-  // 5-minute server check and a late data feed can still act on that candle.
-  const grace = fromEt === toEt ? 10 : 0;
-  let dayStart = Math.floor((now - nyOffsetMs(now)) / 86_400_000) * 86_400_000;
-  for (let k = 0; k < 8; k++, dayStart += 86_400_000) {
-    const wd = new Date(dayStart).getUTCDay();
+  let day = Math.floor((now - nyOffsetMs(now)) / 86_400_000) * 86_400_000;
+  for (let k = 0; k < 8; k++, day += 86_400_000) {
+    const wd = new Date(day).getUTCDay();
     if (wd === 0 || wd === 6) continue;
-    const from = etInstant(dayStart, fromEt);
-    const istMidnight = Math.floor((from + IST_MS) / 86_400_000) * 86_400_000 - IST_MS;
-    const to = Math.min(etInstant(dayStart, toEt), istMidnight + IST_LAST_CALL * 60_000);
-    const until = to + grace * 60_000;
-    if (now <= until) return { open: now >= from, from, to: until, label: grace ? `at ${istClock(from)} IST` : `${istClock(from)} – ${istClock(to)} IST` };
+    const spans = setups.map((id) => spanOn(id, day));
+    const until = Math.max(...spans.map((x) => x[2]));
+    if (now > until) continue;
+    const from = Math.min(...spans.map((x) => x[0]));
+    const last = Math.max(...spans.map((x) => x[1]));
+    const bells = spans.map((x) => x[3]).filter((b): b is number => b !== null);
+    const bell = bells.length ? Math.max(...bells) : null;
+    const label = from === last ? `at ${istClock(from)} IST` : `${istClock(from)} – ${istClock(bell ?? last)} IST`;
+    return { open: now >= from, from, to: until, label, bell };
   }
   return null;
 }

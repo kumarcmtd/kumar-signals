@@ -11,11 +11,11 @@ import type { V3Ticket } from "./ticket";
 const inr = (n: number) => `Rs ${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "-"}${inr(n)}`;
 
-export function v3CallPushText(p: { displayName: string; t: V3Ticket; setup: V3SetupId; regime: string | null; record: { trades: number; avgRs: number | null } | null; hold?: boolean; practice?: boolean; engineName?: string; checks?: string[] }): { title: string; body: string } {
+export function v3CallPushText(p: { displayName: string; t: V3Ticket; setup: V3SetupId; regime: string | null; record: { trades: number; avgRs: number | null } | null; hold?: boolean; practice?: boolean; engineName?: string; checks?: string[]; note?: string }): { title: string; body: string } {
   const { t } = p;
   const lots = lotsFor(DEFAULT_PLAN, t.riskPerLot, t.premiumPerLot);
   const lines = [
-    p.practice ? "PRACTICE CALL — paper only. This setup has not proven itself on 10 years of prices; no real money until its live record does." : "",
+    p.practice ? (p.note ?? "PRACTICE CALL — paper only. This setup has not proven itself on 10 years of prices; no real money until its live record does.") : "",
     `BUY ${p.displayName} ${t.strike} ${t.side} @ Rs ${t.entry} (don't pay above Rs ${t.maxPay}) · 1 lot = ${t.lotSize}`,
     p.hold
       ? `Stop Rs ${t.stop} (${signed(-t.riskPerLot)}/lot), fixed | profit marks Rs ${t.targets[0]} (${signed(t.targetRsPerLot[0])}/lot) · Rs ${t.targets[1]} · Rs ${t.targets[2]}`

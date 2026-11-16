@@ -166,7 +166,10 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
       <div className="p-4 flex items-center gap-3" style={{ background: headBg }}>
         <div className="flex-1 min-w-0">
-          <p className="text-[15px] font-black text-slate-800">{s.sym === "CRUDEOIL" ? "🛢️ Crude Oil" : "🔥 Natural Gas"}</p>
+          <p className="text-[15px] font-black text-slate-800">
+            {s.sym === "CRUDEOIL" ? "🛢️ Crude Oil" : "🔥 Natural Gas"}
+            {s.def.cardLabel && s.def.active[s.sym].length > 0 && <span className="ml-1.5 text-[11px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 align-middle">{s.def.cardLabel}</span>}
+          </p>
           <p className="text-[11px] text-slate-500 leading-snug">{open ? `${open.optSide} call running — follow the steps below.` : r.headline}</p>
         </div>
         <span className="shrink-0 flex items-center gap-1 text-[10.5px] font-black px-2.5 py-1 rounded-full text-white" style={{ background: accent }}>
@@ -194,6 +197,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
             ))}
           </div>
         )}
+        {s.def.cardNote && s.def.active[s.sym].length > 0 && <p className="text-[11px] font-bold text-amber-900 rounded-xl bg-amber-50 border border-amber-200 px-2.5 py-2">⚠️ {s.def.cardNote}</p>}
         {!open && s.gates.length > 0 && (
           <div className="space-y-1">
             <p className="text-[10px] font-black uppercase text-slate-400">Live checks before the call opens</p>

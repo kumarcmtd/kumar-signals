@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { prepare, simulate, type Prepared } from "../utils/twentyLab";
+import { prepare, signalAt, simulate, type Prepared } from "../utils/twentyLab";
 import { V2_RULES } from "../utils/twentyV2";
 import { computeFeatures, sessionMinute, NOISE_MIN_DAYS } from "../utils/twentyV3/features";
-import { entryAt, firstEntry, type V3Ctx } from "../utils/twentyV3/setups";
+import { bellMinute, entryAt, firstEntry, type V3Ctx } from "../utils/twentyV3/setups";
 import { readV3, V3_ACTIVE } from "../utils/twentyV3/live";
+import { ENGINE_DAY } from "../utils/twentyV3/engines";
 import { simulateV3 } from "../utils/twentyV3/sim";
 import type { Candle } from "../types";
 
@@ -133,6 +134,65 @@ describe("v3 setups", () => {
     const b = simulateV3(ctx, ["trend"], { sym: "CRUDEOIL" });
     expect(b.map((x) => [x.openIdx, x.closeIdx, x.rs, x.exit])).toEqual(a.map((x) => [x.openIdx, x.closeIdx, x.rs, x.exit]));
   }, 30_000);
+
+  test("all day: the v2 signal on every MCX hour from 9:00 AM IST, none in the last 30 minutes before the bell", () => {
+    let px = 6000;
+    let drift = 0;
+    let seed = 5;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const c: Candle[] = [];
+    for (const d of weekdays(14))
+      for (let m = 9 * 60; m < 23 * 60 + 55; m += 5) {
+        if (rnd() < 0.03) drift = (rnd() - 0.5) * 6;
+        const o = px;
+        px += drift + (rnd() - 0.5) * 10;
+        c.push({ date: new Date(ist(d, m)).toISOString(), open: o, high: Math.max(o, px) + 2, low: Math.min(o, px) - 2, close: px, volume: 100 });
+      }
+    const p = prepare(c, true);
+    const ctx: V3Ctx = { p, f: computeFeatures(p) };
+    let morning = 0;
+    let fired = 0;
+    for (let i = 0; i < c.length; i++) {
+      expect(bellMinute(p, i)).toBe(23 * 60 + 55); // November: New York on winter time
+      const inWin = p.minute[i] + 5 <= 23 * 60 + 25;
+      const e = entryAt(ctx, i, "trendDay");
+      expect(e?.side ?? null).toBe(inWin ? signalAt(p, i, { ...V2_RULES, hours: "all" }) : null);
+      if (e) {
+        fired++;
+        if (p.minute[i] < 17 * 60) morning++;
+        expect(e.manage).toBe("steps");
+      }
+    }
+    expect(fired).toBeGreaterThan(20);
+    expect(morning).toBeGreaterThan(5); // it really calls outside the New York session
+    // US summer: the bell is 11:30 PM IST, so the last new call is on the candle ending 11:00 PM.
+    expect(bellMinute({ minute: [600], etMinute: [30] } as unknown as Prepared, 0)).toBe(23 * 60 + 30);
+  }, 60_000);
+
+  test("all-day line: the live read calls exactly what the lab replay calls, candle by candle", () => {
+    let px = 6000;
+    let drift = 0;
+    let seed = 13;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const c: Candle[] = [];
+    for (const d of weekdays(15))
+      for (let m = 9 * 60; m < 23 * 60 + 55; m += 5) {
+        if (rnd() < 0.03) drift = (rnd() - 0.5) * 6;
+        const o = px;
+        px += drift + (rnd() - 0.5) * 10;
+        c.push({ date: new Date(ist(d, m)).toISOString(), open: o, high: Math.max(o, px) + 2, low: Math.min(o, px) - 2, close: px, volume: 100 });
+      }
+    const p = prepare(c, true);
+    const full: V3Ctx = { p, f: computeFeatures(p) };
+    let fired = 0;
+    for (let i = c.length - 2 * 179; i < c.length; i++) {
+      const lab = firstEntry(full, i, ["trendDay"]);
+      const live = readV3(c.slice(0, i + 1), "CRUDEOIL", Date.parse(c[i].date) + 5 * 60_000 + 1000, undefined, ENGINE_DAY);
+      expect(live.entry?.side ?? null).toBe(lab?.side ?? null);
+      if (lab) fired++;
+    }
+    expect(fired).toBeGreaterThan(3);
+  }, 120_000);
 
   test("the live read calls exactly what the lab replay calls, candle by candle", () => {
     let px = 6000;

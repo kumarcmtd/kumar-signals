@@ -105,6 +105,25 @@ describe("day plan", () => {
     expect(callWindow([], Date.now())).toBeNull();
   });
 
+  test("the all-day line watches 9:00 AM to the bell in IST; new calls stop 30 minutes before it", () => {
+    const w = callWindow(["trendDay"], ist("2026-11-16T10:00:00"))!; // Monday, US winter: bell 11:55 PM
+    expect(w.open).toBe(true);
+    expect(w.label).toBe("9:00 AM – 11:55 PM IST");
+    expect(w.to).toBe(ist("2026-11-16T23:25:00"));
+    expect(w.bell).toBe(ist("2026-11-16T23:55:00"));
+    const summer = callWindow(["trendDay"], ist("2026-07-13T10:00:00"))!; // US summer: bell 11:30 PM
+    expect(summer.label).toBe("9:00 AM – 11:30 PM IST");
+    expect(summer.to).toBe(ist("2026-07-13T23:00:00"));
+    const early = callWindow(["trendDay"], ist("2026-11-17T08:30:00"))!;
+    expect(early.open).toBe(false);
+    expect(early.from).toBe(ist("2026-11-17T09:00:00"));
+    const late = callWindow(["trendDay"], ist("2026-11-20T23:30:00"))!; // Friday, after the last new call
+    expect(late.from).toBe(ist("2026-11-23T09:00:00"));
+    // The opening drive alone is one moment; with the all-day line the page window spans the day.
+    expect(callWindow(["driveStrict"], ist("2026-11-16T10:00:00"))!.label).toBe("at 8:00 PM IST");
+    expect(callWindow(["driveStrict", "trendDay"], ist("2026-11-16T10:00:00"))!.label).toBe("9:00 AM – 11:55 PM IST");
+  });
+
   test("Wednesday shows the EIA time in IST; expiry within 3 days is flagged", () => {
     const ev = dayEvents(chain({ expiry: "2026-11-20" }), ist("2026-11-18T10:00:00"));
     expect(ev.some((e) => e.label.includes("9:00 PM IST"))).toBe(true);
@@ -190,5 +209,18 @@ describe("waiting before the evening window", () => {
     const r = readV3(c, "CRUDEOIL", now, { p, f: computeFeatures(p) });
     expect(r.state).toBe("window_closed");
     expect(r.setups[0].line).toBe("Checks once today at 8:00 PM IST (9:30 AM New York) — nothing to do before then.");
+    // The all-day line is already watching at 9:43 AM.
+    const { ENGINE_DAY } = await import("../utils/twentyV3/engines");
+    const d = readV3(c, "CRUDEOIL", now, { p, f: computeFeatures(p) }, ENGINE_DAY);
+    expect(["watch", "call"]).toContain(d.state);
+    if (d.state === "watch") expect(d.setups[0].line).toMatch(/^Strength .* · new calls until 11:25 PM IST\.$/);
+    // Before the 9:00 AM open it says when it starts, in IST, with no New York time.
+    const before = ist("2026-11-16T08:30:00");
+    const c0 = c.filter((k) => Date.parse(k.date) + 5 * 60_000 <= before);
+    const p0 = prepare(c0, 3);
+    const b = readV3(c0, "CRUDEOIL", before, { p: p0, f: computeFeatures(p0) }, ENGINE_DAY);
+    expect(b.state).toBe("window_closed");
+    expect(b.headline).toBe("Next check today at 9:00 AM IST.");
+    expect(b.setups[0].line).toBe("Watches from today at 9:00 AM IST until the 11:55 PM IST bell (no new calls in its last 30 minutes) — nothing to do before then.");
   });
 });

@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { ShieldAlert, ChevronDown } from "lucide-react";
-import { V3_LAB } from "../../utils/twentyV3/labFacts";
+import { DAY_LAB, V3_LAB } from "../../utils/twentyV3/labFacts";
 
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${inr(n)}`;
@@ -12,6 +12,7 @@ export function TruthCard() {
   const [open, setOpen] = useState(false);
   const v2 = V3_LAB.v2TenYears;
   const bd = V3_LAB.bigDriveTenYears;
+  const day = DAY_LAB.crude.trendDay;
   return (
     <section className="rounded-3xl shadow-md overflow-hidden bg-white border-2 border-amber-300">
       <button onClick={() => setOpen((o) => !o)} className="w-full p-4 flex items-start gap-3 text-left" style={{ background: "linear-gradient(135deg,#FFFBEB,#FFFFFF)" }}>
@@ -19,7 +20,7 @@ export function TruthCard() {
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-black text-slate-800">The truth from 10 years of prices</p>
           <p className="text-[11.5px] text-slate-600 leading-snug mt-0.5">
-            14 strategies replayed on every 5-minute crude candle since 2017, costs included. <b>None made money reliably.</b> So v3 gives <b>practice calls</b> — real-money calls only when a setup proves itself live.
+            15 strategies replayed on every 5-minute crude candle since 2017, costs included. <b>None made money reliably.</b> So Ai20-20 gives <b>practice calls</b> — real-money calls only when a setup proves itself live. The all-day calls you asked for lost money in all ten years.
           </p>
         </div>
         <ChevronDown size={16} className={`text-slate-400 shrink-0 mt-1 transition-transform ${open ? "rotate-180" : ""}`} />
@@ -31,6 +32,9 @@ export function TruthCard() {
           </p>
           <p>
             <b>The best idea we found — the big opening drive</b> (at 9:30 AM New York, follow a first half hour that moved much more than usual): {signed(bd.avgRs)} a call over {bd.calls} calls in ten years. But it made {signed(bd.recentAvgRs)} a call in 2022–26 and {signed(bd.holdoutAvgRs)} in 2017–21, the years we kept aside to check it. Profitable months: {bd.winningMonths}. Not proven — so it runs as practice.
+          </p>
+          <p>
+            <b>The all-day line (9:00 AM – 11:55 PM IST, as you asked):</b> the original Ai20-20 signal on every MCX hour. It lost money in <b>every one of the ten years</b> — {signed(day.recent.avgRs)} a call in 2022–26 and {signed(day.holdout!.avgRs)} in 2017–21, about {DAY_LAB.line.callsPerMonth} calls a month. With the opening drive added, only {DAY_LAB.bothLines.winningMonths} months made money. It runs as practice on its own line, so it never blocks the opening drive.
           </p>
           <p>
             <b>Natural gas:</b> every strategy lost money over 2022–26. No gas calls.

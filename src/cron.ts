@@ -29,7 +29,7 @@ import { warmEnergyNews } from "./news";
 import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
-import { ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
+import { ENGINE_DAY, ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
@@ -52,6 +52,7 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
         const busy = await runTradeLogAdvanceCheck(env);
         // Ai20-20 v3: tell the phone each step the calls just reached (T1, stop, close).
         await runTwentyV3StepCheck(env).catch(() => undefined);
+        await runTwentyV3StepCheck(env, Date.now(), ENGINE_DAY).catch(() => undefined);
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST).catch(() => undefined);
         if (!busy) await warmTimeProfiles(env);
       })()
@@ -78,6 +79,9 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
     runTradeCardTracker(env)
       .catch(() => undefined)
       .then(() => runTwentyV3CallCheck(env))
+      .catch(() => undefined)
+      // Ai20-20 all day: its own practice line, 9:00 AM IST to 30 minutes before the bell.
+      .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_DAY))
       .catch(() => undefined)
       // Ai-Super Fast: Speed 70+ practice calls with live liquidity and news checks.
       .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST))

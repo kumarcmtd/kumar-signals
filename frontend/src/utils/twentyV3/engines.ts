@@ -4,9 +4,10 @@
 // management, alerts, the journal -- is the same tested code for both pages.
 
 import type { LabSym } from "../twentyLab";
+import { DAY_LAB } from "./labFacts";
 import type { V3SetupId } from "./setups";
 
-export type EngineId = "v3" | "fast";
+export type EngineId = "v3" | "fast" | "day";
 
 export interface EngineDef {
   id: EngineId;
@@ -26,6 +27,14 @@ export interface EngineDef {
   offText: string;
   /** When a call can come, in a few words (shown under the window). */
   callsWhen: string;
+  /** The line's name on its call card when a page runs two lines (e.g. "All day"). */
+  cardLabel?: string;
+  /** A standing warning on the line's card. */
+  cardNote?: string;
+  /** Server alert marks (KV) are named after this, e.g. "TWENTY3". */
+  tag: string;
+  /** The name in phone alerts. */
+  pushName: string;
 }
 
 export const ENGINE_V3: EngineDef = {
@@ -40,6 +49,31 @@ export const ENGINE_V3: EngineDef = {
   olderKeys: (sym) => [`TWENTY20-${sym}-LIVE`, `TWENTY20-${sym}-V2`],
   offText: "Every setup lost money on years of gas prices — no gas calls.",
   callsWhen: "only on days with a big opening move",
+  cardLabel: "Opening drive",
+  tag: "TWENTY3",
+  pushName: "Ai20-20",
+};
+
+export const ENGINE_DAY: EngineDef = {
+  id: "day",
+  name: "Ai20-20 all day",
+  route: "/ai-20-20",
+  key: (sym) => `TWENTY20-${sym}-DAY`,
+  // The owner asked for calls through the whole MCX day (9:00 AM - 11:55 PM IST).
+  // 10-year lab: the v2 rule over every MCX hour lost money in all ten years
+  // (about -Rs 190 a call after costs), so it is PRACTICE only -- and its own
+  // line (own log, one call at a time, own day limits) so it can never block
+  // the big opening drive.
+  active: { CRUDEOIL: ["trendDay"], NATURALGAS: [] },
+  practice: new Set<V3SetupId>(["trendDay"]),
+  gates: { liquidity: false, news: false },
+  olderKeys: () => [],
+  offText: "Every setup lost money on years of gas prices — no gas calls.",
+  callsWhen: "a fresh 5-minute strength turn with the 1-hour trend",
+  cardLabel: "All day",
+  cardNote: `Practice only — on ten years of crude prices this all-day signal lost money in every year (about ₹${Math.abs(DAY_LAB.crude.trendDay.recent.avgRs)} a call after costs). Learn from it; do not trade it with money.`,
+  tag: "TWENTY3DAY",
+  pushName: "Ai20-20 all day",
 };
 
 export const ENGINE_FAST: EngineDef = {
@@ -58,9 +92,11 @@ export const ENGINE_FAST: EngineDef = {
   olderKeys: () => [],
   offText: "No Speed 70+ setup made money on years of gas prices — no gas calls.",
   callsWhen: "only when Speed is 70+, the strike is liquid and the news agrees",
+  tag: "SUPERFAST",
+  pushName: "Ai-Super Fast",
 };
 
-export const ENGINES: readonly EngineDef[] = [ENGINE_V3, ENGINE_FAST];
-export const engineById = (id: EngineId): EngineDef => (id === "fast" ? ENGINE_FAST : ENGINE_V3);
+export const ENGINES: readonly EngineDef[] = [ENGINE_V3, ENGINE_DAY, ENGINE_FAST];
+export const engineById = (id: EngineId): EngineDef => (id === "fast" ? ENGINE_FAST : id === "day" ? ENGINE_DAY : ENGINE_V3);
 /** Practice-only anywhere (setup ids are unique across pages). */
 export const isPracticeAnywhere = (id: V3SetupId) => ENGINES.some((e) => e.practice.has(id));

@@ -5,8 +5,7 @@
 import { useState } from "react";
 import { FlaskConical, ChevronDown } from "lucide-react";
 import type { TwentyV3State } from "../../hooks/useTwentyV3";
-import { V3_LAB, type PeriodFact, type SetupFact } from "../../utils/twentyV3/labFacts";
-import type { EngineDef } from "../../utils/twentyV3/engines";
+import { DAY_LAB, V3_LAB, type PeriodFact, type SetupFact } from "../../utils/twentyV3/labFacts";
 import { SETUP_NAMES, type V3SetupId } from "../../utils/twentyV3/setups";
 import { isPracticeSetup } from "../../utils/twentyV3/live";
 
@@ -79,14 +78,15 @@ function SetupCard({ id, f, s, gas, market }: { id: V3SetupId; f: SetupFact; s: 
 type Row = { id: V3SetupId; f: SetupFact; gas: boolean };
 const rowsOf = (facts: Partial<Record<V3SetupId, SetupFact>>, gas: boolean): Row[] => ORDER.filter((id) => facts[id]).map((id) => ({ id, f: facts[id]!, gas }));
 
-export function SetupsBoard({ crude, gas, facts = V3_LAB, years = 10 }: { crude: TwentyV3State; gas: TwentyV3State; facts?: { crude: Partial<Record<V3SetupId, SetupFact>>; gas: Partial<Record<V3SetupId, SetupFact>> }; years?: number }) {
+export function SetupsBoard({ crude, gas, also, facts = V3_LAB, years = 10 }: { crude: TwentyV3State; gas: TwentyV3State; also?: TwentyV3State; facts?: { crude: Partial<Record<V3SetupId, SetupFact>>; gas: Partial<Record<V3SetupId, SetupFact>> }; years?: number }) {
   const [showRejected, setShowRejected] = useState(false);
-  const def: EngineDef = crude.def;
-  const all = [...rowsOf(facts.crude, false), ...rowsOf(facts.gas, true)];
-  const isOn = (r: Row) => def.active[r.gas ? "NATURALGAS" : "CRUDEOIL"].includes(r.id);
+  // The line (page engine) a setup runs on: the page's own, or its second line.
+  const lineOf = (r: Row): TwentyV3State => (also && also.def.active[r.gas ? "NATURALGAS" : "CRUDEOIL"].includes(r.id) ? also : r.gas ? gas : crude);
+  const all = [...rowsOf({ ...facts.crude, ...(also ? DAY_LAB.crude : {}) }, false), ...rowsOf({ ...facts.gas, ...(also ? DAY_LAB.gas : {}) }, true)];
+  const isOn = (r: Row) => lineOf(r).def.active[r.gas ? "NATURALGAS" : "CRUDEOIL"].includes(r.id);
   const active = all.filter(isOn);
   const rejected = all.filter((r) => !isOn(r));
-  const card = (r: Row) => <SetupCard key={`${r.gas ? "g" : "c"}-${r.id}`} id={r.id} f={r.f} s={r.gas ? gas : crude} gas={r.gas} market={r.gas ? "Gas" : "Crude"} />;
+  const card = (r: Row) => <SetupCard key={`${r.gas ? "g" : "c"}-${r.id}`} id={r.id} f={r.f} s={lineOf(r)} gas={r.gas} market={r.gas ? "Gas" : "Crude"} />;
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden">
       <div className="p-4 pb-2 flex items-center gap-3" style={{ background: "linear-gradient(135deg,#FDF4FF,#FFFFFF)" }}>

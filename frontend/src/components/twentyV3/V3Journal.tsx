@@ -20,6 +20,12 @@ const STATUS: Record<string, string> = {
   closed_manual: "Closed",
 };
 
+/** "Ai20-20 all day · Trend turn · all day (practice)" -> "Trend turn · all day". */
+const setupLabel = (label: string) => {
+  const i = label.indexOf(" · ");
+  return (i >= 0 ? label.slice(i + 3) : label).replace(" (practice)", "");
+};
+
 export interface JournalRow {
   sym: LabSym;
   entry: TradeLogEntry;
@@ -62,7 +68,7 @@ export function V3Journal({ rows, lots, onOpen, name = "v3" }: { rows: JournalRo
         <NotebookPen size={15} className="text-amber-500" /> {`My ${name} journal${rows.length && rows.every((r) => r.entry.practice) ? " — practice calls" : ""}`}
       </p>
       {stats.n === 0 ? (
-        <p className="text-[11.5px] text-slate-500">{`No ${name} call has closed yet. Each one lands here with its result — practice calls too — so ${name} is judged on what really happens, not on promises.`}</p>
+        <p className="text-[11.5px] text-slate-500">{`No ${name} call has closed yet. Each one lands here with its result — practice calls too — judged on what really happens, not on promises.`}</p>
       ) : (
         <div className="grid grid-cols-3 gap-2 text-center">
           {[
@@ -99,7 +105,7 @@ export function V3Journal({ rows, lots, onOpen, name = "v3" }: { rows: JournalRo
                 <div className="min-w-0">
                   <p className="text-xs font-bold truncate text-slate-700">
                     {e.practice && <span className="mr-1 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">PAPER</span>}
-                    {r.sym === "CRUDEOIL" ? "Crude" : "Gas"} {e.strike} {e.optSide} <span className="text-[10px] font-semibold text-slate-400">· {(e.meta?.label ?? "").replace("Ai20-20 v3 · ", "").replace(" (practice)", "")}</span>
+                    {r.sym === "CRUDEOIL" ? "Crude" : "Gas"} {e.strike} {e.optSide} <span className="text-[10px] font-semibold text-slate-400">· {setupLabel(e.meta?.label ?? "")}</span>
                   </p>
                   <p className="text-[10px] text-slate-400">
                     {fmtWhen(e.openedAt)} at ₹{e.entry}
