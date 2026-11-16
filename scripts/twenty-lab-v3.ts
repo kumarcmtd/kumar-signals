@@ -31,8 +31,8 @@ const IS_FAST = process.env.LAB_SET === "fast";
 /** Ai20-20 all day (LAB_SET=day): the v2 rule over every MCX hour, next to the v2 rule in its own US window. */
 const DAY: V3SetupId[] = ["trendDay", "trend"];
 const IS_DAY = process.env.LAB_SET === "day";
-/** How Ai20-20 runs with the all-day setup: the big opening drive first, the all-day turn otherwise. */
-const DAY_LIVE: V3SetupId[] = ["driveStrict", "trendDay"];
+/** Ai20-20 with the all-day setup: two separate practice lines, each one call at a time with its own day limits. */
+const DAY_LANES: V3SetupId[] = ["driveStrict", "trendDay"];
 const CANDIDATES: V3SetupId[] = IS_FAST ? FAST : IS_DAY ? DAY : CANDIDATES_V3;
 const ROUND2: V3SetupId[] = IS_FAST || IS_DAY ? [] : ROUND2_V3;
 const PICK = { minTrades: 80, minAvgRs: 100, minPf: 1.15 };
@@ -157,6 +157,22 @@ function deepDive(d: Data, picked: V3SetupId[], lines: string[], what = "picked 
   }
 }
 
+/** Each setup as its own line (one call at a time, its own day limits), then both lines added up. */
+function lanes(d: Data, ids: V3SetupId[], lines: string[], title: string) {
+  const each = ids.map((id) => run(d, [id], GUARDS));
+  const both = each.flat().sort((a, b) => a.openIdx - b.openIdx);
+  lines.push(`\n**${title}** (each line: one call at a time, max 2 stops / 3 trades a day, stop at -Rs 3,000)`, HEAD);
+  ids.forEach((id, k) => lines.push(row(SETUP_NAMES[id], each[k], d)));
+  lines.push(row("Both lines", both, d));
+  if (d.years) {
+    lines.push(`- Both lines by year: ${byYear(both)}`);
+    const months = new Map<string, number>();
+    for (const x of both) months.set(x.openAt.slice(0, 7), (months.get(x.openAt.slice(0, 7)) ?? 0) + x.rs);
+    const mv = [...months.values()];
+    lines.push(`- Months ${mv.length}, winning months ${mv.filter((x) => x > 0).length}, worst month ${fmt(Math.min(0, ...mv))}, best month ${fmt(Math.max(0, ...mv))}`);
+  }
+}
+
 function ensemble(d: Data, picked: V3SetupId[], lines: string[], title: string) {
   if (!picked.length) return;
   const t = run(d, picked, GUARDS);
@@ -247,8 +263,7 @@ async function main() {
       if (IS_DAY) {
         // Measured whether or not it passes: this is what Ai20-20 will run.
         deepDive(years, DAY.filter((id) => !picked.includes(id)), lines, "the all-day setups");
-        ensemble(years, ["driveStrict"], lines, "Big opening drive alone (Ai20-20 until now)");
-        ensemble(years, DAY_LIVE, lines, "Ai20-20 as it will run");
+        lanes(years, DAY_LANES, lines, "Ai20-20 as it will run: two practice lines");
       }
       log(`${sym} years done`);
       console.log(lines.splice(0).join("\n")); // printed now: a later failure cannot lose it
@@ -256,7 +271,7 @@ async function main() {
     for (const d of recent) {
       candidateTable(d, lines);
       ensemble(d, picked, lines, "Picked setups together");
-      if (IS_DAY) ensemble(d, DAY_LIVE, lines, "Ai20-20 as it will run");
+      if (IS_DAY) lanes(d, DAY_LANES, lines, "Ai20-20 as it will run: two practice lines");
       // Same dates on the multi-year source: does the data source change the answer?
       if (yearsRes && years) {
         const from = d.ctx.p.c[0].date;
