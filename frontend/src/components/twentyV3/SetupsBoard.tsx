@@ -11,7 +11,7 @@ import { SETUP_NAMES, type V3SetupId } from "../../utils/twentyV3/setups";
 import { isPracticeSetup } from "../../utils/twentyV3/live";
 
 const signed = (n: number | null | undefined) => (n === null || n === undefined ? "—" : `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`);
-const ORDER: V3SetupId[] = ["driveStrict", "drive", "trend", "driveTrend", "driveBusy", "driveSteps", "drive60", "noise", "noise30", "orb", "orbTrend", "vwapPull", "eia", "eiaFade", "fastTurnUS", "fastTurnDay", "fastBreakUS", "fastBreakDay", "fastNoiseUS"];
+const ORDER: V3SetupId[] = ["driveStrict", "trendDay", "drive", "trend", "driveTrend", "driveBusy", "driveSteps", "drive60", "noise", "noise30", "orb", "orbTrend", "vwapPull", "eia", "eiaFade", "fastTurnUS", "fastTurnDay", "fastBreakUS", "fastBreakDay", "fastNoiseUS"];
 
 const ABOUT: Record<V3SetupId, string> = {
   trend: "The v2 rule: the 5-minute strength turns strong on a finished candle, with the 1-hour trend, 10:30 AM–1:15 PM New York.",
@@ -28,6 +28,7 @@ const ABOUT: Record<V3SetupId, string> = {
   driveBusy: "Opening drive only on busy days (swings 1.2× normal).",
   driveSteps: "Opening drive with the usual step exits instead of holding.",
   driveStrict: "Opening drive only when the first half hour moved at least 1.2× its usual range — hold to the close, stop only.",
+  trendDay: "The original Ai20-20 signal — a fresh 5-minute strength turn with the 1-hour trend — over the whole MCX day, 9:00 AM IST to 30 minutes before the bell.",
   fastTurnUS: "Speed 70+ and the v2 strength turn with the 1-hour trend, 9:30 AM–1:15 PM New York.",
   fastTurnDay: "Speed 70+ and the v2 strength turn with the 1-hour trend, 10:00 AM–11:00 PM IST.",
   fastBreakUS: "Speed 70+ and a 15-minute close beyond the last hour's range, with the 1-hour trend, US session.",

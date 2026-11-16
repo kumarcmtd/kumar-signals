@@ -5,12 +5,15 @@
 // functions live, so what was measured is what trades.
 
 import { signalAt, type LabRules, type Prepared } from "../twentyLab";
+import { CLOSE_US_DST_MIN, CLOSE_US_STD_MIN } from "../mcxSession";
 import { SPEED_MIN } from "./speed";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
 
 export type V3SetupId =
   | "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict"
+  // Ai20-20 all day: the v2 rule over the whole MCX session.
+  | "trendDay"
   // Ai-Super Fast: only while the Speed gauge reads 70+ (see speed.ts).
   | "fastTurnUS" | "fastTurnDay" | "fastBreakUS" | "fastBreakDay" | "fastNoiseUS";
 
@@ -53,6 +56,7 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   driveBusy: "Opening drive on busy days",
   driveSteps: "Opening drive, step exits",
   driveStrict: "Big opening drive",
+  trendDay: "Trend turn · all day",
   fastTurnUS: "Fast turn · US session",
   fastTurnDay: "Fast turn · all day",
   fastBreakUS: "Fast 15-min breakout · US session",
@@ -67,6 +71,17 @@ export function busyRatio(p: Prepared, i: number): number | null {
   if (same.length < 5 || !Number.isFinite(p.atr[i])) return null;
   const med = [...same].sort((a, b) => a - b)[Math.floor(same.length / 2)];
   return med > 0 ? p.atr[i] / med : null;
+}
+
+/** The v2 rule -- fresh strength turn, 1-hour trend agrees, no new call in the EIA half hour -- with no clock window of its own. */
+const DAY_TURN: LabRules = { ...V2_RULES, hours: "all", window: undefined };
+
+/** No new all-day call in the last 30 minutes before the bell: running calls are closed at the bell. */
+export const LAST_CALL_BEFORE_BELL_MIN = 30;
+
+/** That day's MCX close on the IST clock: 11:30 PM while New York is on summer time (IST - New York = 9h30), else 11:55 PM. */
+export function bellMinute(p: Prepared, i: number): number {
+  return (p.minute[i] - p.etMinute[i] + 1440) % 1440 === 570 ? CLOSE_US_DST_MIN : CLOSE_US_STD_MIN;
 }
 
 /** The v2 strength turn (fresh 58+/42-, 1-hour trend agrees) without v2's own time window. */
@@ -113,6 +128,16 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
       if (!band) return null;
       side = c.close > band.upper && c.close > f.vwap[i] ? "CE" : c.close < band.lower && c.close < f.vwap[i] ? "PE" : null;
     }
+    if (!side) return null;
+    const stop = 2 * k * atr;
+    return mk(side, stop, 1.5 * stop, "steps");
+  }
+
+  if (id === "trendDay") {
+    // The whole MCX session: from the 9:00 AM IST open to the candle that ends
+    // 30 minutes before the bell.
+    if (p.minute[i] < 9 * 60 || p.minute[i] + 5 > bellMinute(p, i) - LAST_CALL_BEFORE_BELL_MIN) return null;
+    const side = signalAt(p, i, DAY_TURN);
     if (!side) return null;
     const stop = 2 * k * atr;
     return mk(side, stop, 1.5 * stop, "steps");

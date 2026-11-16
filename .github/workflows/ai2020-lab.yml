@@ -7,6 +7,10 @@ name: Ai20-20 rules lab
 # lab code changes on the development branch.
 on:
   workflow_dispatch:
+    inputs:
+      group:
+        description: "Rule set to run: all, v3, fast or day"
+        default: "all"
   push:
     branches: [claude/natural-gas-crude-oil-options-qkizj2]
     paths:
@@ -14,7 +18,11 @@ on:
       - "scripts/twenty-lab-v3.ts"
       - "scripts/lab-data.ts"
       - "frontend/src/utils/twentyLab.ts"
-      - "frontend/src/utils/twentyV3/**"
+      # Only the files the replay runs (not the page's wording or windows).
+      - "frontend/src/utils/twentyV3/setups.ts"
+      - "frontend/src/utils/twentyV3/sim.ts"
+      - "frontend/src/utils/twentyV3/features.ts"
+      - "frontend/src/utils/twentyV3/speed.ts"
       - "frontend/src/utils/aiTwentyTwentyEngine.ts"
       - "frontend/src/utils/twentyV2.ts"
       - ".github/workflows/ai2020-lab.yml"
@@ -33,14 +41,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "" }
-          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "" }
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "", group: v3 }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "", group: v3 }
           # Holdout: five older years no rule was ever chosen on.
-          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "", group: v3 }
           # Ai-Super Fast: Speed 70+ rules on the same three data sets.
-          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "fast" }
-          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "fast" }
-          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "fast" }
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "fast", group: fast }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "fast", group: fast }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "fast", group: fast }
+          # Ai20-20 all day: the v2 rule over every MCX hour (9:00 AM IST to 30 minutes before the bell).
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "day", group: day }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "day", group: day }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "day", group: day }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -59,6 +71,8 @@ jobs:
           key: duka-m5-${{ matrix.market }}-${{ github.run_id }}
           restore-keys: duka-m5-${{ matrix.market }}-
       - name: Run the v3 lab
+        # A hand-started run can pick one rule set; the others finish at once.
+        if: github.event_name != 'workflow_dispatch' || inputs.group == 'all' || inputs.group == matrix.group
         timeout-minutes: 50
         env:
           DUKA_DIR: /tmp/duka

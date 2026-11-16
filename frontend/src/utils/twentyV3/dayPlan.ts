@@ -30,6 +30,7 @@ export const SETUP_WINDOWS: Record<V3SetupId, [number, number]> = {
   // All day: 10:00 AM - 11:00 PM IST, expressed in New York minutes for the clock (winter: IST - 10:30).
   fastTurnDay: [-30, 12 * 60 + 30],
   fastBreakDay: [-30, 12 * 60 + 30],
+  trendDay: [-90, 12 * 60 + 55],
 };
 
 const IST_MS = 5.5 * 3600_000;

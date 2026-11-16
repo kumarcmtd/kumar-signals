@@ -28,8 +28,13 @@ const ROUND2_V3: V3SetupId[] = ["driveTrend", "driveBusy", "driveSteps", "driveS
 /** Ai-Super Fast (LAB_SET=fast): the trader's rule -- only while the Speed gauge reads 70+ -- with three ways to pick the side. */
 const FAST: V3SetupId[] = ["fastTurnUS", "fastTurnDay", "fastBreakUS", "fastBreakDay", "fastNoiseUS"];
 const IS_FAST = process.env.LAB_SET === "fast";
-const CANDIDATES: V3SetupId[] = IS_FAST ? FAST : CANDIDATES_V3;
-const ROUND2: V3SetupId[] = IS_FAST ? [] : ROUND2_V3;
+/** Ai20-20 all day (LAB_SET=day): the v2 rule over every MCX hour, next to the v2 rule in its own US window. */
+const DAY: V3SetupId[] = ["trendDay", "trend"];
+const IS_DAY = process.env.LAB_SET === "day";
+/** How Ai20-20 runs with the all-day setup: the big opening drive first, the all-day turn otherwise. */
+const DAY_LIVE: V3SetupId[] = ["driveStrict", "trendDay"];
+const CANDIDATES: V3SetupId[] = IS_FAST ? FAST : IS_DAY ? DAY : CANDIDATES_V3;
+const ROUND2: V3SetupId[] = IS_FAST || IS_DAY ? [] : ROUND2_V3;
 const PICK = { minTrades: 80, minAvgRs: 100, minPf: 1.15 };
 const GUARDS = { maxStopsPerDay: 2, maxTradesPerDay: 3, dayLossLimitRs: 3000 };
 const FROM = process.env.LAB_FROM || "2022-01-01";
@@ -48,8 +53,8 @@ const fmt = (n: number | null | undefined) => (n === null || n === undefined || 
 const avg = (t: V3Trade[]) => (t.length ? t.reduce((a, x) => a + x.rs, 0) / t.length : null);
 
 function load(name: string, sym: LabSym, candles: Candle[], years: boolean): Data {
-  // Super Fast's all-day setups need the strength score on every candle.
-  const p: Prepared = prepare(candles, IS_FAST ? true : { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
+  // All-day setups need the strength score on every candle.
+  const p: Prepared = prepare(candles, IS_FAST || IS_DAY ? true : { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
   return { name, sym, ctx: { p, f: computeFeatures(p) }, years };
 }
 
@@ -82,6 +87,15 @@ function byHour(t: V3Trade[], d: Data): string {
     m.set(h, [...(m.get(h) ?? []), x]);
   }
   return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([h, xs]) => `${h}h NY: ${xs.length} / avg ${fmt(avg(xs))}`).join(" · ");
+}
+
+function byIstHour(t: V3Trade[], d: Data): string {
+  const m = new Map<number, V3Trade[]>();
+  for (const x of t) {
+    const h = Math.floor(d.ctx.p.minute[x.openIdx] / 60);
+    m.set(h, [...(m.get(h) ?? []), x]);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([h, xs]) => `${h}h IST: ${xs.length} / avg ${fmt(avg(xs))}`).join(" · ");
 }
 
 function run(d: Data, setups: V3SetupId[], extra: Partial<V3SimOpts> = {}, k?: number): V3Trade[] {
@@ -125,8 +139,8 @@ function pick(d: Data, res: Map<V3SetupId, V3Trade[]>): V3SetupId[] {
   return ok.sort((x, y) => y.a - x.a).map((x) => x.id);
 }
 
-function deepDive(d: Data, picked: V3SetupId[], lines: string[]) {
-  lines.push(`\n### ${d.name}: picked setups in detail`);
+function deepDive(d: Data, picked: V3SetupId[], lines: string[], what = "picked setups") {
+  lines.push(`\n### ${d.name}: ${what} in detail`);
   for (const id of picked) {
     const base = run(d, [id]);
     const lo = run(d, [id], {}, 0.8);
@@ -137,6 +151,7 @@ function deepDive(d: Data, picked: V3SetupId[], lines: string[]) {
     lines.push(`- Settings x0.8: avg ${fmt(s(lo).avgRs)} (${s(lo).trades}), halves ${fmt(s(lo).firstHalfAvg)} / ${fmt(s(lo).secondHalfAvg)} · x1.2: avg ${fmt(s(hi).avgRs)} (${s(hi).trades}), halves ${fmt(s(hi).firstHalfAvg)} / ${fmt(s(hi).secondHalfAvg)}`);
     lines.push(`- With Rs 100 more cost per trade: avg ${fmt(s(stress).avgRs)}, PF ${s(stress).profitFactor ?? "—"}`);
     lines.push(`- Entry hour: ${byHour(base, d)}`);
+    if (IS_DAY) lines.push(`- Entry hour (IST): ${byIstHour(base, d)}`);
     const ex = s(base).exits;
     lines.push(`- Exits: ${Object.entries(ex).map(([k, n]) => `${k} ${n}`).join(" · ")}`);
   }
@@ -183,7 +198,7 @@ async function main() {
   const t0 = Date.now();
   const log = (s: string) => console.error(`[${Math.round((Date.now() - t0) / 1000)}s] ${s}`);
   const head: string[] = [
-    `# ${IS_FAST ? "Ai-Super Fast" : "Ai20-20 v3"} rules lab — ${new Date().toISOString()}`,
+    `# ${IS_FAST ? "Ai-Super Fast" : IS_DAY ? "Ai20-20 all day" : "Ai20-20 v3"} rules lab — ${new Date().toISOString()}`,
     "",
     "Rs per lot after costs (Rs 150 Crude / Rs 200 NG per trade + ~Rs 50 an hour time decay), option at delta 0.5. Estimates, not live fills.",
     `Pick rule (fixed before the run): ${PICK.minTrades}+ trades, average >= Rs ${PICK.minAvgRs}, both halves positive, profit factor >= ${PICK.minPf}, on the multi-year history.`,
@@ -220,7 +235,7 @@ async function main() {
       picked = pick(years, res);
       lines.push("\n**Every setup by year** (calls / average Rs):");
       for (const id of [...CANDIDATES, ...ROUND2]) lines.push(`- ${SETUP_NAMES[id]}: ${byYear(res.get(id)!)}`);
-      for (const kk of IS_FAST ? [] : [0.8, 1.2]) {
+      for (const kk of IS_FAST || IS_DAY ? [] : [0.8, 1.2]) {
         const t = run(years, ["drive"], {}, kk);
         const st = statsOf(t, years.ctx.p, "x");
         lines.push(`- Opening drive with the band x${kk}: ${st.trades} calls, avg ${fmt(st.avgRs)}, PF ${st.profitFactor ?? "—"}, halves ${fmt(st.firstHalfAvg)} / ${fmt(st.secondHalfAvg)}`);
@@ -229,12 +244,19 @@ async function main() {
       lines.push(`\n**Picked for ${sym}: ${picked.length ? picked.map((id) => SETUP_NAMES[id]).join(", ") : "none"}**`);
       deepDive(years, picked, lines);
       ensemble(years, picked, lines, "Picked setups together");
+      if (IS_DAY) {
+        // Measured whether or not it passes: this is what Ai20-20 will run.
+        deepDive(years, DAY.filter((id) => !picked.includes(id)), lines, "the all-day setups");
+        ensemble(years, ["driveStrict"], lines, "Big opening drive alone (Ai20-20 until now)");
+        ensemble(years, DAY_LIVE, lines, "Ai20-20 as it will run");
+      }
       log(`${sym} years done`);
       console.log(lines.splice(0).join("\n")); // printed now: a later failure cannot lose it
     }
     for (const d of recent) {
       candidateTable(d, lines);
       ensemble(d, picked, lines, "Picked setups together");
+      if (IS_DAY) ensemble(d, DAY_LIVE, lines, "Ai20-20 as it will run");
       // Same dates on the multi-year source: does the data source change the answer?
       if (yearsRes && years) {
         const from = d.ctx.p.c[0].date;
