@@ -164,3 +164,31 @@ describe("hold-to-close calls (opening drive)", () => {
     expect(stepsOf(entry({ targetsHit: [true, false, false] }), 12)).toEqual(["t1"]); // steps calls: no bell alert
   });
 });
+
+describe("waiting before the evening window", () => {
+  test("in the Indian morning the setup line gives the IST time of the next check", async () => {
+    const { readV3 } = await import("../utils/twentyV3/live");
+    const { prepare } = await import("../utils/twentyLab");
+    const { computeFeatures } = await import("../utils/twentyV3/features");
+    // A Monday morning: candles up to 9:40 AM IST from earlier sessions are enough for the read.
+    const now = ist("2026-11-16T09:43:00");
+    const c = [];
+    let px = 5400;
+    for (let d = 20; d >= 0; d--) {
+      const day = Date.parse("2026-11-16T00:00:00+05:30") - d * 86_400_000;
+      const wd = new Date(day + 5.5 * 3600_000).getUTCDay();
+      if (wd === 0 || wd === 6) continue;
+      for (let m = 9 * 60; m < 23 * 60 + 55; m += 5) {
+        const t = day + m * 60_000;
+        if (t + 5 * 60_000 > now) break;
+        const o = px;
+        px += Math.sin(t / 3.7e6) * 3;
+        c.push({ date: new Date(t).toISOString(), open: o, high: Math.max(o, px) + 2, low: Math.min(o, px) - 2, close: px, volume: 100 });
+      }
+    }
+    const p = prepare(c, 3);
+    const r = readV3(c, "CRUDEOIL", now, { p, f: computeFeatures(p) });
+    expect(r.state).toBe("window_closed");
+    expect(r.setups[0].line).toBe("Checks once today at 8:00 PM IST (9:30 AM New York) — nothing to do before then.");
+  });
+});

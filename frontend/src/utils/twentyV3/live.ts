@@ -141,12 +141,18 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
   const callEnd = Date.parse(p.c[at].date) + BAR_MS;
   // After the bell or on a weekend the latest candle is from an earlier session:
   // say when the next check is, not what "today" did.
-  const oldCandle = istDate(barEnd) !== istDate(now) || (w !== null && !w.open && w.from > now && istDate(w.from) !== istDate(barEnd));
+  // Before today's window (or after it, overnight, weekends): say plainly when
+  // the next check is, in IST first -- not what a New York clock reads now.
+  const beforeWindow = w !== null && !w.open && w.from > now;
+  const waitLine = (id: V3SetupId) =>
+    SETUP_WINDOWS[id][0] === SETUP_WINDOWS[id][1]
+      ? `Checks once ${whenNext(w!.from, now)} (${nyLabel(SETUP_WINDOWS[id][0])}) — nothing to do before then.`
+      : `Watches from ${whenNext(w!.from, now)} until ${istClock(w!.to)} IST — nothing to do before then.`;
   const statuses = setups.map((id) => ({
     id,
     name: SETUP_NAMES[id],
     fired: entry?.setup === id,
-    line: oldCandle && w && SETUP_WINDOWS[id][0] === SETUP_WINDOWS[id][1] ? `Next check ${whenNext(w.from, now)}: is the first half hour moving well beyond its usual range?` : statusLine(ctx, i, id, entry?.setup === id),
+    line: beforeWindow ? waitLine(id) : statusLine(ctx, i, id, entry?.setup === id),
   }));
   const base = { barEnd, fut: p.c[i].close, setups: statuses, regime: readRegime(p, ctx.f) };
   if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
