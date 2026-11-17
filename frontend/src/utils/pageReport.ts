@@ -101,6 +101,24 @@ function row(label: string, calls: ReportCall[]): ReportRow {
   return { label, closed: calls.length, won, stopped, winPct: won + stopped ? Math.round((won / (won + stopped)) * 100) : null, netRs: calls.reduce((s, c) => s + c.netRs, 0) };
 }
 
+const PERIOD_PREF = "pageReport.period";
+/** The report period the trader last picked (shared by every page's report). */
+export function readReportPeriod(): ReportPeriod {
+  try {
+    const v = localStorage.getItem(PERIOD_PREF);
+    return v === "today" || v === "7d" || v === "all" ? v : "30d";
+  } catch {
+    return "30d";
+  }
+}
+export function saveReportPeriod(p: ReportPeriod): void {
+  try {
+    localStorage.setItem(PERIOD_PREF, p);
+  } catch {
+    /* private mode */
+  }
+}
+
 export function periodStart(period: ReportPeriod, now: number): number | null {
   if (period === "all") return null;
   if (period === "today") return Date.parse(`${istDay(now)}T00:00:00Z`) - IST_MS;

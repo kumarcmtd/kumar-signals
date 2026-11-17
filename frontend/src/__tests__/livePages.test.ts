@@ -19,6 +19,12 @@ test("every other page is not always-live", () => {
   }
 });
 
+test("AI-Test V2 holds Ai-Trust's old tab; Ai-Trust stays live from the More menu", () => {
+  assert.equal(LIVE_PAGE_PATHS[3], "/ai-test-v2");
+  assert.equal(isAlwaysLivePage("/ai-test-v2"), true);
+  assert.equal(isAlwaysLivePage("/ai-trust"), true, "it was a live tab; moving it into More must not freeze it");
+});
+
 test("a trailing slash does not turn a main page into a paused one", () => {
   assert.equal(isAlwaysLivePage("/best-call/"), true);
   assert.equal(isAlwaysLivePage("/"), true, "the root is a single slash and must survive the trim");

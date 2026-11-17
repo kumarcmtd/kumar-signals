@@ -36,16 +36,17 @@ const PRIMARY: NavItem[] = [
   { to: LIVE_PAGE_PATHS[0], label: "AI-Shoot", icon: Rocket, end: true },
   { to: LIVE_PAGE_PATHS[1], label: "Best Call", icon: Crosshair },
   { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
-  { to: LIVE_PAGE_PATHS[3], label: "Ai-Trust", icon: Gem },
+  { to: LIVE_PAGE_PATHS[3], label: "AI-Test V2", icon: FlaskConical },
   { to: LIVE_PAGE_PATHS[4], label: "Ai-Today", icon: Sun },
   { to: LIVE_PAGE_PATHS[5], label: "Ai-News", icon: Rss },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "⚡ Ai-Super Fast (new) · 🔁 AI-Up",
+    title: "⚡ Ai-Super Fast · 💎 Ai-Trust · 🔁 AI-Up",
     items: [
       { to: "/ai-super-fast", label: "Super Fast", icon: Zap },
+      { to: "/ai-trust", label: "Ai-Trust", icon: Gem },
       { to: "/ai-up", label: "AI-Up", icon: Repeat },
     ],
   },
@@ -67,7 +68,6 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
     items: [
       { to: "/ai-strategy-verification", label: "AI Verify", icon: ClipboardCheck },
       { to: "/ai-risk", label: "AI-Risk", icon: Flame },
-      { to: "/ai-test-v2", label: "AI-Test V2", icon: FlaskConical },
       { to: "/ai-test-pro", label: "AI-Test Pro", icon: Crown },
       { to: "/ai-elite", label: "AI Elite", icon: ShieldCheck },
       { to: "/kimi-ai-trade", label: "Kimi AI", icon: BookOpen },

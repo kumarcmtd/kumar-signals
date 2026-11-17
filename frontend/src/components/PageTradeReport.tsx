@@ -10,7 +10,7 @@ import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { useTradeCardLog } from "../api/hooks";
 import { toLogEntry } from "./trust/TrustLiveCalls";
 import { ENGINES, type EngineDef } from "../utils/aiEdgeEngine";
-import { buildPageReport, EST_COST_RS, type ReportMarket, type ReportPeriod, type ReportRow } from "../utils/pageReport";
+import { buildPageReport, EST_COST_RS, readReportPeriod, saveReportPeriod, type ReportMarket, type ReportPeriod, type ReportRow } from "../utils/pageReport";
 
 const PERIODS: { k: ReportPeriod; t: string }[] = [
   { k: "today", t: "Today" },
@@ -33,19 +33,11 @@ const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string
 };
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
-const PREF = "pageReport.period";
+/** Pages that show their own (compact) report at the top instead of this strip. */
+const EMBEDDED_REPORT = new Set(["/ai-test-v2"]);
 
 const rs = (n: number) => `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const when = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
-
-function readPeriod(): ReportPeriod {
-  try {
-    const v = localStorage.getItem(PREF);
-    return v === "today" || v === "7d" || v === "all" ? v : "30d";
-  } catch {
-    return "30d";
-  }
-}
 
 function Tile({ big, small, bg }: { big: string; small: string; bg: string }) {
   return (
@@ -97,16 +89,12 @@ export function PageTradeReport({ engine, logs, note, keyFilter }: { engine: Eng
     if (!keyFilter) return base;
     return Object.fromEntries(Object.entries(base).filter(([k]) => keyFilter(k)));
   }, [logs, storeLogs, keyFilter]);
-  const [period, setPeriodState] = useState<ReportPeriod>(readPeriod);
+  const [period, setPeriodState] = useState<ReportPeriod>(readReportPeriod);
   const [market, setMarket] = useState<ReportMarket>("ALL");
   const [open, setOpen] = useState(false);
   const setPeriod = (p: ReportPeriod) => {
     setPeriodState(p);
-    try {
-      localStorage.setItem(PREF, p);
-    } catch {
-      /* private mode */
-    }
+    saveReportPeriod(p);
   };
   const r = useMemo(() => buildPageReport(tradeLogs, engine, { period, market, scoped: logs !== undefined }), [tradeLogs, engine, period, market, logs]);
   const chip = (on: boolean) => `rounded-lg px-2 py-1 text-[11px] font-black ${on ? "bg-white text-indigo-700" : "bg-white/15 text-white/85"}`;
@@ -216,6 +204,7 @@ export function PageReportStrip() {
   const { pathname } = useLocation();
   const clean = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
   if (clean === TRUST_ENGINE.route) return <TrustPageReport />;
+  if (EMBEDDED_REPORT.has(clean)) return null;
   const route = ROUTE_ALIAS[clean] ?? clean;
   const engine = ENGINES.find((e) => e.route === route);
   if (!engine) return null;

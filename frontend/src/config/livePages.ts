@@ -19,7 +19,7 @@ export const LIVE_PAGE_PATHS = [
   "/", // AI-Shoot
   "/best-call",
   "/ai-20-20",
-  "/ai-trust", // took Level Cross's tab (Level Cross is in More -> Signals)
+  "/ai-test-v2", // took Ai-Trust's tab at the owner's request (Ai-Trust is at the top of More)
   "/ai-today", // took AI-Up's tab (AI-Up is at the top of More)
   "/ai-news", // took SuperTrend's tab: war-time crude moves on headlines
 ] as const;
@@ -27,8 +27,9 @@ export const LIVE_PAGE_PATHS = [
 export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 
 // Live but NOT a bottom-bar tab: AI-Up and Ai-Super Fast (top of the More
-// menu) log their own calls, so they must keep updating while open.
-export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast"] as const;
+// menu) log their own calls, so they must keep updating while open; Ai-Trust
+// was a tab until AI-Test V2 took its place and keeps updating as before.
+export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast", "/ai-trust"] as const;
 
 const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 
