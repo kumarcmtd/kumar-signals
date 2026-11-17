@@ -18,15 +18,25 @@ export const TF_SHORT: Record<string, string> = { "15": "15m", "30": "30m", "60"
 export const isOwnKey = (k: string) => /^(CRUDEOIL|NATURALGAS)-\d+$/.test(k);
 export const ownLogs = (logs: Record<string, TradeLogEntry[]>) => Object.fromEntries(Object.entries(logs).filter(([k]) => isOwnKey(k)));
 
-/** Colour of each decision tier (bullish green ... bearish rose). */
+/** Text colour of each decision tier on a light card (bullish greens ... bearish roses). */
 export const DECISION_HEX: Record<Decision6, string> = {
-  "STRONG BUY": "#22C55E",
-  BUY: "#4ADE80",
-  "WATCH BUY": "#A3E635",
-  WAIT: "#FBBF24",
-  SELL: "#FB7185",
-  "STRONG SELL": "#F43F5E",
+  "STRONG BUY": "#059669",
+  BUY: "#16A34A",
+  "WATCH BUY": "#65A30D",
+  WAIT: "#D97706",
+  SELL: "#E11D48",
+  "STRONG SELL": "#BE123C",
 };
+/** Vivid fill of each tier (signal map cells, detail header). */
+export const DECISION_GRAD: Record<Decision6, string> = {
+  "STRONG BUY": "linear-gradient(145deg,#059669,#34D399)",
+  BUY: "linear-gradient(145deg,#16A34A,#4ADE80)",
+  "WATCH BUY": "linear-gradient(145deg,#65A30D,#A3E635)",
+  WAIT: "linear-gradient(145deg,#F59E0B,#FBBF24)",
+  SELL: "linear-gradient(145deg,#E11D48,#FB7185)",
+  "STRONG SELL": "linear-gradient(145deg,#BE123C,#F43F5E)",
+};
+export const NO_DATA_GRAD = "linear-gradient(145deg,#CBD5E1,#E2E8F0)";
 /** Only a few points off WAIT: real but weak signals, flagged wherever they show. */
 export const MARGINAL = new Set<Decision6>(["WATCH BUY", "SELL"]);
 
@@ -40,13 +50,13 @@ export const STATUS_LABEL: Record<TradeLogStatus, string> = {
   closed_eod: "Closed at Day End",
 };
 export const STATUS_HEX: Record<TradeLogStatus, string> = {
-  running: "#E2E8F0",
-  sl_hit: "#F43F5E",
-  stopped_breakeven: "#A3E635",
-  stopped_after_t1: "#22C55E",
-  target3_hit: "#22C55E",
-  closed_manual: "#94A3B8",
-  closed_eod: "#94A3B8",
+  running: "#334155",
+  sl_hit: "#E11D48",
+  stopped_breakeven: "#65A30D",
+  stopped_after_t1: "#059669",
+  target3_hit: "#059669",
+  closed_manual: "#64748B",
+  closed_eod: "#64748B",
 };
 
 export interface PremiumProjection {

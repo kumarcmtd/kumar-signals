@@ -131,13 +131,15 @@ export function AITest() {
   );
 
   return (
-    <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 text-white min-h-screen space-y-3.5" style={{ background: "radial-gradient(80% 40% at 50% 0%,rgba(79,70,229,.25),transparent 70%),linear-gradient(180deg,#07050C,#0D0A17 30%,#0D0A17)" }}>
+    <div className="-mx-4 -mt-4 px-4 pt-4 pb-6 text-slate-800 min-h-screen space-y-3.5" style={{ background: "linear-gradient(180deg,#F5F3FF 0%,#FDF2F8 30%,#ECFEFF 65%,#F8FAFC 100%)" }}>
       <AiTestHero open={isOpen} timeLabel={market?.timeLabel} updatedAt={updatedAt} fetching={crude.isFetching || gas.isFetching} onRefresh={() => void Promise.all([crude.refetchAll(), gas.refetchAll()])} />
       <ResultsStrip logs={own} />
 
       <section className="space-y-2">
-        <p className="text-[13px] font-black flex items-center gap-1.5 px-1">
-          <Radio size={14} className={running.length ? "text-amber-300" : "text-white/40"} />
+        <p className="text-[14px] font-black flex items-center gap-2 px-1 text-slate-800">
+          <span className="w-7 h-7 rounded-xl flex items-center justify-center shadow-sm" style={{ background: running.length ? "linear-gradient(135deg,#F97316,#DB2777)" : "linear-gradient(135deg,#94A3B8,#CBD5E1)" }}>
+            <Radio size={15} className="text-white" />
+          </span>
           {running.length ? `Running now · ${running.length}` : "Running now"}
         </p>
         {running.length ? (
@@ -159,7 +161,7 @@ export function AITest() {
             )
           )
         ) : (
-          <p className="rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-2.5 text-[11.5px] text-white/55 leading-snug">
+          <p className="rounded-2xl bg-white shadow-sm px-3 py-2.5 text-[12px] text-slate-600 leading-snug">
             {isOpen === false ? `MCX is closed — calls close at the bell and no new call opens until the next session, ${nextMcxOpen().label}.` : "No call running. A call opens the moment a timeframe's signal turns — the map shows how close each one is."}
           </p>
         )}
@@ -167,13 +169,15 @@ export function AITest() {
 
       <ConfluenceMap rows={SYMBOLS.map((sym) => ({ sym, analyses: board[sym].analyses, logs: own }))} sel={sel} onSelect={choose} stale={isOpen === false} star={star ? `${star.sym}-${star.a.tf}` : null} />
 
-      <p className="flex items-start gap-2 rounded-2xl bg-white/[0.04] border border-white/10 px-3 py-2.5 text-[11.5px] text-white/65 leading-snug">
-        <Brain size={14} className="text-fuchsia-300 shrink-0 mt-0.5" />
+      <p className="flex items-start gap-2.5 rounded-2xl bg-white shadow-sm px-3 py-2.5 text-[12px] text-slate-700 leading-snug">
+        <span className="w-7 h-7 rounded-xl flex items-center justify-center shrink-0" style={{ background: "linear-gradient(135deg,#8B5CF6,#EC4899)" }}>
+          <Brain size={15} className="text-white" />
+        </span>
         {summary(sel.sym, board[sel.sym].analyses)}
       </p>
 
       {board[sel.sym].liveDataUnavailable && (
-        <p className="flex items-start gap-2 rounded-2xl bg-amber-400/10 border border-amber-400/30 px-3 py-2.5 text-[11.5px] text-amber-200 leading-snug">
+        <p className="flex items-start gap-2 rounded-2xl bg-amber-50 border border-amber-300 px-3 py-2.5 text-[12px] font-semibold text-amber-900 leading-snug">
           <AlertTriangle size={14} className="shrink-0 mt-0.5" />
           {`${board[sel.sym].errorMessage ?? "Option chain unreachable"} — no entry, target, stop or probability is made up while live data is down.`}
         </p>
@@ -188,13 +192,13 @@ export function AITest() {
           onOpenEntry={(e) => setDetail({ sym: sel.sym, e })}
           running={
             selRun ? (
-              <p className="rounded-xl bg-amber-300/10 border border-amber-300/25 px-2.5 py-2 text-[11.5px] text-amber-100">{`Call running on this timeframe: ${selRun.e.strike} ${selRun.e.optSide} from ₹${selRun.e.entry}${liveFor(sel.sym, selRun.e) !== null ? ` · now ₹${liveFor(sel.sym, selRun.e)}` : ""} — its card is under Running now.`}</p>
+              <p className="rounded-xl bg-orange-50 border border-orange-200 px-2.5 py-2 text-[12px] font-semibold text-orange-800">{`Call running on this timeframe: ${selRun.e.strike} ${selRun.e.optSide} from ₹${selRun.e.entry}${liveFor(sel.sym, selRun.e) !== null ? ` · now ₹${liveFor(sel.sym, selRun.e)}` : ""} — its card is under Running now.`}</p>
             ) : null
           }
         />
       )}
 
-      <p className="text-[10px] text-white/30 leading-relaxed text-center px-4 pb-2">
+      <p className="text-[10px] text-slate-400 leading-relaxed text-center px-4 pb-2">
         {`Educational reference only, not financial advice. Position sizing uses your Risk page settings (₹${risk.capital.toLocaleString("en-IN")} capital, ${risk.riskPercent}% risk). Every timeframe is scored on its own — nothing here is a guaranteed outcome.`}
       </p>
 
