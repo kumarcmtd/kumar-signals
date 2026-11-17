@@ -9,6 +9,7 @@ import { evaluateEntryTiming } from "../../utils/entryTiming";
 import { DECISION_LABEL } from "../../utils/timeframeEngine";
 import { EntryTimingBadge } from "../EntryTimingBadge";
 import { fmtWhen, LOT_SIZE, rupees, SHORT_NAME, TF_SHORT, type TradableSymbol } from "./kit";
+import { LevelTiles } from "./CallLevels";
 
 const GREEN = "#059669";
 const RED = "#E11D48";
@@ -110,7 +111,10 @@ export function LiveCallCard({ sym, tf, e, live, logged, onLog, onCopy, copied, 
               </p>
             )}
           </div>
-          {e.decision && <p className="text-[10.5px] text-slate-400 mt-0.5">{`Called as ${DECISION_LABEL[e.decision]} · SL ₹${stop}${stop !== e.stop ? ` (moved from ₹${e.stop})` : ""}`}</p>}
+          {e.decision && <p className="text-[10.5px] text-slate-400 mt-0.5">{`Called as ${DECISION_LABEL[e.decision]}`}</p>}
+          <div className="mt-2">
+            <LevelTiles e={e} />
+          </div>
           <Scale e={e} live={live} />
         </div>
       </button>

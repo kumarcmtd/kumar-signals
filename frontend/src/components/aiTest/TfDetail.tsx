@@ -1,6 +1,7 @@
-// The full read for one market + timeframe: AI score ring, signal, hit
+// The full read for one market + timeframe: its latest call's levels first
+// (entry, stop loss, targets 1-3), then the AI score ring, signal, hit
 // probability and confidence, the six factor scores as bars, why (reasons and
-// any rule that held it back), the running call and this timeframe's history.
+// any rule that held it back) and this timeframe's call history.
 
 import { useState } from "react";
 import { motion } from "framer-motion";
@@ -46,7 +47,11 @@ function Cell({ label, value, tint }: { label: string; value: string; tint: stri
   );
 }
 
-export function TfDetail({ sym, a, log, liveFor, running, onOpenEntry }: { sym: TradableSymbol; a: TimeframeAnalysis; log: TradeLogEntry[]; liveFor: (e: TradeLogEntry) => number | null; running: React.ReactNode; onOpenEntry: (e: TradeLogEntry) => void }) {
+/**
+ * levels: the latest call's level tiles (or a note when this timeframe has none) -- shown even without live data.
+ * noDataWhy: why there is no read (e.g. the Upstox login expired), said instead of the engine's generic "not enough bars".
+ */
+export function TfDetail({ sym, a, log, liveFor, levels, noDataWhy, onOpenEntry }: { sym: TradableSymbol; a: TimeframeAnalysis; log: TradeLogEntry[]; liveFor: (e: TradeLogEntry) => number | null; levels: React.ReactNode; noDataWhy?: string; onOpenEntry: (e: TradeLogEntry) => void }) {
   const [allWhy, setAllWhy] = useState(false);
   const [history, setHistory] = useState(false);
   const none = !!a.insufficient || a.overallScore === null;
@@ -63,10 +68,12 @@ export function TfDetail({ sym, a, log, liveFor, running, onOpenEntry }: { sym: 
           </span>
         )}
       </div>
-      {a.insufficient ? (
-        <p className="text-[12px] text-slate-500 p-3.5">{a.insufficient}</p>
-      ) : (
-        <div className="p-3.5 space-y-3">
+      <div className="p-3.5 space-y-3">
+        {levels}
+        {a.insufficient ? (
+          <p className="text-[12px] text-slate-500">{noDataWhy ?? a.insufficient}</p>
+        ) : (
+          <>
           <div className="flex items-center gap-3">
             <Ring score={Math.round(a.overallScore ?? 0)} hex={hex} />
             <div className="grid grid-cols-2 gap-1.5 flex-1 min-w-0">
@@ -121,7 +128,8 @@ export function TfDetail({ sym, a, log, liveFor, running, onOpenEntry }: { sym: 
               )}
             </div>
           )}
-          {running}
+          </>
+        )}
           {log.length > 0 && (
             <div className="rounded-2xl bg-slate-50 px-2.5 py-1.5">
               <button onClick={() => setHistory((o) => !o)} className="w-full flex items-center justify-between text-[12px] font-black text-slate-700 py-1">
@@ -137,8 +145,7 @@ export function TfDetail({ sym, a, log, liveFor, running, onOpenEntry }: { sym: 
               )}
             </div>
           )}
-        </div>
-      )}
+      </div>
     </motion.section>
   );
 }

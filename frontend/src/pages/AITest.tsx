@@ -12,6 +12,7 @@ import { ResultsStrip } from "../components/aiTest/ResultsStrip";
 import { ConfluenceMap } from "../components/aiTest/ConfluenceMap";
 import { CallRow, LiveCallCard } from "../components/aiTest/LiveCallCard";
 import { TfDetail } from "../components/aiTest/TfDetail";
+import { CallLevels } from "../components/aiTest/CallLevels";
 import { TradeLogDetailModal } from "../components/aiTest/TradeLogKit";
 import { copyTip, DISPLAY_NAME, LOT_SIZE, MARGINAL, ownLogs, projectPremium, SYMBOLS, TF_SHORT, type TradableSymbol } from "../components/aiTest/kit";
 
@@ -102,7 +103,8 @@ export function AITest() {
   };
   const selA = board[sel.sym].analyses.find((a) => a.tf === sel.tf) ?? board[sel.sym].analyses[0];
   const selLog = own[`${sel.sym}-${sel.tf}`] ?? [];
-  const selRun = running.find((r) => r.sym === sel.sym && r.tf === sel.tf) ?? null;
+  // The latest call on the open timeframe (running, or how the last one ended): its levels lead the panel.
+  const selLast = selLog[selLog.length - 1] ?? null;
   const updatedAt = Math.max(crude.dataUpdatedAt, gas.dataUpdatedAt);
   const isOpen = market ? market.isOpen : null;
 
@@ -190,10 +192,13 @@ export function AITest() {
           log={selLog}
           liveFor={(e) => liveFor(sel.sym, e)}
           onOpenEntry={(e) => setDetail({ sym: sel.sym, e })}
-          running={
-            selRun ? (
-              <p className="rounded-xl bg-orange-50 border border-orange-200 px-2.5 py-2 text-[12px] font-semibold text-orange-800">{`Call running on this timeframe: ${selRun.e.strike} ${selRun.e.optSide} from ₹${selRun.e.entry}${liveFor(sel.sym, selRun.e) !== null ? ` · now ₹${liveFor(sel.sym, selRun.e)}` : ""} — its card is under Running now.`}</p>
-            ) : null
+          noDataWhy={board[sel.sym].liveDataUnavailable ? "No live prices right now (see the warning above), so there is no fresh read. Earlier calls and their levels are still shown." : undefined}
+          levels={
+            selLast ? (
+              <CallLevels sym={sel.sym} e={selLast} live={selLast.closed ? null : liveFor(sel.sym, selLast)} />
+            ) : (
+              <p className="rounded-2xl bg-slate-50 px-3 py-2.5 text-[12px] text-slate-500 leading-snug">No call on this timeframe yet. One opens here — with its entry, stop loss and targets 1, 2, 3 — when the signal leaves Wait (CE when bullish, PE when bearish) while MCX is open.</p>
+            )
           }
         />
       )}
