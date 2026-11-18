@@ -41,6 +41,9 @@ export const SETUP_WINDOWS: Record<V3SetupId, SetupWindow> = {
   trendDay: ist(9 * 60, "bell"),
   fastTurnDay: ist(10 * 60, 23 * 60),
   fastBreakDay: ist(10 * 60, 23 * 60),
+  // gapRun.ts, window "all": 9:30 AM IST to 30 minutes before the bell.
+  gapRun: ist(9 * 60 + 30, "bell"),
+  gapBreak: ist(9 * 60 + 30, "bell"),
 };
 
 /** Checked on one candle only (the 9:30 opening drive). */

@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       group:
-        description: "Rule set to run: all, v3, fast, day or lite"
+        description: "Rule set to run: all, v3, fast, day, lite or smart"
         default: "all"
   push:
     branches: [claude/natural-gas-crude-oil-options-qkizj2]
@@ -17,6 +17,8 @@ on:
       - "scripts/twenty-lab.ts"
       - "scripts/twenty-lab-v3.ts"
       - "scripts/lite-lab.ts"
+      - "scripts/smart-lab.ts"
+      - "frontend/src/utils/twentyV3/gapRun.ts"
       - "frontend/src/utils/lite/**"
       - "scripts/lab-data.ts"
       - "frontend/src/utils/twentyLab.ts"
@@ -59,6 +61,11 @@ jobs:
           - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
           - { market: NATURALGAS, from: "2022-01-01", to: "", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
           - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
+          # Smart Ai20-20: v2 with a recent-record switch, and the run-to-the-recent-high setups.
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
+          - { market: NATURALGAS, from: "2017-01-01", to: "2021-12-31", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

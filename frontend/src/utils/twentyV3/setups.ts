@@ -9,13 +9,16 @@ import { CLOSE_US_DST_MIN, CLOSE_US_STD_MIN } from "../mcxSession";
 import { SPEED_MIN } from "./speed";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
+import { GAP_LIVE, gapBreakAt, gapRunAt, type GapParams } from "./gapRun";
 
 export type V3SetupId =
   | "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict"
   // Ai20-20 all day: the v2 rule over the whole MCX session.
   | "trendDay"
   // Ai-Super Fast: only while the Speed gauge reads 70+ (see speed.ts).
-  | "fastTurnUS" | "fastTurnDay" | "fastBreakUS" | "fastBreakDay" | "fastNoiseUS";
+  | "fastTurnUS" | "fastTurnDay" | "fastBreakUS" | "fastBreakDay" | "fastNoiseUS"
+  // The trader's idea: a fast run back to a recent high / low (gapRun.ts).
+  | "gapRun" | "gapBreak";
 
 /**
  * steps: T1 -> stop to entry, T2 -> stop to T1, out at T3 (the page's way).
@@ -32,6 +35,8 @@ export interface V3Entry {
   /** Futures points to Target 1 (T2 = 1.6x, T3 = 2.25x). For trail/hold setups it is shown, not used to exit. */
   t1Pts: number;
   manage: V3Manage;
+  /** gapRun / gapBreak: the recent high (CE) or low (PE) in futures points. */
+  level?: number;
 }
 
 export interface V3Ctx {
@@ -39,6 +44,8 @@ export interface V3Ctx {
   f: V3Features;
   /** Sensitivity check only: scales band widths and ATR stops (1 = the rules as written). */
   k?: number;
+  /** Lab only: a stricter or more liberal version of the run-to-the-high setups. */
+  gap?: Partial<GapParams>;
 }
 
 export const SETUP_NAMES: Record<V3SetupId, string> = {
@@ -62,6 +69,8 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   fastBreakUS: "Fast 15-min breakout · US session",
   fastBreakDay: "Fast 15-min breakout · all day",
   fastNoiseUS: "Fast noise breakout · US session",
+  gapRun: "Run to the recent high / low",
+  gapBreak: "Stable close beyond the high / low",
 };
 
 /** Today's ATR at candle i against its median at the same clock minute over the previous 10 sessions. */
@@ -131,6 +140,12 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
     if (!side) return null;
     const stop = 2 * k * atr;
     return mk(side, stop, 1.5 * stop, "steps");
+  }
+
+  if (id === "gapRun" || id === "gapBreak") {
+    const g = { ...GAP_LIVE, ...ctx.gap };
+    const hit = (id === "gapRun" ? gapRunAt : gapBreakAt)(p, f, i, g, bellMinute(p, i));
+    return hit ? { ...mk(hit.side, hit.stopPts, hit.t1Pts, "steps"), level: hit.level } : null;
   }
 
   if (id === "trendDay") {
