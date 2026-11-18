@@ -144,6 +144,18 @@ test("the money rules skip the call (2 stop-losses today) and mark the candle ha
   expect(store.m.get("notified:LITE-CRUDEOIL")).toBe(String(hit.barEnd));
 }, 60_000);
 
+test("a call the app already recorded on this candle is still pushed to the phone, once, and not recorded twice", async () => {
+  const { hit, env } = setup();
+  stored = [{ id: `5400-${hit.side}-${hit.barEnd}`, strike: 5400, optSide: hit.side, entry: 180, targets: [190, 195, 200], stop: 170, targetsHit: [false, false, false], status: "running", closed: false, openedAt: hit.barEnd, closedAt: null }];
+  const report = await runLiteCallCheck(env);
+  expect(report.join(" ")).toContain("already recorded by the app; pushed.");
+  expect(pushTradeLogs).not.toHaveBeenCalled();
+  expect(ntfyBodies()).toHaveLength(2); // crude and gas both read the same mocked candles
+  expect(ntfyBodies()[0]).toContain("Stop Rs 170 (-Rs 1,000/lot)");
+  expect((await runLiteCallCheck(env)).join(" ")).toContain("already handled");
+  expect(ntfyBodies()).toHaveLength(2);
+}, 60_000);
+
 test("no call on the option's expiry day", async () => {
   const { hit, env } = setup();
   expiry = new Date(hit.now + 5.5 * 3600_000).toISOString().slice(0, 10);

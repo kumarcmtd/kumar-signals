@@ -7,11 +7,12 @@
 //   runLiteStepCheck (TRADES, right after tradeLogCron moves calls along
 //     against live premiums): push each step reached (T1, T2, closed) once.
 
-import { LITE, LITE_LOT, type LiteSym } from "../frontend/src/utils/lite/engine";
+import { LITE, LITE_LOT, type LiteKind, type LiteSym } from "../frontend/src/utils/lite/engine";
 import { liteGuard, liteKey, openLiteEntry, readLite } from "../frontend/src/utils/lite/live";
 import { daysToExpiry } from "../frontend/src/utils/oiBuildup";
 import { stepsOf, v3StepPushText } from "../frontend/src/utils/twentyV3/push";
 import { pickStrike } from "../frontend/src/utils/twentyV3/ticket";
+import type { TradeLogEntry } from "../frontend/src/utils/tradeLogCore";
 import { cachePut, type Env, getMarketStatus, OPTION_SYMBOLS, type Symbol } from "./env";
 import { NTFY_TOPIC_KV_KEY, sendNtfyNotification } from "./notify";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
@@ -54,7 +55,19 @@ export async function runLiteCallCheck(env: Env, now: number = Date.now()): Prom
         continue;
       }
       const key = liteKey(sym);
-      const guard = liteGuard(await readTradeLogKey(env, key), side, sym, now);
+      const log = await readTradeLogKey(env, key);
+      // The page (app open) may have recorded this very call first: still push it, once, without a second record.
+      const pageCall = log.find((e) => e.openedAt === read.barEnd && e.optSide === side);
+      if (pageCall) {
+        if (!(await cachePut(env.COMMODITY_KV, mark, String(read.barEnd), { expirationTtl: 86_400 }))) continue;
+        if (pageCall.closed) {
+          say(`${side} call already recorded by the app and already closed -- no buy alert.`);
+          continue;
+        }
+        say(`${pageCall.strike} ${side} @ Rs ${pageCall.entry} -- already recorded by the app; ${await pushCall(env, sym, pageCall, read.signal?.kind ?? null, null)}`);
+        continue;
+      }
+      const guard = liteGuard(log, side, sym, now);
       if (!guard.ok) {
         say(`${side} call skipped: ${guard.reason}`);
         await cachePut(env.COMMODITY_KV, mark, String(read.barEnd), { expirationTtl: 86_400 });
@@ -80,27 +93,29 @@ export async function runLiteCallCheck(env: Env, now: number = Date.now()): Prom
       }
       const entry = openLiteEntry(choice, side, sym, read);
       await pushTradeLogs(env, { [key]: [entry] });
-      say(`${entry.strike} ${side} @ Rs ${entry.entry} -- call recorded.`);
-      const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
-      if (!topic) {
-        say("no ntfy topic saved -- recorded but not pushed.");
-        continue;
-      }
-      const kind = read.signal?.kind === "breakout" ? "Breakout" : "Dip-and-turn";
-      const title = `🍃 Ai Lite: BUY ${SHORT[sym]} ${entry.strike} ${side} @ Rs ${entry.entry}`;
-      const body = [
-        `${kind} with the ${side === "CE" ? "up" : "down"}trend on the 15-minute chart.`,
-        `Target Rs ${entry.targets[2]} (+Rs ${LITE.targetRs.toLocaleString("en-IN")}/lot) · Stop Rs ${entry.stop} (-Rs ${LITE.stopRs.toLocaleString("en-IN")}/lot)`,
-        `At Rs ${entry.targets[0]} (+Rs ${LITE.t1Rs.toLocaleString("en-IN")}) move the stop to entry; at Rs ${entry.targets[1]} lock +Rs ${LITE.t1Rs.toLocaleString("en-IN")}.`,
-        `${choice.why}`,
-      ].join("\n");
-      const sent = await sendNtfyNotification(topic, title, body, "urgent", { token: env.NTFY_TOKEN });
-      say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
+      say(`${entry.strike} ${side} @ Rs ${entry.entry} -- call recorded; ${await pushCall(env, sym, entry, read.signal?.kind ?? null, choice.why)}`);
     } catch (e: any) {
       say(`check failed (${e?.message ?? "error"}).`);
     }
   }
   return report;
+}
+
+/** The buy alert for a call: strike, premium, the Rs 2,000 target and Rs 1,000 stop, and how to trail. */
+async function pushCall(env: Env, sym: LiteSym, entry: TradeLogEntry, kind: LiteKind | null, why: string | null): Promise<string> {
+  const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
+  if (!topic) return "no ntfy topic saved -- not pushed.";
+  const side = entry.optSide;
+  const rs = (n: number) => n.toLocaleString("en-IN");
+  const title = `🍃 Ai Lite: BUY ${SHORT[sym]} ${entry.strike} ${side} @ Rs ${entry.entry}`;
+  const body = [
+    `${kind === "breakout" ? "Breakout" : "Dip-and-turn"} with the ${side === "CE" ? "up" : "down"}trend on the 15-minute chart.`,
+    `Target Rs ${entry.targets[2]} (+Rs ${rs(LITE.targetRs)}/lot) · Stop Rs ${entry.stop} (-Rs ${rs(LITE.stopRs)}/lot)`,
+    `At Rs ${entry.targets[0]} (+Rs ${rs(LITE.t1Rs)}) move the stop to entry; at Rs ${entry.targets[1]} lock +Rs ${rs(LITE.t1Rs)}.`,
+    ...(why ? [why] : []),
+  ].join("\n");
+  const sent = await sendNtfyNotification(topic, title, body, "urgent", { token: env.NTFY_TOKEN });
+  return sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`;
 }
 
 /** Push every step the latest Ai Lite call has reached (T1, T2, closed), once each. */
