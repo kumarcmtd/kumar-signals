@@ -31,8 +31,15 @@ const IST_MS = 5.5 * 3600_000;
 const NAME: Record<LabSym, string> = { CRUDEOIL: "Crude Oil", NATURALGAS: "Natural Gas" };
 const istDate = (ms: number) => new Date(ms + IST_MS).toISOString().slice(0, 10);
 
+interface DayRecord {
+  trades: number;
+  avgRs: number | null;
+  /** Season lines: is the line resting today (its last 10 trading days clearly lost)? */
+  season?: { resting: boolean; calls: number; avgRs: number | null } | null;
+}
+
 /** The live setups re-measured on the prior days' real MCX candles; once a day, cached. */
-async function v3Record(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number, def: EngineDef): Promise<{ trades: number; avgRs: number | null } | null> {
+async function v3Record(env: Env, token: string, instrumentKey: string, sym: LabSym, now: number, def: EngineDef): Promise<DayRecord | null> {
   const kvKey = `twenty3:rec:${def.id}:${sym}:${def.active[sym].join("+")}:${istDate(now)}`;
   const cached = await env.COMMODITY_KV.get(kvKey);
   if (cached) {
@@ -44,9 +51,9 @@ async function v3Record(env: Env, token: string, instrumentKey: string, sym: Lab
   }
   const bars = await getPriorDayBars(env, token, instrumentKey, 20, 5);
   if (!bars) return null;
-  const m = measureV3(bars, sym, def);
+  const m = measureV3(bars, sym, def, now);
   if (!m) return null;
-  const out = { trades: m.together.trades, avgRs: m.together.avgRs };
+  const out: DayRecord = { trades: m.together.trades, avgRs: m.together.avgRs, ...(m.season ? { season: { resting: m.season.resting, calls: m.season.calls, avgRs: m.season.avgRs } } : {}) };
   await cachePut(env.COMMODITY_KV, kvKey, JSON.stringify(out), { expirationTtl: 2 * 86_400 });
   return out;
 }
@@ -130,20 +137,33 @@ export async function runTwentyV3CallCheck(env: Env, now: number = Date.now(), d
         }
         for (const g of results) checks.push(`${g.label} ✓`);
       }
+      // Season line: live or resting today, from its own last 10 trading days (once a day, cached).
+      let record: DayRecord | null | undefined;
+      let practice = isPracticeSetup(read.entry.setup);
+      let note = def.cardNote?.replace(/₹/g, "Rs ");
+      if (def.season) {
+        record = await v3Record(env, token, fut.instrument_key, sym, now, def).catch(() => null);
+        const ss = record?.season ?? null;
+        practice = ss ? ss.resting : true;
+        const last10 = ss && ss.avgRs !== null ? `${ss.calls} test calls, average ${ss.avgRs >= 0 ? "+" : "-"}Rs ${Math.abs(ss.avgRs)}/lot` : "too few calls to judge";
+        if (!ss) note = "Season not known (no recent candles to check) -- PRACTICE call, paper only.";
+        else if (ss.resting) note = `RESTING -- these calls' last 10 trading days lost (${last10}), so this is a PRACTICE call: paper only until they turn.`;
+        else checks.push(`Season: live (last 10 days: ${last10})`);
+      }
       // Marker first: if it cannot be saved, acting anyway would repeat the call next tick.
       if (!(await cachePut(env.COMMODITY_KV, barKey, String(read.barEnd), { expirationTtl: 86_400 }))) {
         say("call found, but the already-handled marker could not be saved -- skipped so it cannot repeat.");
         continue;
       }
-      await pushTradeLogs(env, { [key]: [openV3Entry(ticket, read, def)] });
+      await pushTradeLogs(env, { [key]: [openV3Entry(ticket, read, def, def.season ? practice : undefined)] });
       say(`${ticket.strike} ${ticket.side} @ Rs ${ticket.entry} (${read.entry.setup}) -- call recorded.`);
       const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
       if (!topic) {
         say("no ntfy topic saved -- recorded but not pushed.");
         continue;
       }
-      const record = await v3Record(env, token, fut.instrument_key, sym, now, def).catch(() => null);
-      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record, hold: read.entry.manage === "hold", practice: isPracticeSetup(read.entry.setup), engineName: def.name, checks, note: def.cardNote?.replace(/₹/g, "Rs ") });
+      record ??= await v3Record(env, token, fut.instrument_key, sym, now, def).catch(() => null);
+      const msg = v3CallPushText({ displayName: NAME[sym], t: ticket, setup: read.entry.setup, regime: read.regime?.text ?? null, record: record ?? null, hold: read.entry.manage === "hold", practice, engineName: def.name, checks, note });
       const sent = await sendNtfyNotification(topic, msg.title, msg.body, "urgent", { token: env.NTFY_TOKEN });
       say(sent.ok ? "pushed." : `push failed: ${sent.error ?? "unknown error"}.`);
     } catch (e: any) {

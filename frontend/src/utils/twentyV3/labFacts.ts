@@ -121,3 +121,37 @@ export const FAST_LAB = {
     ["2026", 975],
   ] as [string, number][],
 };
+
+/**
+ * Smart Ai20-20 lab (scripts/smart-lab.ts, 18 Nov 2026), crude. The live line:
+ * the v2 trend calls + the trader's "care at the high" check (no call within
+ * 1 ATR of the 3-hour high / low unless a candle closed through it) + the
+ * season switch (rest while the last 10 trading days clearly lost). Chosen on
+ * 2022-26, then checked on 2017-21.
+ */
+export const SMART_LAB = {
+  ranAt: "18 Nov 2026",
+  line: { recent: f(455, 46, 228, 1.24), holdout: f(306, 35, -124, 0.8) },
+  lineByYear: [
+    ["2017", -240],
+    ["2018", -58],
+    ["2019", -366],
+    ["2020", -4],
+    ["2021", -60],
+    ["2022", 112],
+    ["2023", 49],
+    ["2024", 160],
+    ["2025", -306],
+    ["2026", 824],
+  ] as [string, number][],
+  /** Ten years together (both periods). */
+  tenYears: { calls: 761, netRs: 65731, avgRs: 86 },
+  /** The v2 calls always on, no checks: ten years. */
+  v2Always: { calls: 2170, netRs: -156926, avgRs: -72 },
+  /** The line's rule (before the season switch) on the last 50 days of real NYMEX futures, and the app's own MCX candles. */
+  last50: { calls: 33, avgRs: 1008 },
+  mcx15: { calls: 7, avgRs: 1457 },
+  /** The trader's run-to-the-high idea as calls of its own: every version lost, both periods. */
+  gapRun: { recent: f(6917, 29, -151, 0.8), holdout: f(7265, 27, -206, 0.53), versions: 48 },
+  gapBreak: { recent: f(4238, 26, -137, 0.79), holdout: f(4465, 26, -155, 0.59), versions: 24 },
+};

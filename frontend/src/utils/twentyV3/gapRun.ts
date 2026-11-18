@@ -40,8 +40,13 @@ export interface GapParams {
 }
 
 export const GAP_DEFAULT: GapParams = { lookback: 36, dropAtr: 2, recAtr: 1.5, recBars: 6, roomAtr: 2.5, speedMin: 0, trend: "none", window: "all", stopAtr: 1.5, breakBuf: 0.1, nearAtr: 0 };
-/** What the page and the server run (chosen by the lab). */
-export const GAP_LIVE: GapParams = GAP_DEFAULT;
+/**
+ * What the page and the server run. Smart lab, 18 Nov 2026: as entries of their
+ * own both run setups lost in every year, but "care at the high" -- no CE
+ * within 1 ATR under the 3-hour high unless a candle already closed above it --
+ * lifted the v2 calls (see engines.ts, ENGINE_SEASON).
+ */
+export const GAP_LIVE: GapParams = { ...GAP_DEFAULT, nearAtr: 1 };
 
 export interface GapHit {
   side: "CE" | "PE";

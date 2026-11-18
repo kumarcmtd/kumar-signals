@@ -7,7 +7,7 @@ import type { LabSym } from "../twentyLab";
 import { DAY_LAB } from "./labFacts";
 import type { V3SetupId } from "./setups";
 
-export type EngineId = "v3" | "fast" | "day";
+export type EngineId = "v3" | "fast" | "day" | "season";
 
 export interface EngineDef {
   id: EngineId;
@@ -35,7 +35,29 @@ export interface EngineDef {
   tag: string;
   /** The name in phone alerts. */
   pushName: string;
+  /** Live while the rule's own last 10 trading days did not clearly lose; practice while resting (season.ts). */
+  season?: boolean;
 }
+
+export const ENGINE_SEASON: EngineDef = {
+  id: "season",
+  name: "Ai20-20",
+  route: "/ai-20-20",
+  key: (sym) => `TWENTY20-${sym}-SEASON`,
+  // Smart lab (18 Nov 2026): the v2 trend calls -- the ones the trader earned
+  // from -- plus the trader's own "care at the high" check, traded with the
+  // season switch. Gas: the v2 calls lost on years of gas prices.
+  active: { CRUDEOIL: ["trendGap"], NATURALGAS: [] },
+  practice: new Set<V3SetupId>(),
+  season: true,
+  gates: { liquidity: false, news: false },
+  olderKeys: () => [],
+  offText: "The v2 calls lost money on years of gas prices — no gas calls.",
+  callsWhen: "10:30 AM – 1:15 PM New York on a fresh strength turn with the 1-hour trend — never right under the recent high",
+  cardLabel: "Main line",
+  tag: "TWENTY20S",
+  pushName: "Ai20-20",
+};
 
 export const ENGINE_V3: EngineDef = {
   id: "v3",
@@ -96,7 +118,7 @@ export const ENGINE_FAST: EngineDef = {
   pushName: "Ai-Super Fast",
 };
 
-export const ENGINES: readonly EngineDef[] = [ENGINE_V3, ENGINE_DAY, ENGINE_FAST];
-export const engineById = (id: EngineId): EngineDef => (id === "fast" ? ENGINE_FAST : id === "day" ? ENGINE_DAY : ENGINE_V3);
+export const ENGINES: readonly EngineDef[] = [ENGINE_SEASON, ENGINE_V3, ENGINE_DAY, ENGINE_FAST];
+export const engineById = (id: EngineId): EngineDef => (id === "fast" ? ENGINE_FAST : id === "day" ? ENGINE_DAY : id === "season" ? ENGINE_SEASON : ENGINE_V3);
 /** Practice-only anywhere (setup ids are unique across pages). */
 export const isPracticeAnywhere = (id: V3SetupId) => ENGINES.some((e) => e.practice.has(id));

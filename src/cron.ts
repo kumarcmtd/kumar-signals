@@ -30,7 +30,7 @@ import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
 import { runLiteCallCheck, runLiteStepCheck } from "./liteCron";
-import { ENGINE_DAY, ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
+import { ENGINE_DAY, ENGINE_FAST, ENGINE_SEASON } from "../frontend/src/utils/twentyV3/engines";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
@@ -53,6 +53,7 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
         const busy = await runTradeLogAdvanceCheck(env);
         // Ai20-20 v3: tell the phone each step the calls just reached (T1, stop, close).
         await runTwentyV3StepCheck(env).catch(() => undefined);
+        await runTwentyV3StepCheck(env, Date.now(), ENGINE_SEASON).catch(() => undefined);
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_DAY).catch(() => undefined);
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST).catch(() => undefined);
         // Ai Lite: T1 / T2 / closed alerts.
@@ -82,6 +83,9 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
     runTradeCardTracker(env)
       .catch(() => undefined)
       .then(() => runTwentyV3CallCheck(env))
+      .catch(() => undefined)
+      // Ai20-20's main line: the v2 calls + "care at the high", live while in season.
+      .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_SEASON))
       .catch(() => undefined)
       // Ai20-20 all day: its own practice line, 9:00 AM IST to 30 minutes before the bell.
       .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_DAY))

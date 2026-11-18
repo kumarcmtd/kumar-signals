@@ -14,6 +14,7 @@ import { PriceScale, fmtWhen } from "../CallCardKit";
 import { BuyNowBanner } from "../BuyNowBanner";
 import { AiChart } from "../trust/AiChart";
 import { isPracticeSetup } from "../../utils/twentyV3/live";
+import { newsVsSide } from "../../utils/newsPulse";
 
 const inr = (n: number) => `₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${inr(n)}`;
@@ -143,7 +144,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
   const olderOpen = [...s.older].reverse().find((e) => !e.closed) ?? null;
   const open = s.running ?? olderOpen;
   const side = open?.optSide ?? r.entry?.side ?? null;
-  const practice = open ? !!open.practice : r.entry ? isPracticeSetup(r.entry.setup) : false;
+  const practice = open ? !!open.practice : r.entry ? s.resting === true || isPracticeSetup(r.entry.setup) : false;
   const pill = open ? (practice ? "PRACTICE RUNNING" : "CALL RUNNING") : r.state === "call" ? (practice ? "PRACTICE CALL" : "NEW CALL") : r.state === "watch" ? "WATCHING" : r.state === "window_closed" ? "WAITING" : r.state === "off" ? "NO CALLS" : "LOADING";
   const hot = !!open || r.state === "call";
   // Badge colours by meaning: blue = practice, green/red = a real CE/PE call,
@@ -161,7 +162,7 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
         ? "linear-gradient(135deg,#F0FDFA,#FFFFFF)"
         : "linear-gradient(135deg,#F8FAFC,#FFFFFF)";
   const Dir = side === "PE" ? TrendingDown : TrendingUp;
-  const blocked = r.state === "call" && !open ? (s.expiry ?? (s.guard.ok ? (s.ticket ? (s.gatesOk ? null : "The setup fired, but a live check failed — no call this time.") : "No live option price to build the order — nothing to enter.") : s.guard.reason)) : null;
+  const blocked = r.state === "call" && !open ? (s.expiry ?? (s.guard.ok ? (s.ticket ? (s.gatesOk ? (s.resting === null ? "Checking this line's season (its last 10 days) before the call opens…" : null) : "The setup fired, but a live check failed — no call this time.") : "No live option price to build the order — nothing to enter.") : s.guard.reason)) : null;
   return (
     <section className="rounded-3xl bg-white shadow-md overflow-hidden border-l-8" style={{ borderColor: accent }}>
       <div className="p-4 flex items-center gap-3" style={{ background: headBg }}>
@@ -212,6 +213,13 @@ export function V3CallCard({ s }: { s: TwentyV3State }) {
           </div>
         )}
         {blocked && <p className="text-[11.5px] font-bold text-amber-800 rounded-xl bg-amber-50 border border-amber-200 px-2.5 py-2">{blocked}</p>}
+        {s.def.season && s.news && s.def.active[s.sym].length > 0 && (
+          <p className="text-[11px] text-slate-600 rounded-xl bg-slate-50 px-2.5 py-1.5">
+            {`📰 News now: ${s.news.direction} (${s.news.net >= 0 ? "+" : ""}${s.news.net})`}
+            {side && ` — ${newsVsSide(s.news, side).startsWith("strongly") ? "strongly against" : newsVsSide(s.news, side)} this ${side}`}
+            {" · for your judgement; news never blocks these calls."}
+          </p>
+        )}
         {open && <RunningCall s={s} open={open} older={!s.running} />}
         {r.state !== "off" && (
           <p className="text-[11px] text-slate-500">

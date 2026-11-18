@@ -65,10 +65,35 @@ export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
     const id = setInterval(() => setTick((t) => t + 1), 15_000);
     return () => clearInterval(id);
   }, []);
+  // The setups' record on ~20 days of real MCX candles (a background worker); for
+  // a season line it also says whether the line is live or resting today.
+  const hist = useHistory5m(sym);
+  const [record, setRecord] = useState<V3Record | null>(null);
+  const [recordState, setRecordState] = useState<"loading" | "ready" | "error" | "off">(on ? "loading" : "off");
+  useEffect(() => {
+    if (!on) return;
+    const c = hist.data?.candles;
+    if (!c) {
+      if (hist.data?.error || hist.isError) setRecordState("error");
+      return;
+    }
+    let alive = true;
+    measureV3Async(c, sym, def).then((r) => {
+      if (!alive) return;
+      setRecord(r);
+      setRecordState(r ? "ready" : "error");
+    });
+    return () => {
+      alive = false;
+    };
+  }, [hist.data, hist.isError, sym, on, def]);
+  // Season line: null until its switch is known -- no call is opened before that.
+  const resting: boolean | null = def.season ? (record?.season ? record.season.resting : null) : false;
+
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const ctx = useMemo(() => (candles.length ? liveCtx(candles, Date.now()) : null), [candles, tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const read = useMemo(() => readV3(candles, sym, Date.now(), ctx, def), [ctx, sym]);
+  const read = useMemo(() => readV3(candles, sym, Date.now(), ctx, def, resting === true), [ctx, sym, resting]);
   const choice: StrikeChoice | null = useMemo(() => (read.state === "call" && read.entry ? pickStrike(options, read.entry.side) : null), [read, options]);
   const ticket = useMemo(() => (read.entry && choice ? buildTicket(read.entry, choice, sym) : null), [read, choice, sym]);
 
@@ -76,7 +101,8 @@ export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
   const newsQ = useNewsTrade();
   const news = useMemo(() => {
     const d = newsQ.data;
-    if (!def.gates.news || !d?.news?.available) return null;
+    // Season lines show the news for the trader's judgement (it never blocks their calls).
+    if (!(def.gates.news || def.season) || !d?.news?.available) return null;
     const eia = sym === "CRUDEOIL" ? (d.eia?.crude ?? null) : (d.eia?.ngStorage ?? null);
     return newsPulseFor(sym, d.news.articles ?? [], eia, d.news.builtAt ?? d.fetchedAt ?? null, Date.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -100,12 +126,12 @@ export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
       if (next !== last) setTradeLog(key, [...history.slice(0, -1), next]);
       return;
     }
-    if (read.state !== "call" || !ticket || !gatesOk || expiryBlock(options, now)) return;
-    const entry = openV3Entry(ticket, read, def);
+    if (read.state !== "call" || !ticket || !gatesOk || expiryBlock(options, now) || resting === null) return;
+    const entry = openV3Entry(ticket, read, def, def.season ? resting : undefined);
     if (history.some((e) => e.id === entry.id)) return;
     if (!v3Guard(history, ticket.side, sym, now).ok) return;
     setTradeLog(key, [...history, entry].slice(-MAX_HISTORY));
-  }, [read, ticket, gatesOk, options, key, sym, setTradeLog]);
+  }, [read, ticket, gatesOk, options, key, sym, setTradeLog, resting, def]);
 
   // Calls made under earlier rules keep moving until they close.
   useEffect(() => {
@@ -116,28 +142,7 @@ export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
       const next = advanceOpenEntry(last, liveLtpFor(options, last.strike, last.optSide), Date.now());
       if (next !== last) setTradeLog(k, [...history.slice(0, -1), next]);
     }
-  }, [options, sym, setTradeLog]);
-
-  const hist = useHistory5m(sym);
-  const [record, setRecord] = useState<V3Record | null>(null);
-  const [recordState, setRecordState] = useState<"loading" | "ready" | "error" | "off">(on ? "loading" : "off");
-  useEffect(() => {
-    if (!on) return;
-    const c = hist.data?.candles;
-    if (!c) {
-      if (hist.data?.error || hist.isError) setRecordState("error");
-      return;
-    }
-    let alive = true;
-    measureV3Async(c, sym, def).then((r) => {
-      if (!alive) return;
-      setRecord(r);
-      setRecordState(r ? "ready" : "error");
-    });
-    return () => {
-      alive = false;
-    };
-  }, [hist.data, hist.isError, sym, on]);
+  }, [options, sym, setTradeLog, def]);
 
   const now = Date.now();
   const guard = v3Guard(log, read.entry?.side ?? null, sym, now);
@@ -170,6 +175,9 @@ export function useTwentyV3(sym: LabSym, def: EngineDef = ENGINE_V3) {
     expiry: on ? expiryBlock(options) : null,
     record,
     recordState,
+    /** Season lines: true = resting (practice calls), false = live, null = not known yet. */
+    resting,
+    season: record?.season ?? null,
     key,
   };
 }

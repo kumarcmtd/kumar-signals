@@ -12,6 +12,8 @@ import { entryAt, SETUP_NAMES, type V3Ctx, type V3Entry, type V3SetupId } from "
 import { simulateV3, type V3Trade } from "./sim";
 import type { V3Ticket } from "./ticket";
 import { ENGINE_V3, isPracticeAnywhere, type EngineDef } from "./engines";
+import { seasonOf, type Season } from "./season";
+import { GAP_LIVE } from "./gapRun";
 
 // Which setups run, and which are practice only, is decided per page in
 // engines.ts (from the lab). These names keep Ai20-20's existing callers working.
@@ -75,10 +77,18 @@ function statusLine(ctx: V3Ctx, i: number, id: V3SetupId, fired: boolean, own: C
     const what = id.startsWith("fastBreak") ? "a 15-minute close beyond the last hour's range" : id.startsWith("fastTurn") ? "a fresh 5-minute strength turn" : "a half-hour close outside the normal range";
     return `${speedTxt} · waiting for ${what} with the trend · ${trend}.`;
   }
-  if (id === "trend") {
+  if (id === "trend" || id === "trendGap") {
     const sc = p.score[i];
     const s = Number.isFinite(sc) ? Math.round(sc) : null;
-    return `Strength ${s ?? "—"} (CE needs a fresh 58+, PE 42 or less) · ${trendText(p, i)} · ${nyLabel(from)} – ${nyLabel(to)}.`;
+    const base = `Strength ${s ?? "—"} (CE needs a fresh 58+, PE 42 or less) · ${trendText(p, i)} · ${nyLabel(from)} – ${nyLabel(to)}`;
+    if (id === "trend" || i < GAP_LIVE.lookback) return `${base}.`;
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (let j = i - GAP_LIVE.lookback; j < i; j++) {
+      hi = Math.max(hi, p.c[j].high);
+      lo = Math.min(lo, p.c[j].low);
+    }
+    return `${base} · careful near the 3-hour high ${inr(hi)} / low ${inr(lo)}: no call within ${GAP_LIVE.nearAtr} ATR (${inr(GAP_LIVE.nearAtr * p.atr[i])}) of it until a candle closes through.`;
   }
   if (!Number.isFinite(sm)) return `Starts after the 9:00 AM New York open (${nyLabel(from)}).`;
   if (id === "noise" || id === "noise30") {
@@ -116,7 +126,7 @@ export function liveCtx(candles: Candle[], now: number): V3Ctx | null {
   return { p, f };
 }
 
-export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(), ctxIn?: V3Ctx | null, def: EngineDef = ENGINE_V3): V3Read {
+export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(), ctxIn?: V3Ctx | null, def: EngineDef = ENGINE_V3, resting = false): V3Read {
   const setups = def.active[sym];
   const none = (headline: string, state: V3Read["state"]): V3Read => ({ state, entry: null, barEnd: null, fut: null, setups: [], regime: null, headline });
   if (!setups.length) return none(def.offText, "off");
@@ -164,7 +174,7 @@ export function readV3(candles: Candle[], sym: LabSym, now: number = Date.now(),
     return { id, name: SETUP_NAMES[id], fired, line: !fired && own && !own.open && own.from > now ? waitLine(id, own) : statusLine(ctx, i, id, fired, own) };
   });
   const base = { barEnd, fut: p.c[i].close, setups: statuses, regime: readRegime(p, ctx.f) };
-  if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
+  if (entry) return { ...base, barEnd: callEnd, state: "call", entry, headline: `${resting || isPracticeSetup(entry.setup) ? "Practice " : ""}${entry.side} call — ${SETUP_NAMES[entry.setup]} on the ${istClock(callEnd)} candle.` };
   // The New York time only helps when every setup runs on the New York clock.
   const nyNote = setups.every((id) => SETUP_WINDOWS[id].clock === "ny") ? ` (${nyLabel(Math.min(...setups.map((id) => SETUP_WINDOWS[id].from)))})` : "";
   if (w && !w.open) return { ...base, state: "window_closed", entry: null, headline: w.from > now ? `Next check ${whenNext(w.from, now)}${nyNote}.` : `Calls only ${w.label}.` };
@@ -199,16 +209,17 @@ export function v3Guard(log: TradeLogEntry[], side: "CE" | "PE" | null, sym: Lab
 }
 
 /** The log entry for a call; id and time come from the signal candle so page and server write the same one. */
-export function openV3Entry(t: V3Ticket, read: V3Read, def: EngineDef = ENGINE_V3): TradeLogEntry {
+export function openV3Entry(t: V3Ticket, read: V3Read, def: EngineDef = ENGINE_V3, practiceOverride?: boolean): TradeLogEntry {
   const e = read.entry!;
+  const practice = practiceOverride ?? isPracticeSetup(e.setup);
   const why = read.setups.find((s) => s.id === e.setup);
   const entry = openNewEntry({ strike: t.strike, optSide: t.side, entry: t.entry, targets: t.targets, stop: t.stop }, read.barEnd ?? Date.now(), {
-    label: `${def.name} · ${SETUP_NAMES[e.setup]}${isPracticeSetup(e.setup) ? " (practice)" : ""}`,
+    label: `${def.name} · ${SETUP_NAMES[e.setup]}${practice ? " (practice)" : ""}`,
     reasons: [why?.name ?? e.setup, read.regime?.text ?? ""].filter(Boolean),
     confirmingTimeframes: ["5m", "1h"],
   });
   // Hold setups keep their first stop and sell at the close, as the lab replayed them.
-  return { ...entry, ...(e.manage === "hold" ? { manage: "hold" as const } : {}), ...(isPracticeSetup(e.setup) ? { practice: true } : {}) };
+  return { ...entry, ...(e.manage === "hold" ? { manage: "hold" as const } : {}), ...(practice ? { practice: true } : {}) };
 }
 
 // ---- the measured record on recent real candles ----
@@ -219,9 +230,11 @@ export interface V3Record {
   together: LabStats;
   bySetup: Partial<Record<V3SetupId, LabStats>>;
   trades: V3Trade[];
+  /** Season engines: the switch read on the first setup's own replay (season.ts). */
+  season?: Season | null;
 }
 
-export function measureV3(history: Candle[], sym: LabSym, def: EngineDef = ENGINE_V3): V3Record | null {
+export function measureV3(history: Candle[], sym: LabSym, def: EngineDef = ENGINE_V3, now: number = Date.now()): V3Record | null {
   const setups = def.active[sym];
   if (history.length < MIN_BARS || !setups.length) return null;
   // All-day setups need the strength score on every candle; the rest only in v2's window.
@@ -229,6 +242,11 @@ export function measureV3(history: Candle[], sym: LabSym, def: EngineDef = ENGIN
   const ctx: V3Ctx = { p, f: computeFeatures(p) };
   const trades = simulateV3(ctx, setups, { sym, ...V3_GUARDS });
   const bySetup: Partial<Record<V3SetupId, LabStats>> = {};
-  for (const id of setups) bySetup[id] = statsOf(simulateV3(ctx, [id], { sym }), p, SETUP_NAMES[id]);
-  return { from: p.c[0].date, to: p.c[p.c.length - 1].date, together: statsOf(trades, p, def.name), bySetup, trades };
+  let season: Season | null = null;
+  for (const id of setups) {
+    const own = simulateV3(ctx, [id], { sym });
+    bySetup[id] = statsOf(own, p, SETUP_NAMES[id]);
+    if (def.season && id === setups[0]) season = seasonOf(own, p, now);
+  }
+  return { from: p.c[0].date, to: p.c[p.c.length - 1].date, together: statsOf(trades, p, def.name), bySetup, trades, ...(def.season ? { season } : {}) };
 }
