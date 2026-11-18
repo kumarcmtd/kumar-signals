@@ -29,7 +29,7 @@ export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 // Live but NOT a bottom-bar tab: AI-Up and Ai-Super Fast (top of the More
 // menu) log their own calls, so they must keep updating while open; Ai-Trust
 // was a tab until AI-Test V2 took its place and keeps updating as before.
-export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast", "/ai-trust"] as const;
+export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast", "/ai-trust", "/ai-lite"] as const;
 
 const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 

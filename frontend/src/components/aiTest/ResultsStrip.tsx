@@ -13,7 +13,7 @@ import { buildPageReport, EST_COST_RS, periodStart, readReportPeriod, saveReport
 import { rankSignalsByWinRate } from "../../utils/tradeLogStats";
 import { ownLogs, rupees } from "./kit";
 
-const ENGINE = ENGINES.find((e) => e.id === "aitest")!;
+const engineOf = (id: string) => ENGINES.find((e) => e.id === id)!;
 const PERIODS: [ReportPeriod, string][] = [["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All"]];
 const MARKETS: [ReportMarket, string][] = [["ALL", "Both"], ["CRUDEOIL", "🛢️ Crude"], ["NATURALGAS", "🔥 NG"]];
 type Tab = "summary" | "tf" | "days" | "signals";
@@ -75,13 +75,16 @@ function Small({ big, small, color }: { big: string; small: string; color?: stri
   );
 }
 
-export function ResultsStrip({ logs }: { logs: Record<string, TradeLogEntry[]> }) {
+/** engineId: whose calls (AI-Test V2 by default; Ai Lite reuses this). signalsTab: AI-Test's signal-tier ranking. */
+export function ResultsStrip({ logs, engineId = "aitest", signalsTab = true }: { logs: Record<string, TradeLogEntry[]>; engineId?: string; signalsTab?: boolean }) {
   const [period, setPeriodState] = useState<ReportPeriod>(readReportPeriod);
   const [market, setMarket] = useState<ReportMarket>("ALL");
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("summary");
-  const r = useMemo(() => buildPageReport(logs, ENGINE, { period, market }), [logs, period, market]);
+  const r = useMemo(() => buildPageReport(logs, engineOf(engineId), { period, market }), [logs, engineId, period, market]);
+  const tabs = signalsTab ? TABS : TABS.filter(([k]) => k !== "signals");
   const signals = useMemo(() => {
+    if (!signalsTab) return [];
     const since = periodStart(period, Date.now());
     const list: TradeLogEntry[] = [];
     for (const [k, entries] of Object.entries(ownLogs(logs))) {
@@ -90,7 +93,7 @@ export function ResultsStrip({ logs }: { logs: Record<string, TradeLogEntry[]> }
       list.push(...entries.filter((e) => keep.has(e.id) && e.closed && (since === null || (e.closedAt ?? e.openedAt) >= since)));
     }
     return rankSignalsByWinRate(list);
-  }, [logs, period, market]);
+  }, [logs, period, market, signalsTab]);
   const days = [...r.days].reverse();
   const peak = Math.max(1, ...days.map((d) => Math.abs(d.netRs)));
   const up = r.netRs >= 0;
@@ -151,8 +154,8 @@ export function ResultsStrip({ logs }: { logs: Record<string, TradeLogEntry[]> }
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-4 gap-1 rounded-2xl bg-slate-100 p-1">
-            {TABS.map(([k, t]) => (
+          <div className={`grid ${tabs.length === 4 ? "grid-cols-4" : "grid-cols-3"} gap-1 rounded-2xl bg-slate-100 p-1`}>
+            {tabs.map(([k, t]) => (
               <button key={k} onClick={() => setTab(k)} className={`rounded-xl py-1.5 text-[11px] font-black ${tab === k ? "bg-white text-violet-700 shadow" : "text-slate-500"}`}>
                 {t}
               </button>

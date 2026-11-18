@@ -29,6 +29,7 @@ import { warmEnergyNews } from "./news";
 import { runNewsFlashCheck } from "./newsFlash";
 import { runBestCallNotificationCheck } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
+import { runLiteCallCheck, runLiteStepCheck } from "./liteCron";
 import { ENGINE_DAY, ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
@@ -54,6 +55,8 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
         await runTwentyV3StepCheck(env).catch(() => undefined);
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_DAY).catch(() => undefined);
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST).catch(() => undefined);
+        // Ai Lite: T1 / T2 / closed alerts.
+        await runLiteStepCheck(env).catch(() => undefined);
         if (!busy) await warmTimeProfiles(env);
       })()
     );
@@ -85,6 +88,10 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
       .catch(() => undefined)
       // Ai-Super Fast: Speed 70+ practice calls with live liquidity and news checks.
       .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST))
+      .catch(() => undefined)
+      // Ai Lite: three plain rules on 15-minute candles, Rs 2,000 target.
+      .then(() => runLiteCallCheck(env))
+      .catch(() => undefined)
   );
   // EIA release in ~30 min; live data failing at the open.
   ctx.waitUntil(runImportantAlerts(env).catch(() => undefined));

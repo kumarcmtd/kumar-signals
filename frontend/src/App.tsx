@@ -28,6 +28,7 @@ import { AiVerifyPro } from "./pages/AiVerifyPro";
 import { NewsBasedTradeAi } from "./pages/NewsBasedTradeAi";
 import { AiTwentyTwenty } from "./pages/AiTwentyTwenty";
 import { AiSuperFast } from "./pages/AiSuperFast";
+import { AiLite } from "./pages/AiLite";
 import { LevelCrossScan } from "./pages/LevelCrossScan";
 import { AiOwn } from "./pages/AiOwn";
 import { AiUp } from "./pages/AiUp";
@@ -75,6 +76,7 @@ function App() {
           <Route path="/news-trade-ai" element={<NewsBasedTradeAi />} />
           <Route path="/ai-20-20" element={<AiTwentyTwenty />} />
           <Route path="/ai-super-fast" element={<AiSuperFast />} />
+          <Route path="/ai-lite" element={<AiLite />} />
           <Route path="/level-cross-scan" element={<LevelCrossScan />} />
           <Route path="/ai-own" element={<AiOwn />} />
           <Route path="/ai-up" element={<AiUp />} />

@@ -34,7 +34,7 @@ const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
 /** Pages that show their own (compact) report at the top instead of this strip. */
-const EMBEDDED_REPORT = new Set(["/ai-test-v2"]);
+const EMBEDDED_REPORT = new Set(["/ai-test-v2", "/ai-lite"]);
 
 const rs = (n: number) => `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const when = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });

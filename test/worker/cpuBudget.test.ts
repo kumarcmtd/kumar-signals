@@ -189,6 +189,10 @@ test("each trigger runs only its own jobs; Best Call pushes run with Ai20-20", a
   vi.doMock("../../src/notify", () => ({
     runBestCallNotificationCheck: async () => { calls.push("bestcall"); },
   }));
+  vi.doMock("../../src/liteCron", () => ({
+    runLiteCallCheck: async () => { calls.push("lite"); },
+    runLiteStepCheck: async () => { calls.push("litesteps"); },
+  }));
   vi.doMock("../../src/twentyV3Cron", () => ({
     runTwentyV3CallCheck: async () => { calls.push("twenty"); },
     runTwentyV3StepCheck: async () => { calls.push("steps"); },
@@ -205,14 +209,14 @@ test("each trigger runs only its own jobs; Best Call pushes run with Ai20-20", a
   const run = async (c: string) => { calls.length = 0; waits.length = 0; await cron.runScheduled(envWith(makeKv()), ctx, c); await Promise.all(waits); return [...calls].sort(); };
 
   // Ai20-20's two lines (opening drive, all day) and Ai-Super Fast each run their call check.
-  expect(await run(cron.CRON_FAST)).toEqual(["anchor", "bestcall", "expiry", "twenty", "twenty", "twenty"]);
+  expect(await run(cron.CRON_FAST)).toEqual(["anchor", "bestcall", "expiry", "lite", "twenty", "twenty", "twenty"]);
   // Trades open -> the run's CPU goes to them, and the profile waits.
   // Ai20-20 v3's step alerts follow every trade advance (T1, stop, close).
-  expect(await run(cron.CRON_TRADES)).toEqual(["steps", "steps", "steps", "trades"]);
+  expect(await run(cron.CRON_TRADES)).toEqual(["litesteps", "steps", "steps", "steps", "trades"]);
   tradesOpen = false;
-  expect(await run(cron.CRON_TRADES)).toEqual(["profile", "steps", "steps", "steps", "trades"]);
+  expect(await run(cron.CRON_TRADES)).toEqual(["litesteps", "profile", "steps", "steps", "steps", "trades"]);
   expect(await run(cron.CRON_WARM)).toEqual(["news"]);
-  vi.doUnmock("../../src/notify"); vi.doUnmock("../../src/twentyV3Cron"); vi.doUnmock("../../src/expiryAlerts"); vi.doUnmock("../../src/globalMarkets");
+  vi.doUnmock("../../src/notify"); vi.doUnmock("../../src/twentyV3Cron"); vi.doUnmock("../../src/liteCron"); vi.doUnmock("../../src/expiryAlerts"); vi.doUnmock("../../src/globalMarkets");
   vi.doUnmock("../../src/tradeLogCron"); vi.doUnmock("../../src/news"); vi.doUnmock("../../src/profiles");
   vi.resetModules();
 });

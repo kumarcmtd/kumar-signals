@@ -69,6 +69,7 @@ export const ENGINES: EngineDef[] = [
   { id: "elite", label: "AI Elite", prefix: "ELITE", route: "/ai-elite" },
   { id: "pattern", label: "AI-Learn", prefix: "PATTERN", route: "/ai-learn" },
   { id: "kimi", label: "Kimi AI", prefix: "KIMI", route: "/kimi-ai-trade" },
+  { id: "lite", label: "Ai Lite", prefix: "LITE", route: "/ai-lite" },
   { id: "aitest", label: "AI-Test (V2/Pro)", prefix: null, route: "/ai-test-v2" },
 ];
 
