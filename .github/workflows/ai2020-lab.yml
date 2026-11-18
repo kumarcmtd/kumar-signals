@@ -9,13 +9,15 @@ on:
   workflow_dispatch:
     inputs:
       group:
-        description: "Rule set to run: all, v3, fast or day"
+        description: "Rule set to run: all, v3, fast, day or lite"
         default: "all"
   push:
     branches: [claude/natural-gas-crude-oil-options-qkizj2]
     paths:
       - "scripts/twenty-lab.ts"
       - "scripts/twenty-lab-v3.ts"
+      - "scripts/lite-lab.ts"
+      - "frontend/src/utils/lite/**"
       - "scripts/lab-data.ts"
       - "frontend/src/utils/twentyLab.ts"
       # Only the files the replay runs (not the page's wording or windows).
@@ -53,6 +55,10 @@ jobs:
           - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "day", group: day }
           - { market: NATURALGAS, from: "2022-01-01", to: "", set: "day", group: day }
           - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "day", group: day }
+          # Ai Lite: three plain rules, Rs 2,000 target (its own script).
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "lite", group: lite, script: "scripts/lite-lab.ts" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -83,7 +89,7 @@ jobs:
           LAB_SET: ${{ matrix.set }}
         run: |
           set -o pipefail
-          npx -y tsx scripts/twenty-lab-v3.ts | tee lab.md
+          npx -y tsx ${{ matrix.script || 'scripts/twenty-lab-v3.ts' }} | tee lab.md
       - name: Summary
         if: always()
         run: test -f lab.md && cat lab.md >> "$GITHUB_STEP_SUMMARY" || true
