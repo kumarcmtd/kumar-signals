@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       group:
-        description: "Rule set to run: all, v3, fast, day, lite or smart"
+        description: "Rule set to run: all, v3, fast, day, lite, smart or round2"
         default: "all"
   push:
     branches: [claude/natural-gas-crude-oil-options-qkizj2]
@@ -66,6 +66,10 @@ jobs:
           - { market: NATURALGAS, from: "2022-01-01", to: "", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
           - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
           - { market: NATURALGAS, from: "2017-01-01", to: "2021-12-31", set: "smart", group: smart, script: "scripts/smart-lab.ts" }
+          # Round 2: v2 + "care at the high", wider windows, Speed; each with the season switch.
+          - { market: CRUDEOIL, from: "2022-01-01", to: "", set: "round2", group: round2, script: "scripts/smart-lab.ts" }
+          - { market: CRUDEOIL, from: "2017-01-01", to: "2021-12-31", set: "round2", group: round2, script: "scripts/smart-lab.ts" }
+          - { market: NATURALGAS, from: "2022-01-01", to: "", set: "round2", group: round2, script: "scripts/smart-lab.ts" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

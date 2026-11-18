@@ -35,6 +35,7 @@ const ABOUT: Record<V3SetupId, string> = {
   fastNoiseUS: "Speed 70+ and a half-hour close outside the normal range from the New York open.",
   gapRun: "Price fell from a recent high and races back up fast with room left: buy CE, last target just under that high (the mirror for PE).",
   gapBreak: "After such a run, a stable 5-minute close above the recent high is the next leg: buy CE, stop just under the old high (the mirror for PE).",
+  trendGap: "The v2 rule, but a CE right under the recent high waits until a 5-minute candle closes above it (the mirror for PE).",
 };
 
 function Period({ label, p }: { label: string; p: PeriodFact | undefined }) {

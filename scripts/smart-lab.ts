@@ -128,9 +128,11 @@ function gapSection(d: Data, id: "gapRun" | "gapBreak", title: string, keys: Par
   switchRows("As described", base, d, (lines.push("\n**With the recent-record switch**", HEAD), lines));
 }
 
+const ROUND2 = process.env.LAB_SET === "round2";
+
 function load(name: string, sym: LabSym, candles: Candle[]): Data {
-  // The v2 strength score is only needed in its own New York window.
-  const p = prepare(candles, { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
+  // The v2 strength score is only needed in its own New York window (round 2 tries wider ones).
+  const p = prepare(candles, ROUND2 ? { etFrom: 9 * 60 + 30, etTo: 14 * 60 } : { etFrom: 10 * 60 + 30, etTo: 13 * 60 + 15 });
   return { name, sym, ctx: { p, f: computeFeatures(p) } };
 }
 
@@ -152,6 +154,35 @@ function full(d: Data, lines: string[]) {
   for (const ids of [["gapBreak", "gapRun"], ["trend", "gapBreak", "gapRun"]] as V3SetupId[][]) {
     const t = run(d, ids, undefined, GUARDS);
     lines.push(row(ids.join(" > "), t, d));
+  }
+}
+
+/** Round 2: the v2 rule with the trader's "care at the high" check, wider windows and Speed; each also with the season switch. */
+const R2: [string, V3SetupId, Partial<V3Ctx>][] = [
+  ["v2 as it was (10:30 AM - 1:15 PM NY)", "trend", {}],
+  ["v2, from 9:30 AM NY", "trend", { v2Window: [570, 795] }],
+  ["v2, from 10:00 AM NY", "trend", { v2Window: [600, 795] }],
+  ["v2, until 2:00 PM NY", "trend", { v2Window: [630, 840] }],
+  ["v2 + care at the high 0.5 ATR", "trendGap", { gap: { nearAtr: 0.5 } }],
+  ["v2 + care at the high 1 ATR", "trendGap", { gap: { nearAtr: 1 } }],
+  ["v2 + care at the high 1.5 ATR", "trendGap", { gap: { nearAtr: 1.5 } }],
+  ["v2 + care at the high 2 ATR", "trendGap", { gap: { nearAtr: 2 } }],
+  ["v2 + care at the 5-hour high 1 ATR", "trendGap", { gap: { nearAtr: 1, lookback: 60 } }],
+  ["v2 + care at the 2-hour high 1 ATR", "trendGap", { gap: { nearAtr: 1, lookback: 24 } }],
+  ["v2 + fast (Speed 60+)", "trendGap", { gap: { speedMin: 60 } }],
+  ["v2 + care 1 ATR + Speed 60+", "trendGap", { gap: { nearAtr: 1, speedMin: 60 } }],
+];
+const season = (t: LabTrade[], d: Data) => gateTrades(t, d.ctx.p, 10, 5, 0, true).gated;
+
+function round2(d: Data, lines: string[], withYears: boolean) {
+  const res = R2.map(([label, id, extra]) => ({ label, t: simulateV3({ ...d.ctx, ...extra }, [id], { sym: d.sym }) }));
+  lines.push(header(d), "### Every version as it is", HEAD);
+  for (const r of res) lines.push(row(r.label, r.t, d));
+  lines.push("\n### With the season switch (rest only when the last 10 days clearly lost: 5+ calls, average below zero)", HEAD);
+  for (const r of res) lines.push(row(r.label, season(r.t, d), d));
+  if (withYears) {
+    lines.push("\n**By year** (calls / avg Rs; plain → with the season switch)");
+    for (const r of res) lines.push(`- ${r.label}: ${byYear(r.t)} → ${byYear(season(r.t, d))}`);
   }
 }
 
@@ -202,7 +233,8 @@ async function main() {
       if (c.length < 5000) throw new Error(`only ${c.length} candles`);
       years = load(`${label} 5-min, ${FROM} to ${TO} (Dukascopy, as MCX ${sym})`, sym, c);
       log(`${sym} loaded`);
-      full(years, lines);
+      if (ROUND2) round2(years, lines, true);
+      else full(years, lines);
       log(`${sym} years done`);
     } catch (e) {
       lines.push(`\n## ${label} multi-year\n\nFailed: ${String(e)}`);
@@ -210,12 +242,15 @@ async function main() {
     console.log(lines.splice(0).join("\n"));
     if (synthMode || HOLDOUT) continue;
     try {
-      brief(load(`${label} — last 60 days of NYMEX futures (Yahoo)`, sym, await yahoo(yh, true)), years, lines);
+      const y = load(`${label} — last 60 days of NYMEX futures (Yahoo)`, sym, await yahoo(yh, true));
+      if (ROUND2) round2(y, lines, false);
+      else brief(y, years, lines);
     } catch (e) {
       lines.push(`\nYahoo ${yh} failed: ${String(e)}`);
     }
     const m = await mcx(sym);
     if (typeof m === "string") lines.push(`\nMCX ${sym}: not available (${m})`);
+    else if (ROUND2) round2(load(`MCX ${sym} 5-min (the app's own candles)`, sym, m), lines, false);
     else brief(load(`MCX ${sym} 5-min (the app's own candles)`, sym, m), years, lines);
     console.log(lines.join("\n"));
   }

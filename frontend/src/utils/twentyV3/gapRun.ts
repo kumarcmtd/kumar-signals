@@ -35,9 +35,11 @@ export interface GapParams {
   stopAtr: number;
   /** gapBreak: the close must clear the level by this many ATR. */
   breakBuf: number;
+  /** trendGap: skip a call this close (in ATR) under the recent high / over the recent low, unless already through it. 0 = off. */
+  nearAtr: number;
 }
 
-export const GAP_DEFAULT: GapParams = { lookback: 36, dropAtr: 2, recAtr: 1.5, recBars: 6, roomAtr: 2.5, speedMin: 0, trend: "none", window: "all", stopAtr: 1.5, breakBuf: 0.1 };
+export const GAP_DEFAULT: GapParams = { lookback: 36, dropAtr: 2, recAtr: 1.5, recBars: 6, roomAtr: 2.5, speedMin: 0, trend: "none", window: "all", stopAtr: 1.5, breakBuf: 0.1, nearAtr: 0 };
 /** What the page and the server run (chosen by the lab). */
 export const GAP_LIVE: GapParams = GAP_DEFAULT;
 
@@ -132,4 +134,52 @@ export function gapBreakAt(p: Prepared, f: V3Features, i: number, g: GapParams, 
     return { side, level: s.level, stopPts, t1Pts: 1.5 * stopPts };
   }
   return null;
+}
+
+/**
+ * "Care at the high": a CE right under the recent high (closer than nearAtr x
+ * ATR) waits -- unless the candle already closed above it. Mirror for PE.
+ */
+export function gapRoomOk(p: Prepared, f: V3Features, i: number, side: "CE" | "PE", g: GapParams): boolean {
+  if (g.speedMin > 0 && !(f.speed[i] >= g.speedMin)) return false;
+  if (!(g.nearAtr > 0)) return true;
+  const atr = p.atr[i];
+  const from = i - g.lookback;
+  if (from < 0 || !Number.isFinite(atr)) return true;
+  const d = side === "CE" ? 1 : -1;
+  let level = d > 0 ? -Infinity : Infinity;
+  for (let j = from; j < i; j++) level = d > 0 ? Math.max(level, p.c[j].high) : Math.min(level, p.c[j].low);
+  const room = d * (level - p.c[i].close);
+  return room < 0 || room >= g.nearAtr * atr;
+}
+
+export interface GapPicture {
+  side: "CE" | "PE";
+  /** The recent high (CE) / low (PE) and the turn after it, futures points. */
+  level: number;
+  turn: number;
+  close: number;
+  atr: number;
+  /** Points left to the level, and points already won back from the turn. */
+  roomPts: number;
+  backPts: number;
+}
+
+/**
+ * What the run looks like on the latest candle, for the page's gap meter: the
+ * side whose recent swing has been won back the most (in ATR), or null.
+ */
+export function gapPicture(p: Prepared, i: number, g: GapParams = GAP_LIVE): GapPicture | null {
+  const atr = p.atr[i];
+  if (!Number.isFinite(atr) || atr <= 0) return null;
+  let best: GapPicture | null = null;
+  for (const d of [1, -1] as const) {
+    const s = swing(p, i, d, g.lookback);
+    if (!s || s.iL <= s.iH) continue;
+    const close = p.c[i].close;
+    const pic: GapPicture = { side: d > 0 ? "CE" : "PE", level: s.level, turn: s.turn, close, atr, roomPts: d * (s.level - close), backPts: d * (close - s.turn) };
+    if (pic.roomPts < 0) continue;
+    if (!best || pic.backPts / atr > best.backPts / atr) best = pic;
+  }
+  return best;
 }

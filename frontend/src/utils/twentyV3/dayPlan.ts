@@ -44,6 +44,7 @@ export const SETUP_WINDOWS: Record<V3SetupId, SetupWindow> = {
   // gapRun.ts, window "all": 9:30 AM IST to 30 minutes before the bell.
   gapRun: ist(9 * 60 + 30, "bell"),
   gapBreak: ist(9 * 60 + 30, "bell"),
+  trendGap: ny(10 * 60 + 35, 13 * 60 + 20),
 };
 
 /** Checked on one candle only (the 9:30 opening drive). */

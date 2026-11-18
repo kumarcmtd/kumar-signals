@@ -9,7 +9,7 @@ import { CLOSE_US_DST_MIN, CLOSE_US_STD_MIN } from "../mcxSession";
 import { SPEED_MIN } from "./speed";
 import { V2_RULES } from "../twentyV2";
 import type { V3Features } from "./features";
-import { GAP_LIVE, gapBreakAt, gapRunAt, type GapParams } from "./gapRun";
+import { GAP_LIVE, gapBreakAt, gapRoomOk, gapRunAt, type GapParams } from "./gapRun";
 
 export type V3SetupId =
   | "trend" | "noise" | "noise30" | "orb" | "orbTrend" | "drive" | "drive60" | "vwapPull" | "eia" | "eiaFade" | "driveTrend" | "driveBusy" | "driveSteps" | "driveStrict"
@@ -18,7 +18,9 @@ export type V3SetupId =
   // Ai-Super Fast: only while the Speed gauge reads 70+ (see speed.ts).
   | "fastTurnUS" | "fastTurnDay" | "fastBreakUS" | "fastBreakDay" | "fastNoiseUS"
   // The trader's idea: a fast run back to a recent high / low (gapRun.ts).
-  | "gapRun" | "gapBreak";
+  | "gapRun" | "gapBreak"
+  // The v2 rule with the trader's "care at the high" check.
+  | "trendGap";
 
 /**
  * steps: T1 -> stop to entry, T2 -> stop to T1, out at T3 (the page's way).
@@ -46,6 +48,8 @@ export interface V3Ctx {
   k?: number;
   /** Lab only: a stricter or more liberal version of the run-to-the-high setups. */
   gap?: Partial<GapParams>;
+  /** Lab only: the v2 rule in another New York window [from, to). */
+  v2Window?: [number, number];
 }
 
 export const SETUP_NAMES: Record<V3SetupId, string> = {
@@ -71,6 +75,7 @@ export const SETUP_NAMES: Record<V3SetupId, string> = {
   fastNoiseUS: "Fast noise breakout · US session",
   gapRun: "Run to the recent high / low",
   gapBreak: "Stable close beyond the high / low",
+  trendGap: "Trend turn, careful at the high",
 };
 
 /** Today's ATR at candle i against its median at the same clock minute over the previous 10 sessions. */
@@ -158,9 +163,10 @@ export function entryAt(ctx: V3Ctx, i: number, id: V3SetupId): V3Entry | null {
     return mk(side, stop, 1.5 * stop, "steps");
   }
 
-  if (id === "trend") {
-    const side = signalAt(p, i, V2_RULES);
+  if (id === "trend" || id === "trendGap") {
+    const side = signalAt(p, i, ctx.v2Window ? { ...V2_RULES, window: ctx.v2Window } : V2_RULES);
     if (!side) return null;
+    if (id === "trendGap" && !gapRoomOk(p, f, i, side, { ...GAP_LIVE, ...ctx.gap })) return null;
     const stop = 2 * k * atr;
     return mk(side, stop, 1.5 * stop, "steps");
   }
