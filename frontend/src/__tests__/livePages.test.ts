@@ -25,6 +25,12 @@ test("AI-Test V2 holds Ai-Trust's old tab; Ai-Trust stays live from the More men
   assert.equal(isAlwaysLivePage("/ai-trust"), true, "it was a live tab; moving it into More must not freeze it");
 });
 
+test("Ai Lite holds Ai-News's old tab; Ai-News stays live from the More menu", () => {
+  assert.equal(LIVE_PAGE_PATHS[5], "/ai-lite");
+  assert.equal(isAlwaysLivePage("/ai-lite"), true);
+  assert.equal(isAlwaysLivePage("/ai-news"), true, "it was a live tab; moving it into More must not freeze it");
+});
+
 test("a trailing slash does not turn a main page into a paused one", () => {
   assert.equal(isAlwaysLivePage("/best-call/"), true);
   assert.equal(isAlwaysLivePage("/"), true, "the root is a single slash and must survive the trim");

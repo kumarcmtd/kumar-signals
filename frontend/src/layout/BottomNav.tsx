@@ -38,14 +38,14 @@ const PRIMARY: NavItem[] = [
   { to: LIVE_PAGE_PATHS[2], label: "Ai20-20", icon: Target },
   { to: LIVE_PAGE_PATHS[3], label: "AI-Test V2", icon: FlaskConical },
   { to: LIVE_PAGE_PATHS[4], label: "Ai-Today", icon: Sun },
-  { to: LIVE_PAGE_PATHS[5], label: "Ai-News", icon: Rss },
+  { to: LIVE_PAGE_PATHS[5], label: "Ai Lite", icon: Leaf },
 ];
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "🍃 Ai Lite (new) · ⚡ Super Fast · 💎 Ai-Trust · 🔁 AI-Up",
+    title: "📰 Ai-News · ⚡ Super Fast · 💎 Ai-Trust · 🔁 AI-Up",
     items: [
-      { to: "/ai-lite", label: "Ai Lite", icon: Leaf },
+      { to: "/ai-news", label: "Ai-News", icon: Rss },
       { to: "/ai-super-fast", label: "Super Fast", icon: Zap },
       { to: "/ai-trust", label: "Ai-Trust", icon: Gem },
       { to: "/ai-up", label: "AI-Up", icon: Repeat },
