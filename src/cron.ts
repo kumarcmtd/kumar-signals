@@ -27,10 +27,10 @@ import { runExpiryAlertCheck } from "./expiryAlerts";
 import { captureOvernightAnchor } from "./globalMarkets";
 import { warmEnergyNews } from "./news";
 import { runNewsFlashCheck } from "./newsFlash";
-import { runBestCallNotificationCheck } from "./notify";
+import { runBestCallNotificationCheck, runTwentyTwentyNotificationCheck } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
 import { runLiteCallCheck, runLiteStepCheck } from "./liteCron";
-import { ENGINE_DAY, ENGINE_FAST, ENGINE_SEASON } from "../frontend/src/utils/twentyV3/engines";
+import { ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
 import { warmTimeProfiles } from "./profiles";
 import { runTradeLogAdvanceCheck } from "./tradeLogCron";
 import { runTradeCardTracker } from "./tradeCardTracker";
@@ -51,10 +51,7 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
     ctx.waitUntil(
       (async () => {
         const busy = await runTradeLogAdvanceCheck(env);
-        // Ai20-20 v3: tell the phone each step the calls just reached (T1, stop, close).
-        await runTwentyV3StepCheck(env).catch(() => undefined);
-        await runTwentyV3StepCheck(env, Date.now(), ENGINE_SEASON).catch(() => undefined);
-        await runTwentyV3StepCheck(env, Date.now(), ENGINE_DAY).catch(() => undefined);
+        // Ai-Super Fast: tell the phone each step its calls just reached (T1, stop, close).
         await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST).catch(() => undefined);
         // Ai Lite: T1 / T2 / closed alerts.
         await runLiteStepCheck(env).catch(() => undefined);
@@ -78,17 +75,13 @@ export async function runScheduled(env: Env, ctx: ExecutionContext, cron: string
   ctx.waitUntil(runBestCallNotificationCheck(env));
   ctx.waitUntil(runExpiryAlertCheck(env));
   // The Trade Card's own scorecard: log its TRADE calls, settle them on target / stop / day end,
-  // and push each. Then Ai20-20 v3's call check (the setups the lab picked).
+  // and push each. Then Ai20-20 (the original page, restored at the trader's
+  // request): every new call pushed, and its MATCHED check, which skips a
+  // trade the card already pushed.
   ctx.waitUntil(
     runTradeCardTracker(env)
       .catch(() => undefined)
-      .then(() => runTwentyV3CallCheck(env))
-      .catch(() => undefined)
-      // Ai20-20's main line: the v2 calls + "care at the high", live while in season.
-      .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_SEASON))
-      .catch(() => undefined)
-      // Ai20-20 all day: its own practice line, 9:00 AM IST to 30 minutes before the bell.
-      .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_DAY))
+      .then(() => runTwentyTwentyNotificationCheck(env))
       .catch(() => undefined)
       // Ai-Super Fast: Speed 70+ practice calls with live liquidity and news checks.
       .then(() => runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST))

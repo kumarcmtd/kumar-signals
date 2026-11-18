@@ -1,6 +1,8 @@
 // The pages that run on the v3 engine. Each one picks its setups (from the
 // lab), which of them are practice-only, its trade-log key and its live-only
-// checks. Everything else -- reading candles, sizing, the order ticket, trade
+// checks. Since 18 Nov 2026 only Ai-Super Fast (ENGINE_FAST) runs: the trader
+// asked for the original Ai20-20 page back (aiTwentyTwentyEngine.ts), so the
+// Ai20-20 lines below are no longer scheduled -- kept for their logs and tests. Everything else -- reading candles, sizing, the order ticket, trade
 // management, alerts, the journal -- is the same tested code for both pages.
 
 import type { LabSym } from "../twentyLab";

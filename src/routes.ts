@@ -14,9 +14,9 @@ import { computeGlobalMarkets, computeOvernightTracker } from "./globalMarkets";
 import { type RequestGuard, requireToken } from "./guard";
 import { computeKumarAiAnalysis, type KumarAiAnalyzeRequest } from "./kumarAi";
 import { fetchEnergyNews, scanNewsNow } from "./news";
-import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, sendNtfyNotification } from "./notify";
+import { matchedPushText, NTFY_TOPIC_KV_KEY, runBestCallNotificationCheck, runTwentyTwentyNotificationCheck, sendNtfyNotification } from "./notify";
 import { runTwentyV3CallCheck, runTwentyV3StepCheck } from "./twentyV3Cron";
-import { ENGINE_DAY, ENGINE_FAST, ENGINE_SEASON, ENGINE_V3 } from "../frontend/src/utils/twentyV3/engines";
+import { ENGINE_FAST } from "../frontend/src/utils/twentyV3/engines";
 import { runLiteCallCheck, runLiteStepCheck } from "./liteCron";
 import { v3CallPushText } from "../frontend/src/utils/twentyV3/push";
 import { computeOptionsAnalytics } from "./optionsAnalytics";
@@ -353,8 +353,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
         // matched call is found, exactly like the Cron) and says why per market.
         if (url.pathname === "/api/notify/check-matched") {
           if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
-          const report: string[] = [];
-          for (const def of [ENGINE_SEASON, ENGINE_V3, ENGINE_DAY, ENGINE_FAST]) report.push(...(await runTwentyV3CallCheck(env, Date.now(), def)), ...(await runTwentyV3StepCheck(env, Date.now(), def)));
+          // Ai20-20 (the original page), then Ai-Super Fast and Ai Lite.
+          const report: string[] = [...(await runTwentyTwentyNotificationCheck(env))];
+          report.push(...(await runTwentyV3CallCheck(env, Date.now(), ENGINE_FAST)), ...(await runTwentyV3StepCheck(env, Date.now(), ENGINE_FAST)));
           report.push(...(await runLiteCallCheck(env)), ...(await runLiteStepCheck(env)));
           return json({ report });
         }

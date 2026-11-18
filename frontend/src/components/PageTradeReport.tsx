@@ -24,17 +24,19 @@ const MARKETS: { k: ReportMarket; t: string }[] = [
   { k: "NATURALGAS", t: "🔥 NG" },
 ];
 /**
- * Pages whose report counts only some of their keys. Ai20-20 started fresh
- * with v2: the old rules' calls stay saved but are not mixed into its report.
+ * Pages whose report counts only some of their keys. Ai20-20 is the original
+ * page again (restored 18 Nov 2026): its report counts that page's own calls
+ * (TWENTY20-<SYMBOL>-LIVE); the v2 / v3 / all-day / season logs stay saved
+ * but are not mixed in.
  */
 const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string }> = {
-  "/ai-20-20": { only: (k) => k.startsWith("TWENTY20-") && (k.endsWith("-V3") || k.endsWith("-DAY")), label: "Ai20-20" },
+  "/ai-20-20": { only: (k) => k.startsWith("TWENTY20-") && k.endsWith("-LIVE"), label: "Ai20-20" },
   "/ai-super-fast": { only: (k) => k.startsWith("SUPERFAST-"), label: "Ai-Super Fast" },
 };
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
 /** Pages that show their own (compact) report at the top instead of this strip. */
-const EMBEDDED_REPORT = new Set(["/ai-test-v2", "/ai-lite", "/ai-20-20"]);
+const EMBEDDED_REPORT = new Set(["/ai-test-v2", "/ai-lite"]);
 
 const rs = (n: number) => `${n >= 0 ? "+" : "−"}₹${Math.abs(Math.round(n)).toLocaleString("en-IN")}`;
 const when = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });

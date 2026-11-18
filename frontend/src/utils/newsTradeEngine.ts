@@ -192,7 +192,7 @@ function computeOptionsReading(options: OptionsAnalytics | null, atmOiSamples: (
     reasons.push(reason);
   };
 
-  if (options.pcr !== null) {
+  if (options.pcr != null) {
     const lean = options.pcr > 1.3 ? 1 : options.pcr < 0.7 ? -1 : clamp((options.pcr - 1) * 2, -1, 1);
     vote(lean, 55, `PCR ${options.pcr.toFixed(2)} -- ${options.pcr > 1.1 ? "Bullish lean" : options.pcr < 0.9 ? "Bearish lean" : "Neutral"}`);
   }
@@ -207,7 +207,7 @@ function computeOptionsReading(options: OptionsAnalytics | null, atmOiSamples: (
     }
   }
 
-  if (options.maxPain !== null && options.spot > 0 && Math.abs(((options.spot - options.maxPain) / options.maxPain) * 100) < 1) {
+  if (options.maxPain != null && options.spot > 0 && Math.abs(((options.spot - options.maxPain) / options.maxPain) * 100) < 1) {
     reasons.push("Price sitting near Max Pain -- elevated pin risk");
   }
 
