@@ -20,6 +20,8 @@ import { cachePut, type Candle, type Env, getMarketStatus, OPTION_SYMBOLS, type 
 import { computeOptionsAnalytics } from "./optionsAnalytics";
 import { getCandlesForTF } from "./signals";
 import { getNearestFuture } from "./upstox";
+import { advanceTradeLog } from "../frontend/src/utils/tradeLogCore";
+import { pushTradeLogs, readTradeLogKey } from "./tradeLogStore";
 
 // ---- Best Call background push notifications (ntfy.sh) ----
 // A Cron Trigger (see wrangler.jsonc) calls runBestCallNotificationCheck on a
@@ -459,6 +461,33 @@ async function computeBestCallForSymbol(env: Env, token: string, symbol: Symbol)
   return pickBestCall(allPicks);
 }
 
+/**
+ * Record a Best Call pick in its "BEST-<symbol>" log -- the same entry the app
+ * writes when it is open (one call at a time; a leg just stopped out is not
+ * reopened at once), so a call pushed while the app is shut is still tracked
+ * to target / stop / day end and shown on the Ai-Chart. Returns whether it recorded.
+ */
+export async function recordBestCall(env: Env, symbol: string, pick: BestCallPick, now: number = Date.now()): Promise<boolean> {
+  const key = `BEST-${symbol}`;
+  const history = await readTradeLogKey(env, key);
+  const next = advanceTradeLog(
+    history,
+    {
+      decision: pick.direction === "bullish" ? "STRONG BUY" : "STRONG SELL",
+      insufficient: null,
+      optSide: pick.optSide,
+      proj: { strike: pick.strike, optSide: pick.optSide, entry: pick.entry, targets: pick.targets, stop: pick.stop },
+      liveLtpForOpen: null,
+      meta: { label: pick.source, reasons: pick.reasons, confirmingTimeframes: [pick.label] },
+    },
+    now
+  );
+  const created = next[next.length - 1];
+  if (!created || history.some((e) => e.id === created.id)) return false;
+  await pushTradeLogs(env, { [key]: [created] });
+  return true;
+}
+
 // Only notifies when the pick actually CHANGES (tracked via a per-symbol
 // "last notified" signature in KV) -- otherwise the same still-running call
 // would re-notify every single Cron tick.
@@ -471,8 +500,8 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
   if (!mcxSessionAt().isOpen) return;
   const token = await env.COMMODITY_KV.get("access_token");
   if (!token) return;
+  // No ntfy topic still records the calls (for the record and the Ai-Chart); it only skips the push.
   const topic = await env.COMMODITY_KV.get(NTFY_TOPIC_KV_KEY);
-  if (!topic) return;
 
   for (const symbol of OPTION_SYMBOLS) {
     try {
@@ -488,6 +517,8 @@ export async function runBestCallNotificationCheck(env: Env): Promise<void> {
       const sig = bestCallSignature(pick);
       if (sig === lastSig) continue;
       if (!(await cachePut(env.COMMODITY_KV, lastSigKey, sig))) continue; // no marker, no alert (see above)
+      await recordBestCall(env, symbol, pick).catch(() => false);
+      if (!topic) continue;
 
       const displayName = symbol === "CRUDEOIL" ? "Crude Oil" : "Natural Gas";
       const title = `Best Call: ${displayName} ${pick.strike} ${pick.optSide}`;

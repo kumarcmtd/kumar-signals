@@ -174,6 +174,9 @@ export function useAlertEngine(): void {
         if (bestCallLastIdRef.current.get(board.trackingKey) === latest.id) continue;
         bestCallLastIdRef.current.set(board.trackingKey, latest.id);
         if (firstRunRef.current) continue;
+        // A call the server recorded while the app was shut arrives with the next
+        // sync -- it was already pushed then, so ringing again now would mislead.
+        if (now - latest.openedAt > 10 * 60_000) continue;
         const sourceLabel = latest.meta?.label ?? board.best?.source ?? "Best Call";
         fresh.push({
           id: `${board.trackingKey}-${latest.id}`,

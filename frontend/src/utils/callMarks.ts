@@ -32,7 +32,7 @@ const LOT: Record<ChartSym, number> = { CRUDEOIL: 100, NATURALGAS: 1250 };
 const TAG: Record<string, string> = {
   twenty20: "Ai20",
   lite: "Ai Lite",
-  best: "Best",
+  best: "Best Call",
   shoot: "Shoot",
   today: "Today",
   levelcross: "LvlX",
