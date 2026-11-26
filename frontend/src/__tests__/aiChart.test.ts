@@ -3,6 +3,7 @@ import type { Candle } from "../types";
 import type { TradeLogEntry } from "../utils/tradeLogCore";
 import { chartLevels, findSrLevels } from "../utils/srLevels";
 import { callMarks, callResult, pageOfKey } from "../utils/callMarks";
+import { placePill } from "../components/aichart/primitives";
 
 const T0 = Date.parse("2026-11-02T09:00:00+05:30");
 const M30 = 30 * 60_000;
@@ -87,7 +88,30 @@ describe("call stars", () => {
   test("pages are named, unknown keys are not drawn", () => {
     expect(pageOfKey("TWENTY20-CRUDEOIL-LIVE")).toMatchObject({ page: "Ai20-20", tag: "Ai20", route: "/ai-20-20" });
     expect(pageOfKey("SUPERFAST-CRUDEOIL-FAST")).toMatchObject({ tag: "Fast" });
+    expect(pageOfKey("BEST-NATURALGAS")).toMatchObject({ page: "Best Call", tag: "Best Call", route: "/best-call" });
     expect(pageOfKey("SOMETHING-ELSE")).toBeNull();
+  });
+
+  test("a call's name never sits on another star, another name, or the level names at the right edge", () => {
+    const size = { width: 400, height: 300 };
+    // Free space: right of the star, a little above it (a CE call).
+    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [])).toEqual({ x: 110.5, y: 80, w: 50, h: 14 });
+    // Another live star just up-right: the name goes left of the star instead.
+    const star = { x: 113, y: 76, w: 24, h: 24 };
+    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [star])).toMatchObject({ x: 39.5, y: 80 });
+    // Both sides taken: it steps up, clear of both.
+    const name = { x: 39.5, y: 80, w: 50, h: 14 };
+    const up = placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [star, name]);
+    expect(up.y).toBeLessThan(80);
+    expect([star, name].some((b) => up.x < b.x + b.w && b.x < up.x + up.w && up.y < b.y + b.h && b.y < up.y + up.h)).toBe(false);
+    // Near the right edge (level names live there): left of the star.
+    expect(placePill({ x: 330, y: 100 }, 7.5, 50, "PE", size, [])).toMatchObject({ x: 269.5, y: 92 });
+    // A PE name blocked beside and below its star goes just above it, not far down.
+    const below = [
+      { x: 105, y: 93, w: 60, h: 40 },
+      { x: 30, y: 93, w: 60, h: 40 },
+    ];
+    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "PE", size, below)).toMatchObject({ x: 110.5, y: 77 });
   });
 
   test("the result reads in rupees a lot", () => {

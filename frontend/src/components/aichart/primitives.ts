@@ -133,14 +133,14 @@ export class StarsPrimitive extends Base<StarMark> {
 
   protected draw(target: Target) {
     if (!this.items.length) return;
-    const stack = new Map<string, number>();
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-      for (const m of this.items) {
+      const shown = this.items.flatMap((m) => {
         const p = this.where(m);
-        if (!p) continue;
-        const col = m.side === "CE" ? "#16A34A" : "#DC2626";
         const sel = this.selected === m.id;
-        const r = sel ? 10 : 7.5;
+        return p ? [{ m, p, sel, r: sel ? 10 : 7.5, ring: sel ? 15 : m.live ? 12 : 8 }] : [];
+      });
+      for (const { m, p, sel, r } of shown) {
+        const col = m.side === "CE" ? "#16A34A" : "#DC2626";
         if (sel || m.live) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, sel ? 15 : 12, 0, Math.PI * 2);
@@ -156,23 +156,65 @@ export class StarsPrimitive extends Base<StarMark> {
         ctx.lineWidth = m.practice ? 2 : 1.5;
         ctx.strokeStyle = m.practice ? col : "#FFFFFF";
         ctx.stroke();
-        // The page's name in a pill; several calls on one candle stack upwards.
-        const k = `${m.time}:${m.side}`;
-        const n = stack.get(k) ?? 0;
-        stack.set(k, n + 1);
+      }
+      // Then the page's name in a pill beside each star -- clear of the other
+      // stars and of the names already placed (live calls often sit close
+      // together), and clear of the level names along the right edge.
+      ctx.font = "800 10px system-ui, sans-serif";
+      const stars: Box[] = shown.map(({ p, ring }) => ({ x: p.x - ring, y: p.y - ring, w: 2 * ring, h: 2 * ring }));
+      const pills: Box[] = [];
+      shown.forEach(({ m, p, r, ring }) => {
         const text = `${m.practice ? "(P) " : ""}${m.tag}`;
-        ctx.font = "800 10px system-ui, sans-serif";
-        const w = ctx.measureText(text).width + 8;
-        const right = p.x + w + 12 < mediaSize.width;
-        const lx = right ? p.x + r + 3 : p.x - r - 3 - w;
-        const ly = p.y - 7 - (m.side === "CE" ? 1 : -1) * n * 14 - (m.side === "CE" ? 6 : -6);
+        // Its own star (and any other call on the very same spot) is not in the way.
+        const others = stars.filter((_, j) => Math.abs(shown[j].p.x - p.x) > 2 || Math.abs(shown[j].p.y - p.y) > 2);
+        const box = placePill(p, r, ctx.measureText(text).width + 8, m.side, mediaSize, [...others, ...pills]);
+        pills.push(box);
+        const col = m.side === "CE" ? "#16A34A" : "#DC2626";
+        // A name that had to move away from its star gets a thin line back to it.
+        const nx = Math.min(Math.max(p.x, box.x), box.x + box.w);
+        const ny = Math.min(Math.max(p.y, box.y), box.y + box.h);
+        const d = Math.hypot(nx - p.x, ny - p.y);
+        if (d > ring + 4) {
+          ctx.beginPath();
+          ctx.moveTo(p.x + ((nx - p.x) * ring) / d, p.y + ((ny - p.y) * ring) / d);
+          ctx.lineTo(nx, ny);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = col;
+          ctx.stroke();
+        }
         ctx.fillStyle = col;
         ctx.beginPath();
-        ctx.roundRect(lx, ly - 7, w, 14, 4);
+        ctx.roundRect(box.x, box.y, box.w, box.h, 4);
         ctx.fill();
         ctx.fillStyle = "#FFFFFF";
-        ctx.fillText(text, lx + 4, ly + 3.5);
-      }
+        ctx.fillText(text, box.x + 4, box.y + 10.5);
+      });
     });
   }
+}
+
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Room the level names ("S×15", "PDH") take at the pane's right edge. */
+const NAMES_EDGE = 50;
+const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * Where a star's name pill goes: right of the star, else left; when both are
+ * taken, one row further away (up for a CE call, down for a PE), then one row
+ * the other way, and so on, until it hits nothing; failing that, the first
+ * spot on screen.
+ */
+export function placePill(p: { x: number; y: number }, r: number, w: number, side: "CE" | "PE", size: { width: number; height: number }, avoid: Box[]): Box {
+  const y0 = side === "CE" ? p.y - 20 : p.y - 8;
+  const step = side === "CE" ? -15 : 15;
+  const tries: Box[] = [];
+  for (const k of [0, 1, -1, 2, -2, 3, -3, 4, 5]) for (const x of [p.x + r + 3, p.x - r - 3 - w]) tries.push({ x, y: y0 + k * step, w, h: 14 });
+  const onScreen = (b: Box) => b.x >= 0 && b.x + b.w <= size.width - NAMES_EDGE && b.y >= 0 && b.y + b.h <= size.height;
+  return tries.find((b) => onScreen(b) && !avoid.some((a) => overlaps(a, b))) ?? tries.find(onScreen) ?? tries[0];
 }
