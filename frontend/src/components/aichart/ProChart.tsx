@@ -63,14 +63,7 @@ export const ProChart = forwardRef<ProChartHandle, ProChartProps>(function ProCh
     candles.attachPrimitive(stars);
     chart.subscribeClick((param) => {
       if (!param.point) return;
-      let best: { id: string; d: number } | null = null;
-      for (const m of starsRef.current?.all() ?? []) {
-        const at = starsRef.current?.where(m);
-        if (!at) continue;
-        const d = Math.hypot(at.x - param.point.x, at.y - param.point.y);
-        if (d < 22 && (!best || d < best.d)) best = { id: m.id, d };
-      }
-      onSelect.current(best?.id ?? null);
+      onSelect.current(starsRef.current?.nearest(param.point.x, param.point.y, 22) ?? null);
     });
     chartRef.current = chart;
     candleRef.current = candles;

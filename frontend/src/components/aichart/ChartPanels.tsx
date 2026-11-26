@@ -1,8 +1,10 @@
 // What sits around the Ai-Chart: the colour legend, the tapped call's details,
-// the list of calls on the chart, and the levels in numbers.
+// the list of calls on the chart, each page's mark and success rate, and the
+// levels in numbers.
 
 import { Link } from "react-router-dom";
-import { callResult, type CallMark, type ChartSym } from "../../utils/callMarks";
+import { callResult, type CallMark, type ChartSym, type PageScore } from "../../utils/callMarks";
+import { MIN_SAMPLE } from "../../utils/aiEdgeEngine";
 import type { SrLevel } from "../../utils/srLevels";
 import { LEVEL_STYLE } from "./chartStyle";
 
@@ -10,6 +12,25 @@ const inr = (n: number, d = 0) => `₹${n.toLocaleString("en-IN", { minimumFract
 const signed = (n: number) => (n === 0 ? "₹0" : `${n > 0 ? "+" : "−"}₹${Math.abs(n).toLocaleString("en-IN")}`);
 const when = (ms: number) => new Date(ms).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
 const TONE = { win: "#059669", loss: "#DC2626", flat: "#64748B", open: "#2563EB" } as const;
+
+const STAR_PTS = Array.from({ length: 10 }, (_, k) => {
+  const rad = k % 2 === 0 ? 11 : 11 * 0.52;
+  const a = -Math.PI / 2 + (k * Math.PI) / 5;
+  return `${(rad * Math.cos(a)).toFixed(2)},${(rad * Math.sin(a)).toFixed(2)}`;
+}).join(" ");
+
+/** The chart's star with the page's code inside: green CE, red PE, hollow = practice, grey = just the page. */
+export function StarBadge({ code, side, practice, size = 22 }: { code: string; side?: "CE" | "PE"; practice?: boolean; size?: number }) {
+  const col = side === "CE" ? "#16A34A" : side === "PE" ? "#DC2626" : "#475569";
+  return (
+    <svg width={size} height={size} viewBox="-12 -12 24 24" className="inline-block shrink-0 align-middle" aria-hidden="true">
+      <polygon points={STAR_PTS} fill={practice ? "#FFFFFF" : col} stroke={practice ? col : "#FFFFFF"} strokeWidth={practice ? 2 : 1.5} strokeLinejoin="round" />
+      <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fontSize={code.length > 1 ? 8 : 10} fontWeight={900} fontFamily="system-ui, sans-serif" fill={practice ? col : "#FFFFFF"}>
+        {code}
+      </text>
+    </svg>
+  );
+}
 
 function Bar({ color, width, label }: { color: string; width: number; label: string }) {
   return (
@@ -33,11 +54,14 @@ export function Legend() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block w-6 h-2.5 rounded-sm bg-rose-200 border border-rose-500" /> Seller zone
       </span>
-      <span>
-        <b className="text-emerald-600">★</b> CE call · <b className="text-rose-600">★</b> PE call
+      <span className="flex items-center gap-1">
+        <StarBadge code="B" side="CE" size={17} /> CE call · <StarBadge code="B" side="PE" size={17} /> PE call
       </span>
-      <span>☆ hollow = practice call</span>
-      <span className="col-span-2 text-slate-400 font-semibold">×N on a line = how many separate times price turned there (90 days of 30-minute candles). P, R1, S1 pivots; PDH / PDL yesterday's high / low. Only live (running) calls are starred; “Past calls” shows the rest. Tap a star for the call.</span>
+      <span className="flex items-center gap-1">
+        <StarBadge code="B" side="CE" practice size={17} /> hollow = practice
+      </span>
+      <span className="col-span-2">Letter in the star = the page: B Best Call · 20 Ai20-20 · L Ai Lite · T Ai-Today — every mark and its success rate in the table below the chart.</span>
+      <span className="col-span-2 text-slate-400 font-semibold">×N on a line = how many separate times price turned there (90 days of 30-minute candles). P, R1, S1 pivots; PDH / PDL yesterday's high / low. Only live (running) calls are starred; “Past calls” shows the rest. Stars that would overlap are stacked, with a thin stem to the call's price. Tap a star for the call.</span>
     </div>
   );
 }
@@ -49,8 +73,9 @@ export function CallDetail({ m, sym, onClose }: { m: CallMark; sym: ChartSym; on
   return (
     <div className="rounded-2xl border-2 p-3 space-y-1.5 bg-white" style={{ borderColor: col }}>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[14px] font-black" style={{ color: col }}>
-          {`★ ${m.page} · ${e.strike} ${m.side}${m.practice ? " (practice)" : ""}`}
+        <p className="flex items-center gap-1.5 text-[14px] font-black" style={{ color: col }}>
+          <StarBadge code={m.code} side={m.side} practice={m.practice} />
+          {`${m.page} · ${e.strike} ${m.side}${m.practice ? " (practice)" : ""}`}
         </p>
         <button onClick={onClose} className="text-[11px] font-black text-slate-400 px-2" aria-label="Close">
           ✕
@@ -84,9 +109,7 @@ export function CallList({ marks, sym, onPick, live }: { marks: CallMark[]; sym:
         const r = callResult(m, sym);
         return (
           <button key={m.id} onClick={() => onPick(m)} className="w-full flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2 text-left">
-            <span className="text-[16px] leading-none" style={{ color: m.side === "CE" ? "#16A34A" : "#DC2626" }}>
-              {m.practice ? "☆" : "★"}
-            </span>
+            <StarBadge code={m.code} side={m.side} practice={m.practice} />
             <span className="flex-1 min-w-0">
               <span className="block text-[12px] font-black text-slate-800 truncate">{`${m.page} · ${m.entry.strike} ${m.side}`}</span>
               <span className="block text-[10.5px] text-slate-500">{`${when(m.openedAt)} · futures ${inr(m.price, m.price < 1000 ? 2 : 0)}`}</span>
@@ -98,6 +121,64 @@ export function CallList({ marks, sym, onPick, live }: { marks: CallMark[]; sym:
         );
       })}
     </div>
+  );
+}
+
+export type ScorePeriod = "30d" | "all";
+
+/** Every page's mark (the letter in its star) and its success rate on this market. */
+export function MarksTable({ scores, sym, period, onPeriod }: { scores: PageScore[]; sym: ChartSym; period: ScorePeriod; onPeriod: (p: ScorePeriod) => void }) {
+  const chip = (on: boolean) => `text-[11px] font-black rounded-lg px-2 py-1 ${on ? "bg-violet-600 text-white" : "bg-slate-100 text-slate-500"}`;
+  return (
+    <section className="rounded-3xl bg-white shadow-md p-3.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[13px] font-black text-slate-800">Marks · success rate</p>
+        <div className="flex gap-1">
+          <button onClick={() => onPeriod("30d")} className={chip(period === "30d")}>
+            30 days
+          </button>
+          <button onClick={() => onPeriod("all")} className={chip(period === "all")}>
+            All time
+          </button>
+        </div>
+      </div>
+      <p className="text-[10.5px] font-bold text-slate-500">{`${sym === "CRUDEOIL" ? "🛢️ Crude Oil" : "🔥 Natural Gas"} · ${period === "30d" ? "calls closed in the last 30 days" : "every recorded call"}`}</p>
+      {scores.length === 0 ? (
+        <p className="text-[11.5px] text-slate-500">No page has a call on this market in this period yet.</p>
+      ) : (
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-left text-[10.5px] text-slate-400">
+              <th className="font-semibold pb-1">Mark</th>
+              <th className="font-semibold pb-1">Page</th>
+              <th className="font-semibold pb-1 text-right">Success</th>
+              <th className="font-semibold pb-1 text-right">Won / Stop</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scores.map((s) => {
+              const few = s.won + s.stopped < MIN_SAMPLE;
+              return (
+                <tr key={s.page} className="border-t border-slate-100">
+                  <td className="py-1.5">
+                    <StarBadge code={s.code} size={24} />
+                  </td>
+                  <td className="py-1.5 font-bold text-slate-700">
+                    {s.page}
+                    {s.running > 0 && <span className="ml-1.5 text-[10px] font-black text-blue-600">{`● ${s.running} live`}</span>}
+                  </td>
+                  <td className={`py-1.5 text-right text-[14px] font-black ${few ? "text-slate-400" : "text-slate-800"}`}>{s.winPct === null ? "—" : `${s.winPct}%`}</td>
+                  <td className="py-1.5 text-right text-slate-500">
+                    <span className="font-bold text-emerald-600">{s.won}</span> / <span className="font-bold text-rose-500">{s.stopped}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+      <p className="text-[10px] text-slate-400 leading-snug">{`Success = calls that went on to T2 or T3, out of those that did or hit the stop first; calls closed at entry after T1, at day end or by hand are left out — the same count as each page's trade report. Grey = fewer than ${MIN_SAMPLE} finished calls, too few to trust yet. Past results don't promise the next call.`}</p>
+    </section>
   );
 }
 

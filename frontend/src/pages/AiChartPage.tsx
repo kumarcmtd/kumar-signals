@@ -8,17 +8,20 @@ import { findFvgs, trendChannel, whereNow } from "../utils/chartMarks";
 import { keyLevels } from "../utils/checklist";
 import { atr } from "../utils/indicators";
 import { chartLevels, findSrLevels } from "../utils/srLevels";
-import { callMarks, type CallMark, type ChartSym } from "../utils/callMarks";
+import { callMarks, pageScores, type CallMark, type ChartSym } from "../utils/callMarks";
+import { periodStart } from "../utils/pageReport";
 import { ProChart, type ProChartHandle } from "../components/aichart/ProChart";
 import { chartTime } from "../components/aichart/chartStyle";
 import type { StarMark, ZoneBox } from "../components/aichart/primitives";
-import { CallDetail, CallList, Legend, LevelChips } from "../components/aichart/ChartPanels";
+import { CallDetail, CallList, Legend, LevelChips, MarksTable, StarBadge, type ScorePeriod } from "../components/aichart/ChartPanels";
 import type { Candle } from "../types";
 
 // Ai-Chart: one big chart that answers "where is the price, what holds it,
 // and who called what" -- strong support (thick green), weak support (yellow),
 // strong rejection (thick red), weak rejection (pink), buyer / seller zones,
-// pivots, and every page's CE / PE call as a star with the page's name.
+// pivots, and every page's CE / PE call as a star with the page's letter
+// inside (B Best Call, 20 Ai20-20, L Ai Lite, T Ai-Today ...), with each
+// page's success rate in a table under the chart.
 // Landscape full screen for the best view.
 
 type Tf = "5" | "15" | "60";
@@ -63,6 +66,7 @@ export function AiChartPage() {
   // Live calls only (running, real money) unless the trader asks for the past ones too.
   const [past, setPast] = useState<boolean>(() => read("aichart.past", false));
   const [selected, setSelected] = useState<string | null>(null);
+  const [period, setPeriod] = useState<ScorePeriod>(() => read("aichart.period", "30d"));
   const [full, setFull] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const chart = useRef<ProChartHandle>(null);
@@ -70,6 +74,7 @@ export function AiChartPage() {
   useEffect(() => save("aichart.tf", tf), [tf]);
   useEffect(() => save("aichart.layers", on), [on]);
   useEffect(() => save("aichart.past", past), [past]);
+  useEffect(() => save("aichart.period", period), [period]);
 
   const live = useCandles(sym, "5");
   const hist5 = useHistory5m(sym);
@@ -106,8 +111,9 @@ export function AiChartPage() {
   const marks = useMemo(() => callMarks(tradeLogs, sym, bars, TF_MS[tf]), [tradeLogs, sym, bars, tf]);
   const base = useMemo(() => (past ? marks : marks.filter((m) => !m.entry.closed && !m.practice)), [marks, past]);
   const shownMarks = useMemo(() => base.filter((m) => !hidden.includes(m.tag)), [base, hidden]);
-  const stars: StarMark[] = useMemo(() => shownMarks.map((m) => ({ id: m.id, time: chartTime(m.barTime), price: m.price, side: m.side, tag: m.tag, practice: m.practice, live: !m.entry.closed })), [shownMarks]);
-  const pages = useMemo(() => [...new Set(base.map((m) => m.tag))], [base]);
+  const stars: StarMark[] = useMemo(() => shownMarks.map((m) => ({ id: m.id, time: chartTime(m.barTime), price: m.price, side: m.side, code: m.code, practice: m.practice, live: !m.entry.closed })), [shownMarks]);
+  const pages = useMemo(() => [...new Map(base.map((m) => [m.tag, m.code])).entries()], [base]);
+  const scores = useMemo(() => pageScores(tradeLogs, sym, periodStart(period, Date.now())), [tradeLogs, sym, period]);
   const pick = marks.find((m) => m.id === selected) ?? null;
 
   const now = useMemo(() => {
@@ -185,9 +191,10 @@ export function AiChartPage() {
         </button>
       )}
       {on.calls &&
-        pages.map((t) => (
-          <button key={t} onClick={() => setHidden((h) => (h.includes(t) ? h.filter((x) => x !== t) : [...h, t]))} className={`text-[11px] font-black rounded-lg px-2 py-1 border ${hidden.includes(t) ? "border-slate-200 text-slate-400" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
-            {`★ ${t} ${base.filter((m) => m.tag === t).length}`}
+        pages.map(([t, code]) => (
+          <button key={t} onClick={() => setHidden((h) => (h.includes(t) ? h.filter((x) => x !== t) : [...h, t]))} className={`flex items-center gap-1 text-[11px] font-black rounded-lg pl-1 pr-2 py-0.5 border ${hidden.includes(t) ? "border-slate-200 text-slate-400 opacity-60" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
+            <StarBadge code={code} size={18} />
+            {`${t} ${base.filter((m) => m.tag === t).length}`}
           </button>
         ))}
     </div>
@@ -236,6 +243,7 @@ export function AiChartPage() {
       </div>
 
       {!full && pick && <CallDetail m={pick} sym={sym} onClose={() => setSelected(null)} />}
+      {!full && <MarksTable scores={scores} sym={sym} period={period} onPeriod={setPeriod} />}
       {!full && ready && levels.length > 0 && (
         <section className="rounded-3xl bg-white shadow-md p-3.5 space-y-2">
           <p className="text-[13px] font-black text-slate-800">Levels in numbers</p>

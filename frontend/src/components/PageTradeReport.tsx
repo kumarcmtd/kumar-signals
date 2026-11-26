@@ -10,7 +10,7 @@ import { useAppStore, type TradeLogEntry } from "../store/appStore";
 import { useTradeCardLog } from "../api/hooks";
 import { toLogEntry } from "./trust/TrustLiveCalls";
 import { ENGINES, type EngineDef } from "../utils/aiEdgeEngine";
-import { buildPageReport, EST_COST_RS, readReportPeriod, saveReportPeriod, type ReportMarket, type ReportPeriod, type ReportRow } from "../utils/pageReport";
+import { buildPageReport, EST_COST_RS, PAGE_KEY_FILTER, readReportPeriod, saveReportPeriod, type ReportMarket, type ReportPeriod, type ReportRow } from "../utils/pageReport";
 
 const PERIODS: { k: ReportPeriod; t: string }[] = [
   { k: "today", t: "Today" },
@@ -23,16 +23,8 @@ const MARKETS: { k: ReportMarket; t: string }[] = [
   { k: "CRUDEOIL", t: "🛢️ Crude" },
   { k: "NATURALGAS", t: "🔥 NG" },
 ];
-/**
- * Pages whose report counts only some of their keys. Ai20-20 is the original
- * page again (restored 18 Nov 2026): its report counts that page's own calls
- * (TWENTY20-<SYMBOL>-LIVE); the v2 / v3 / all-day / season logs stay saved
- * but are not mixed in.
- */
-const ROUTE_KEYS: Record<string, { only: (key: string) => boolean; label: string }> = {
-  "/ai-20-20": { only: (k) => k.startsWith("TWENTY20-") && k.endsWith("-LIVE"), label: "Ai20-20" },
-  "/ai-super-fast": { only: (k) => k.startsWith("SUPERFAST-"), label: "Ai-Super Fast" },
-};
+/** Pages whose report counts only some of their keys (see PAGE_KEY_FILTER). */
+const ROUTE_KEYS = PAGE_KEY_FILTER;
 /** Pages that share another page's log (AI-Test Pro writes AI-Test's keys). */
 const ROUTE_ALIAS: Record<string, string> = { "/ai-test-pro": "/ai-test-v2" };
 /** Pages that show their own (compact) report at the top instead of this strip. */

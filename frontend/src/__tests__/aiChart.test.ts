@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { Candle } from "../types";
 import type { TradeLogEntry } from "../utils/tradeLogCore";
 import { chartLevels, findSrLevels } from "../utils/srLevels";
-import { callMarks, callResult, pageOfKey } from "../utils/callMarks";
-import { placePill } from "../components/aichart/primitives";
+import { callMarks, callResult, pageOfKey, pageScores } from "../utils/callMarks";
+import { spreadStars, STAR_R } from "../components/aichart/primitives";
 
 const T0 = Date.parse("2026-11-02T09:00:00+05:30");
 const M30 = 30 * 60_000;
@@ -92,26 +92,59 @@ describe("call stars", () => {
     expect(pageOfKey("SOMETHING-ELSE")).toBeNull();
   });
 
-  test("a call's name never sits on another star, another name, or the level names at the right edge", () => {
-    const size = { width: 400, height: 300 };
-    // Free space: right of the star, a little above it (a CE call).
-    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [])).toEqual({ x: 110.5, y: 80, w: 50, h: 14 });
-    // Another live star just up-right: the name goes left of the star instead.
-    const star = { x: 113, y: 76, w: 24, h: 24 };
-    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [star])).toMatchObject({ x: 39.5, y: 80 });
-    // Both sides taken: it steps up, clear of both.
-    const name = { x: 39.5, y: 80, w: 50, h: 14 };
-    const up = placePill({ x: 100, y: 100 }, 7.5, 50, "CE", size, [star, name]);
-    expect(up.y).toBeLessThan(80);
-    expect([star, name].some((b) => up.x < b.x + b.w && b.x < up.x + up.w && up.y < b.y + b.h && b.y < up.y + up.h)).toBe(false);
-    // Near the right edge (level names live there): left of the star.
-    expect(placePill({ x: 330, y: 100 }, 7.5, 50, "PE", size, [])).toMatchObject({ x: 269.5, y: 92 });
-    // A PE name blocked beside and below its star goes just above it, not far down.
-    const below = [
-      { x: 105, y: 93, w: 60, h: 40 },
-      { x: 30, y: 93, w: 60, h: 40 },
-    ];
-    expect(placePill({ x: 100, y: 100 }, 7.5, 50, "PE", size, below)).toMatchObject({ x: 110.5, y: 77 });
+  test("each page has its letter for the star: B Best Call, 20 Ai20-20, L Ai Lite, T Ai-Today", () => {
+    expect(pageOfKey("BEST-CRUDEOIL")?.code).toBe("B");
+    expect(pageOfKey("TWENTY20-CRUDEOIL-LIVE")?.code).toBe("20");
+    expect(pageOfKey("LITE-NATURALGAS")?.code).toBe("L");
+    expect(pageOfKey("TODAY-CRUDEOIL-15")?.code).toBe("T");
+    expect(pageOfKey("CRUDEOIL-15")?.code).toBe("V2");
+    expect(pageOfKey("SUPERFAST-CRUDEOIL-FAST")?.code).toBe("F");
+  });
+
+  test("old Ai20-20 rule logs are not drawn as Ai20 calls -- the page's report leaves them out too", () => {
+    expect(pageOfKey("TWENTY20-CRUDEOIL-V3")).toBeNull();
+    expect(pageOfKey("TWENTY20-CRUDEOIL-SEASON")).toBeNull();
+    const at = T0 + 3 * 15 * 60_000 + 60_000;
+    expect(callMarks({ "TWENTY20-CRUDEOIL-V2": [e("v", at, "CE")] }, "CRUDEOIL", candles, 15 * 60_000)).toEqual([]);
+  });
+
+  test("stars that would sit on one another are stacked: CE upwards, PE downwards", () => {
+    const r = STAR_R;
+    expect(spreadStars([{ x: 100, y: 100, side: "CE", r }, { x: 100, y: 100, side: "CE", r }, { x: 100, y: 100, side: "PE", r }])).toEqual([0, -(2 * r + 1), 2 * r + 1]);
+    // Far apart: nothing moves.
+    expect(spreadStars([{ x: 100, y: 100, side: "CE", r }, { x: 160, y: 100, side: "PE", r }])).toEqual([0, 0]);
+  });
+
+  test("each page's success rate on this market, counted like its trade report", () => {
+    const D = 86_400_000;
+    const now = T0 + 40 * D;
+    // Each call an hour long, two hours apart -- calls on one strike that overlap are one call (a second phone's copy).
+    let slot = 0;
+    const done = (id: string, status: TradeLogEntry["status"], daysAgo: number) => {
+      const closedAt = now - daysAgo * D - slot++ * 7_200_000;
+      return e(id, closedAt - 3_600_000, "CE", { status, closed: true, closedAt });
+    };
+    const won = (n: number, tag: string) => Array.from({ length: n }, (_, i) => done(`${tag}w${i}`, "target3_hit", 1));
+    const lost = (n: number, tag: string) => Array.from({ length: n }, (_, i) => done(`${tag}l${i}`, "sl_hit", 2));
+    const logs: Record<string, TradeLogEntry[]> = {
+      // Best Call: 3 won (one at T2, out at T1), 7 stopped, 1 out at entry after T1 (not counted), 1 running.
+      "BEST-CRUDEOIL": [...won(2, "b"), done("bt2", "stopped_after_t1", 1), ...lost(7, "b"), done("bbe", "stopped_breakeven", 1), e("brun", now - 60_000, "PE")],
+      // Ai20-20: 6 of 10 won; one more from 35 days ago is outside 30 days.
+      "TWENTY20-CRUDEOIL-LIVE": [...won(6, "t"), ...lost(4, "t"), done("old", "target3_hit", 35)],
+      // Ai Lite: 1 lucky win -- too few to rank above pages with a real record.
+      "LITE-CRUDEOIL": [done("l1", "target3_hit", 1)],
+      // Other market and old Ai20-20 rule logs: not counted.
+      "BEST-NATURALGAS": [...won(5, "n")],
+      "TWENTY20-CRUDEOIL-V3": [...lost(9, "v")],
+    };
+    const s = pageScores(logs, "CRUDEOIL", now - 30 * D);
+    expect(s.map((p) => [p.code, p.winPct, p.won, p.stopped, p.running])).toEqual([
+      ["20", 60, 6, 4, 0],
+      ["B", 30, 3, 7, 1],
+      ["L", 100, 1, 0, 0],
+    ]);
+    // All time: the 35-day-old Ai20-20 win counts too.
+    expect(pageScores(logs, "CRUDEOIL", null)[0]).toMatchObject({ code: "20", won: 7, stopped: 4, winPct: 64 });
   });
 
   test("the result reads in rupees a lot", () => {

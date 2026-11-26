@@ -1,5 +1,5 @@
 // Drawings lightweight-charts has no built-in shape for: buyer / seller zone
-// boxes, and a star for every page's call with the page's name beside it.
+// boxes, and a star for every page's call with the page's letter inside it.
 // Both are series primitives -- they ask the chart where a time and a price
 // sit on screen, so they move with zoom and scroll.
 
@@ -22,7 +22,8 @@ export interface StarMark {
   time: UTCTimestamp;
   price: number;
   side: "CE" | "PE";
-  tag: string;
+  /** The page's code drawn inside the star ("B", "20", "L"). */
+  code: string;
   practice: boolean;
   /** Still running: drawn with a ring. */
   live?: boolean;
@@ -98,11 +99,11 @@ export class ZonesPrimitive extends Base<ZoneBox> {
   }
 }
 
-/** Five-point star path around (cx, cy). */
+/** Five-point star path around (cx, cy); a fuller star than usual so a letter fits inside. */
 function star(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
   ctx.beginPath();
   for (let k = 0; k < 10; k++) {
-    const rad = k % 2 === 0 ? r : r * 0.45;
+    const rad = k % 2 === 0 ? r : r * 0.52;
     const a = -Math.PI / 2 + (k * Math.PI) / 5;
     const x = cx + rad * Math.cos(a);
     const y = cy + rad * Math.sin(a);
@@ -112,6 +113,35 @@ function star(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) 
   ctx.closePath();
 }
 
+/** Star size: radius on screen, normal and tapped. */
+export const STAR_R = 11;
+const STAR_R_SELECTED = 13;
+
+/**
+ * How far to move each star so none sits on another (two pages calling on the
+ * same candle, or close by): a CE star steps up, a PE star down, one star
+ * height at a time, until it is clear. Returns the y shift for each point.
+ */
+export function spreadStars(points: { x: number; y: number; side: "CE" | "PE"; r: number }[]): number[] {
+  const placed: { x: number; y: number; r: number }[] = [];
+  return points.map((p) => {
+    const step = (p.side === "CE" ? -1 : 1) * (2 * STAR_R + 1);
+    let k = 0;
+    while (k < 4 && placed.some((o) => Math.hypot(o.x - p.x, o.y - (p.y + k * step)) < o.r + p.r - 3)) k++;
+    placed.push({ x: p.x, y: p.y + k * step, r: p.r });
+    return k === 0 ? 0 : k * step;
+  });
+}
+
+interface Placed {
+  m: StarMark;
+  /** Where the star is drawn, and the candle / price it was called at. */
+  x: number;
+  y: number;
+  priceY: number;
+  r: number;
+}
+
 export class StarsPrimitive extends Base<StarMark> {
   selected: string | null = null;
 
@@ -119,102 +149,82 @@ export class StarsPrimitive extends Base<StarMark> {
     super("top");
   }
 
-  all(): readonly StarMark[] {
-    return this.items;
+  private layout(): Placed[] {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return [];
+    const pts = this.items.flatMap((m) => {
+      const x = chart.timeScale().timeToCoordinate(m.time);
+      const y = series.priceToCoordinate(m.price);
+      return x === null || y === null ? [] : [{ m, x, y, side: m.side, r: this.selected === m.id ? STAR_R_SELECTED : STAR_R }];
+    });
+    const dy = spreadStars(pts);
+    return pts.map((p, i) => ({ m: p.m, x: p.x, y: p.y + dy[i], priceY: p.y, r: p.r }));
   }
 
-  /** Screen position of a mark (for taps), or null when it is off screen. */
-  where(m: StarMark): { x: number; y: number } | null {
-    if (!this.chart || !this.series) return null;
-    const x = this.chart.timeScale().timeToCoordinate(m.time);
-    const y = this.series.priceToCoordinate(m.price);
-    return x === null || y === null ? null : { x, y };
+  /** The star nearest a tap at (x, y) within `within` px, as drawn (after stacking), or null. */
+  nearest(x: number, y: number, within: number): string | null {
+    let best: { id: string; d: number } | null = null;
+    for (const p of this.layout()) {
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < within && (!best || d < best.d)) best = { id: p.m.id, d };
+    }
+    return best?.id ?? null;
   }
 
   protected draw(target: Target) {
-    if (!this.items.length) return;
-    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-      const shown = this.items.flatMap((m) => {
-        const p = this.where(m);
-        const sel = this.selected === m.id;
-        return p ? [{ m, p, sel, r: sel ? 10 : 7.5, ring: sel ? 15 : m.live ? 12 : 8 }] : [];
-      });
-      for (const { m, p, sel, r } of shown) {
-        const col = m.side === "CE" ? "#16A34A" : "#DC2626";
-        if (sel || m.live) {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, sel ? 15 : 12, 0, Math.PI * 2);
-          ctx.fillStyle = m.side === "CE" ? "rgba(22,163,74,.2)" : "rgba(220,38,38,.2)";
-          ctx.fill();
-          ctx.lineWidth = 1.5;
-          ctx.strokeStyle = col;
-          ctx.stroke();
-        }
-        star(ctx, p.x, p.y, r);
+    const placed = this.layout();
+    if (!placed.length) return;
+    target.useMediaCoordinateSpace(({ context: ctx }) => {
+      ctx.save();
+      const colOf = (m: StarMark) => (m.side === "CE" ? "#16A34A" : "#DC2626");
+      // In layers -- stems, then rings, then the stars with their letters -- so
+      // one call's stem or see-through ring never covers another call's letter.
+      for (const { m, x, y, priceY, r } of placed) {
+        // A star moved off a crowded spot keeps a thin stem to the price it was called at.
+        if (y === priceY) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, priceY);
+        ctx.lineTo(x, y + (y < priceY ? r : -r));
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = colOf(m);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, priceY, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = colOf(m);
+        ctx.fill();
+      }
+      for (const { m, x, y, r } of placed) {
+        if (this.selected !== m.id && !m.live) continue;
+        ctx.beginPath();
+        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+        ctx.fillStyle = m.side === "CE" ? "rgba(22,163,74,.2)" : "rgba(220,38,38,.2)";
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = colOf(m);
+        ctx.stroke();
+      }
+      for (const { m, x, y, r } of placed) {
+        const col = colOf(m);
+        star(ctx, x, y, r);
         ctx.fillStyle = m.practice ? "#FFFFFF" : col;
         ctx.fill();
         ctx.lineWidth = m.practice ? 2 : 1.5;
         ctx.strokeStyle = m.practice ? col : "#FFFFFF";
         ctx.stroke();
+        // The page's code inside the star: B, 20, L, T ...
+        ctx.font = `900 ${m.code.length > 1 ? 8 : 10}px system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        // A thin halo in the star's own colour keeps "20" / "V2" sharp where it runs into the points.
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = m.practice ? "#FFFFFF" : col;
+        ctx.strokeText(m.code, x, y + 1);
+        ctx.fillStyle = m.practice ? col : "#FFFFFF";
+        ctx.fillText(m.code, x, y + 1);
       }
-      // Then the page's name in a pill beside each star -- clear of the other
-      // stars and of the names already placed (live calls often sit close
-      // together), and clear of the level names along the right edge.
-      ctx.font = "800 10px system-ui, sans-serif";
-      const stars: Box[] = shown.map(({ p, ring }) => ({ x: p.x - ring, y: p.y - ring, w: 2 * ring, h: 2 * ring }));
-      const pills: Box[] = [];
-      shown.forEach(({ m, p, r, ring }) => {
-        const text = `${m.practice ? "(P) " : ""}${m.tag}`;
-        // Its own star (and any other call on the very same spot) is not in the way.
-        const others = stars.filter((_, j) => Math.abs(shown[j].p.x - p.x) > 2 || Math.abs(shown[j].p.y - p.y) > 2);
-        const box = placePill(p, r, ctx.measureText(text).width + 8, m.side, mediaSize, [...others, ...pills]);
-        pills.push(box);
-        const col = m.side === "CE" ? "#16A34A" : "#DC2626";
-        // A name that had to move away from its star gets a thin line back to it.
-        const nx = Math.min(Math.max(p.x, box.x), box.x + box.w);
-        const ny = Math.min(Math.max(p.y, box.y), box.y + box.h);
-        const d = Math.hypot(nx - p.x, ny - p.y);
-        if (d > ring + 4) {
-          ctx.beginPath();
-          ctx.moveTo(p.x + ((nx - p.x) * ring) / d, p.y + ((ny - p.y) * ring) / d);
-          ctx.lineTo(nx, ny);
-          ctx.lineWidth = 1;
-          ctx.strokeStyle = col;
-          ctx.stroke();
-        }
-        ctx.fillStyle = col;
-        ctx.beginPath();
-        ctx.roundRect(box.x, box.y, box.w, box.h, 4);
-        ctx.fill();
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillText(text, box.x + 4, box.y + 10.5);
-      });
+      ctx.restore();
     });
   }
-}
-
-interface Box {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-/** Room the level names ("S×15", "PDH") take at the pane's right edge. */
-const NAMES_EDGE = 50;
-const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-
-/**
- * Where a star's name pill goes: right of the star, else left; when both are
- * taken, one row further away (up for a CE call, down for a PE), then one row
- * the other way, and so on, until it hits nothing; failing that, the first
- * spot on screen.
- */
-export function placePill(p: { x: number; y: number }, r: number, w: number, side: "CE" | "PE", size: { width: number; height: number }, avoid: Box[]): Box {
-  const y0 = side === "CE" ? p.y - 20 : p.y - 8;
-  const step = side === "CE" ? -15 : 15;
-  const tries: Box[] = [];
-  for (const k of [0, 1, -1, 2, -2, 3, -3, 4, 5]) for (const x of [p.x + r + 3, p.x - r - 3 - w]) tries.push({ x, y: y0 + k * step, w, h: 14 });
-  const onScreen = (b: Box) => b.x >= 0 && b.x + b.w <= size.width - NAMES_EDGE && b.y >= 0 && b.y + b.h <= size.height;
-  return tries.find((b) => onScreen(b) && !avoid.some((a) => overlaps(a, b))) ?? tries.find(onScreen) ?? tries[0];
 }

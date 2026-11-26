@@ -89,7 +89,19 @@ export function groupLabel(key: string, symbol: EdgeSymbol): string {
   return TF_LABEL[rest] ?? rest;
 }
 
-function outcomeOf(e: TradeLogEntry): ReportCall["outcome"] {
+/**
+ * Pages whose report counts only some of their keys, by route. Ai20-20 is the
+ * original page again (restored 18 Nov 2026): its report counts that page's
+ * own calls (TWENTY20-<SYMBOL>-LIVE); the v2 / v3 / all-day / season logs stay
+ * saved but are not mixed in. The Ai-Chart draws and scores calls the same way.
+ */
+export const PAGE_KEY_FILTER: Record<string, { only: (key: string) => boolean; label: string }> = {
+  "/ai-20-20": { only: (k) => k.startsWith("TWENTY20-") && k.endsWith("-LIVE"), label: "Ai20-20" },
+  "/ai-super-fast": { only: (k) => k.startsWith("SUPERFAST-"), label: "Ai-Super Fast" },
+};
+
+/** Won = went on to T2 or T3; stopped = stop hit before T1; the rest (out at entry after T1, day end, by hand) = other. */
+export function outcomeOf(e: TradeLogEntry): ReportCall["outcome"] {
   if (e.status === "target3_hit" || e.status === "stopped_after_t1") return "won";
   if (e.status === "sl_hit") return "stopped";
   return "other";
