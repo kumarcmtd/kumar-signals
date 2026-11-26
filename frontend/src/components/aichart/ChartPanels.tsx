@@ -37,7 +37,7 @@ export function Legend() {
         <b className="text-emerald-600">★</b> CE call · <b className="text-rose-600">★</b> PE call
       </span>
       <span>☆ hollow = practice call</span>
-      <span className="col-span-2 text-slate-400 font-semibold">×N on a line = how many separate times price turned there (90 days of 30-minute candles). P, R1, S1 pivots; PDH / PDL yesterday's high / low. Tap a star for the call.</span>
+      <span className="col-span-2 text-slate-400 font-semibold">×N on a line = how many separate times price turned there (90 days of 30-minute candles). P, R1, S1 pivots; PDH / PDL yesterday's high / low. Only live (running) calls are starred; “Past calls” shows the rest. Tap a star for the call.</span>
     </div>
   );
 }
@@ -71,8 +71,13 @@ export function CallDetail({ m, sym, onClose }: { m: CallMark; sym: ChartSym; on
   );
 }
 
-export function CallList({ marks, sym, onPick }: { marks: CallMark[]; sym: ChartSym; onPick: (m: CallMark) => void }) {
-  if (!marks.length) return <p className="text-[11.5px] text-slate-500">No page has called on this market in the candles shown. Calls appear here and on the chart as stars the moment a page gives one.</p>;
+export function CallList({ marks, sym, onPick, live }: { marks: CallMark[]; sym: ChartSym; onPick: (m: CallMark) => void; live?: boolean }) {
+  if (!marks.length)
+    return (
+      <p className="text-[11.5px] text-slate-500">
+        {live ? "No live call right now. A star appears on the chart the moment any page gives a CE or PE call, and goes when the call closes. Tap “Past calls” to see earlier ones." : "No page has called on this market in the candles shown. Calls appear here and on the chart as stars the moment a page gives one."}
+      </p>
+    );
   return (
     <div className="space-y-1.5">
       {[...marks].reverse().slice(0, 20).map((m) => {

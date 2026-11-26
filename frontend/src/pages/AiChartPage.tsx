@@ -60,6 +60,8 @@ export function AiChartPage() {
   const [tf, setTf] = useState<Tf>(() => read("aichart.tf", "15"));
   const [on, setOn] = useState<Record<Layer, boolean>>(() => read("aichart.layers", { levels: true, zones: true, pivots: true, calls: true, channel: false }));
   const [hidden, setHidden] = useState<string[]>([]);
+  // Live calls only (running, real money) unless the trader asks for the past ones too.
+  const [past, setPast] = useState<boolean>(() => read("aichart.past", false));
   const [selected, setSelected] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
@@ -67,6 +69,7 @@ export function AiChartPage() {
   useEffect(() => save("aichart.sym", sym), [sym]);
   useEffect(() => save("aichart.tf", tf), [tf]);
   useEffect(() => save("aichart.layers", on), [on]);
+  useEffect(() => save("aichart.past", past), [past]);
 
   const live = useCandles(sym, "5");
   const hist5 = useHistory5m(sym);
@@ -101,9 +104,10 @@ export function AiChartPage() {
   const pivots = useMemo(() => keyLevels(c15), [c15]);
   const channel = useMemo(() => (bars.length >= 30 ? trendChannel(bars.slice(-96)) : null), [bars]);
   const marks = useMemo(() => callMarks(tradeLogs, sym, bars, TF_MS[tf]), [tradeLogs, sym, bars, tf]);
-  const shownMarks = useMemo(() => marks.filter((m) => !hidden.includes(m.tag)), [marks, hidden]);
-  const stars: StarMark[] = useMemo(() => shownMarks.map((m) => ({ id: m.id, time: chartTime(m.barTime), price: m.price, side: m.side, tag: m.tag, practice: m.practice })), [shownMarks]);
-  const pages = useMemo(() => [...new Set(marks.map((m) => m.tag))], [marks]);
+  const base = useMemo(() => (past ? marks : marks.filter((m) => !m.entry.closed && !m.practice)), [marks, past]);
+  const shownMarks = useMemo(() => base.filter((m) => !hidden.includes(m.tag)), [base, hidden]);
+  const stars: StarMark[] = useMemo(() => shownMarks.map((m) => ({ id: m.id, time: chartTime(m.barTime), price: m.price, side: m.side, tag: m.tag, practice: m.practice, live: !m.entry.closed })), [shownMarks]);
+  const pages = useMemo(() => [...new Set(base.map((m) => m.tag))], [base]);
   const pick = marks.find((m) => m.id === selected) ?? null;
 
   const now = useMemo(() => {
@@ -175,10 +179,15 @@ export function AiChartPage() {
           {LAYER_LABEL[l]}
         </button>
       ))}
+      {on.calls && (
+        <button onClick={() => setPast((v) => !v)} className={`text-[11px] font-black rounded-lg px-2 py-1 ${past ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-500"}`}>
+          {past ? "Past calls ✓" : "Past calls"}
+        </button>
+      )}
       {on.calls &&
         pages.map((t) => (
           <button key={t} onClick={() => setHidden((h) => (h.includes(t) ? h.filter((x) => x !== t) : [...h, t]))} className={`text-[11px] font-black rounded-lg px-2 py-1 border ${hidden.includes(t) ? "border-slate-200 text-slate-400" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
-            {`★ ${t} ${marks.filter((m) => m.tag === t).length}`}
+            {`★ ${t} ${base.filter((m) => m.tag === t).length}`}
           </button>
         ))}
     </div>
@@ -236,8 +245,8 @@ export function AiChartPage() {
       )}
       {!full && (
         <section className="rounded-3xl bg-white shadow-md p-3.5 space-y-2">
-          <p className="text-[13px] font-black text-slate-800">{`Calls on this chart (${shownMarks.length})`}</p>
-          <CallList marks={shownMarks} sym={sym} onPick={focusMark} />
+          <p className="text-[13px] font-black text-slate-800">{past ? `Calls on this chart (${shownMarks.length})` : `Live calls now (${shownMarks.length})`}</p>
+          <CallList marks={shownMarks} sym={sym} onPick={focusMark} live={!past} />
         </section>
       )}
     </div>

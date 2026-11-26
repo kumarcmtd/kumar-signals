@@ -24,6 +24,8 @@ export interface StarMark {
   side: "CE" | "PE";
   tag: string;
   practice: boolean;
+  /** Still running: drawn with a ring. */
+  live?: boolean;
 }
 
 abstract class Base<T> implements ISeriesPrimitive<Time> {
@@ -139,11 +141,14 @@ export class StarsPrimitive extends Base<StarMark> {
         const col = m.side === "CE" ? "#16A34A" : "#DC2626";
         const sel = this.selected === m.id;
         const r = sel ? 10 : 7.5;
-        if (sel) {
+        if (sel || m.live) {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 15, 0, Math.PI * 2);
-          ctx.fillStyle = m.side === "CE" ? "rgba(22,163,74,.22)" : "rgba(220,38,38,.22)";
+          ctx.arc(p.x, p.y, sel ? 15 : 12, 0, Math.PI * 2);
+          ctx.fillStyle = m.side === "CE" ? "rgba(22,163,74,.2)" : "rgba(220,38,38,.2)";
           ctx.fill();
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = col;
+          ctx.stroke();
         }
         star(ctx, p.x, p.y, r);
         ctx.fillStyle = m.practice ? "#FFFFFF" : col;
