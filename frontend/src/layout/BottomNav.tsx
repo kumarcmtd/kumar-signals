@@ -6,7 +6,7 @@ import {
   ClipboardCheck, Flame, Zap, FlaskConical, Crown, ShieldCheck, BookOpen, BrainCircuit, Cpu, TrendingUp, TrendingDown,
   LineChart, Layers, Activity, Calculator, Globe, NotebookText, Bell,
   GraduationCap, BarChart3, Settings, Sparkles, Repeat, Scale, AlarmClock, Activity as ActivityIcon,
-  Microscope, Rss, Shield, Gem, Sun, Leaf,
+  Microscope, Rss, Shield, Gem, Sun, Leaf, CandlestickChart,
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/appStore";
@@ -43,8 +43,9 @@ const PRIMARY: NavItem[] = [
 
 const GROUPS: { title: string; items: NavItem[] }[] = [
   {
-    title: "📰 Ai-News · ⚡ Super Fast · 💎 Ai-Trust · 🔁 AI-Up",
+    title: "📈 Ai-Chart (new) · 📰 Ai-News · ⚡ Super Fast · 💎 Ai-Trust · 🔁 AI-Up",
     items: [
+      { to: "/ai-chart", label: "Ai-Chart", icon: CandlestickChart },
       { to: "/ai-news", label: "Ai-News", icon: Rss },
       { to: "/ai-super-fast", label: "Super Fast", icon: Zap },
       { to: "/ai-trust", label: "Ai-Trust", icon: Gem },

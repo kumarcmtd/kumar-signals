@@ -4,7 +4,7 @@
 // remembered on this phone.
 
 import { useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { MapPin } from "lucide-react";
 import { AiChart } from "../components/trust/AiChart";
 
@@ -36,6 +36,9 @@ export function PriceMapStrip() {
       <div className="flex items-center gap-2 px-1">
         <MapPin size={16} className="text-pink-200" />
         <p className="text-[13.5px] font-black text-white flex-1">Where is the price now?</p>
+        <Link to="/ai-chart" className="rounded-lg px-2 py-1 text-[11px] font-black bg-amber-300 text-violet-900">
+          ⤢ Full chart
+        </Link>
         {(["CRUDEOIL", "NATURALGAS"] as const).map((s) => (
           <button
             key={s}

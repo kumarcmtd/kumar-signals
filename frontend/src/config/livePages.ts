@@ -30,7 +30,7 @@ export type LivePagePath = (typeof LIVE_PAGE_PATHS)[number];
 // menu) log their own calls, so they must keep updating while open; Ai-Trust
 // and Ai-News were tabs until AI-Test V2 and Ai Lite took their places and
 // keep updating as before.
-export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast", "/ai-trust", "/ai-news"] as const;
+export const EXTRA_LIVE_PATHS = ["/ai-up", "/ai-super-fast", "/ai-trust", "/ai-news", "/ai-chart"] as const;
 
 const ALWAYS_LIVE = new Set<string>([...LIVE_PAGE_PATHS, ...EXTRA_LIVE_PATHS]);
 
